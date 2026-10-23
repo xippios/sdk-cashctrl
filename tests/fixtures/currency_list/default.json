@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-23T08:47:59.623071Z",
+  "request": {
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/currency/list.json"
+  },
+  "response": {
+    "body": "{\"total\":3,\"data\":[{\"id\":1,\"created\":\"2026-10-23 07:06:39.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:39.0\",\"lastUpdatedBy\":\"SYSTEM\",\"code\":\"CHF\",\"description\":\"<values><de>Schweizer Franken</de><en>Swiss Franc</en><fr>Franc suisse</fr><it>Franco svizzero</it></values>\",\"rate\":1,\"value\":\"1\",\"default\":true,\"index\":\"CHF <values><de>Schweizer Franken</de><en>Swiss Franc</en><fr>Franc suisse</fr><it>Franco svizzero</it></values>\",\"text\":\"CHF\",\"auto\":false,\"isDefault\":true,\"isAuto\":false},{\"id\":2,\"created\":\"2026-10-23 07:06:39.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:39.0\",\"lastUpdatedBy\":\"SYSTEM\",\"code\":\"EUR\",\"description\":\"<values><de>Euro</de><en>Euro</en><fr>Euro</fr><it>Euro</it></values>\",\"rate\":0.920261,\"value\":\"2\",\"default\":false,\"index\":\"EUR <values><de>Euro</de><en>Euro</en><fr>Euro</fr><it>Euro</it></values>\",\"text\":\"EUR\",\"auto\":true,\"isDefault\":false,\"isAuto\":true},{\"id\":3,\"created\":\"2026-10-23 07:06:39.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:39.0\",\"lastUpdatedBy\":\"SYSTEM\",\"code\":\"USD\",\"description\":\"<values><de>U.S. Dollar</de><en>U.S. Dollar</en><fr>Dollars am\u00e9ricains</fr><it>Dollaro statunitense</it></values>\",\"rate\":0.820845,\"value\":\"3\",\"default\":false,\"index\":\"USD <values><de>U.S. Dollar</de><en>U.S. Dollar</en><fr>Dollars am\u00e9ricains</fr><it>Dollaro statunitense</it></values>\",\"text\":\"USD\",\"auto\":true,\"isDefault\":false,\"isAuto\":true}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Fri, 23 Oct 2026 08:47:57 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

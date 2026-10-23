@@ -1,8 +1,43 @@
+import os
+from collections.abc import Iterator
+
 import pytest
 
-from xippios.cashctrl._client import API_KEY_ENV, auth
+from xippios.cashctrl._client import (
+    DEMO,
+    ORGS_ENV,
+    api_key_env,
+    orgs,
+    reset_clients,
+    subdomain_env,
+)
 
-pytest_plugins = ["xippios.core.testing.plugin"]
+# pytester runs this conftest in a subprocess: tests/test_tasks.py proves with it that a
+# key a live test cached never reaches a later offline test.
+pytest_plugins = ["xippios.core.testing.plugin", "pytester"]
+
+DEMO_PAIR = frozenset({subdomain_env(DEMO), api_key_env(DEMO)})
+PLACEHOLDER_KEY = "placeholder-for-fixture-replay"  # pragma: allowlist secret
+PLACEHOLDERS = {
+    # Fixtures are recorded as https://demo.cashctrl.com/api/v1/... (scripts/record_fixture.py).
+    subdomain_env(DEMO): "demo",
+    api_key_env(DEMO): PLACEHOLDER_KEY,
+}
+
+
+def _strip_productive_organisations() -> None:
+    """Remove every ``CASHCTRL_*`` variable but the demo pair from this process.
+
+    Runs once, when pytest imports this file, before any fixture of any scope: no
+    session- or module-scoped fixture, and no test, can see ``CASHCTRL_ORGS`` or another
+    organisation's subdomain or key. The demo pair stays for the live tests.
+    """
+    for name in [name for name in os.environ if name.startswith("CASHCTRL_")]:
+        if name not in DEMO_PAIR:
+            del os.environ[name]
+
+
+_strip_productive_organisations()
 
 
 @pytest.fixture
@@ -10,23 +45,38 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-PLACEHOLDER_KEY = "placeholder-for-fixture-replay"
-
-
 @pytest.fixture(autouse=True)
-def placeholder_api_key(
+def demo_only(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> str | None:
-    """Every test but a live one sends the placeholder key, whatever the shell holds.
+) -> Iterator[str | None]:
+    """Only the demo organisation can exist in a test, and offline it sends the placeholder.
 
-    Setting the variable is not enough: the client's auth resolves the key once per auth
-    object and caches it, so a live test earlier in the same run would leave the real
-    key in place. ``auth.key``, through which every ``xippios.core`` auth class reads the
-    key, is pinned to the placeholder as well; both come back after the test. Returns
-    the placeholder, or ``None`` in a live test, which uses the key in the environment.
+    The process holds no ``CASHCTRL_*`` variable but the demo pair (stripped at import),
+    and ``CASHCTRL_ORGS`` is removed again for every test. Offline tests always get the
+    placeholder demo pair, so fixture replay matches the recorded host even when direnv
+    has loaded the real one. A live test keeps the demo pair from the environment and
+    never gets a placeholder.
+
+    A client's auth reads the key once and caches it, so a client a live test built would
+    carry the real key. Every cached client is therefore dropped before and after each
+    test, after the placeholders are set: the next ``client_for`` builds a client whose
+    auth reads the placeholder. ``test_a_key_a_live_test_cached_never_reaches_the_next``
+    in ``tests/test_tasks.py`` runs this file in a subprocess to prove it.
+
+    Yields the placeholder key, or ``None`` in a live test.
     """
-    if "live" in request.keywords:
-        return None
-    monkeypatch.setenv(API_KEY_ENV, PLACEHOLDER_KEY)
-    monkeypatch.setattr(auth, "key", lambda: PLACEHOLDER_KEY)
-    return PLACEHOLDER_KEY
+    monkeypatch.delenv(ORGS_ENV, raising=False)
+    live = request.node.get_closest_marker("live") is not None
+    if not live:
+        for name, placeholder in PLACEHOLDERS.items():
+            monkeypatch.setenv(name, placeholder)
+    reset_clients()
+    yield None if live else PLACEHOLDER_KEY
+    reset_clients()
+
+
+@pytest.fixture
+def demo_org() -> str:
+    """The one organisation a live test may reach: ``demo``, and only when it is all there is."""
+    assert orgs() == (DEMO,), "live tests run against the demo organisation and nothing else"
+    return DEMO

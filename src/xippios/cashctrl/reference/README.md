@@ -1,25 +1,19 @@
 # Reference data for CashCtrl
 
-Code lists and calendars the upstream publishes (commodities, countries, report
-schedules) ship here as CSV or JSON, versioned with the package, and load through
-`xippios.core.reference`:
+Nothing ships here yet, and tenant data never will.
 
-```python
-from xippios.core import load_table
+- Accounts, currencies, tax codes, fiscal periods and every other list an organisation
+  keeps for itself are per-organisation data. The list tasks serve them live, with `org`;
+  they are never packaged.
+- The only files this directory may hold are value sets that `docs/upstream/` fixes
+  (enumerations such as journal or order types), generated from the snapshot by
+  `scripts/refresh_reference.py` (`/refresh-reference-data`), never typed in by hand and
+  never fetched from an organisation. The script also regenerates `enums.py`, one
+  `StrEnum` per set, with `xippios.core.reference.render_str_enums`. Until the first set
+  is needed, the script is a stub that exits non-zero.
+- Every file has a row below naming the snapshot file, operation and parameter it comes
+  from, and the snapshot's date.
 
-rows = load_table("xippios.cashctrl", "commodities.csv", Commodity)
-```
-
-Rules:
-
-- Files come from the upstream through `scripts/refresh_reference.py`
-  (`/refresh-reference-data`), never typed in by hand; the script also regenerates
-  `enums.py`, one `StrEnum` per list, with `xippios.core.reference.render_str_enums`.
-- Every file has a row below naming the endpoint or URL it came from and the date.
-- Each packaged list gets a lookup task, `list_<thing>`, served as the MCP tool
-  `cashctrl_list_<thing>` so agents can form valid calls; `/refresh-reference-data`
-  adds the task where it is missing.
-
-| File | Origin | Fetched |
+| File | Origin (snapshot file, operation, parameter) | Snapshot |
 | --- | --- | --- |
 | (none yet) | | |

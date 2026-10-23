@@ -1,50 +1,34 @@
-"""Refresh the packaged reference data from upstream (``/refresh-reference-data``).
+"""Packaged reference data for CashCtrl (``/refresh-reference-data``): none yet, by design.
 
-For every list in ``LISTS`` this writes ``reference/<name>.json`` with the values and
-the fetch date, then regenerates ``enums.py`` with one ``StrEnum`` per list through
-``xippios.core.reference.render_str_enums``. Fetch through the layer-1 wrappers in
-``api/``, never through a task that might answer from the package. Run from the
-repository root with the API key in the environment::
+Tenant data is never packaged. Accounts, currencies, tax codes, fiscal periods and every
+other list an organisation keeps for itself are per-organisation data, served live by the
+list tasks with ``org``. The only reference data this package may ship are value sets the
+documentation fixes, enumerations such as journal or order types, generated with
+provenance from ``docs/upstream/`` into ``reference/`` and ``enums.py`` (through
+``xippios.core.reference.render_str_enums``), never from an organisation's API.
 
-    uv run python scripts/refresh_reference.py
+No task needs such an enum yet, so this script says so and exits with status 1. When the
+first one is needed, it becomes a generator over the snapshot, as
+``.claude/commands/refresh-reference-data.md`` describes::
+
+    uv run scripts/refresh_reference.py
 """
 
-import json
-from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
-from pathlib import Path
+import sys
 
-from xippios.core import sync
-from xippios.core.reference import render_str_enums
-
-ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_DIR = ROOT / "src/xippios/cashctrl"
-REFERENCE = PACKAGE_DIR / "reference"
-ENUMS = PACKAGE_DIR / "enums.py"
-
-LISTS: dict[str, Callable[[], Awaitable[list[str]]]] = {
-    # name of the list, as upstream calls it, to an async fetcher through api/, e.g.
-    # "country_code": lambda: api.list_countries(),
-}
-"""The packaged value lists; keep ``params.PACKAGED_LISTS`` in step with the keys."""
+MESSAGE = (
+    "refresh_reference.py: nothing to refresh. CashCtrl's lists (accounts, currencies, "
+    "tax codes, fiscal periods) are per-organisation data, served live by the list tasks "
+    "and never packaged; the package ships only value sets docs/upstream/ fixes, and none "
+    "is needed yet. See .claude/commands/refresh-reference-data.md."
+)
 
 
-def main() -> None:
-    """Fetch every list, write its file and regenerate ``enums.py``."""
-    today = datetime.now(UTC).date().isoformat()
-    lists: dict[str, list[str]] = {}
-    REFERENCE.mkdir(exist_ok=True)
-    for name, fetch in LISTS.items():
-        values = sync(fetch)()
-        lists[name] = values
-        path = REFERENCE / f"{name}.json"
-        payload = {"param": name, "fetched": today, "values": values}
-        path.write_text(json.dumps(payload, indent=2) + "\n")
-        print(f"{path.name}: {len(values)} values")  # noqa: T201
-    source = render_str_enums(lists, fetched=today, generator="scripts/refresh_reference.py")
-    ENUMS.write_text(source)
-    print(f"{ENUMS.name}: {len(lists)} enums")  # noqa: T201
+def main() -> int:
+    """Say why there is nothing to refresh; return a non-zero exit status."""
+    print(MESSAGE, file=sys.stderr)  # noqa: T201
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

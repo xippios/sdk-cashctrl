@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-23T08:50:49.596409Z",
+  "request": {
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/fiscalperiod/list.json"
+  },
+  "response": {
+    "body": "{\"total\":2,\"data\":[{\"id\":2,\"created\":\"2026-10-23 10:29:24.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:24.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"name\":\"2025\",\"start\":\"2025-01-01 00:00:00.0\",\"end\":\"2025-12-31 23:59:59.0\",\"salaryStart\":\"2025-01-01 00:00:00.0\",\"salaryEnd\":\"2025-12-31 23:59:59.0\",\"shortName\":null,\"lastEntryDate\":\"2025-12-15 00:00:00.0\",\"transient\":false,\"salaryClosed\":false,\"closedMonthIds\":[],\"availableMonthIds\":[\"2025-01\",\"2025-02\",\"2025-03\",\"2025-04\",\"2025-05\",\"2025-06\",\"2025-07\",\"2025-08\",\"2025-09\",\"2025-10\",\"2025-11\",\"2025-12\"],\"closedSalaryMonthIds\":[],\"availableSalaryMonthIds\":[\"2025-01\",\"2025-02\",\"2025-03\",\"2025-04\",\"2025-05\",\"2025-06\",\"2025-07\",\"2025-08\",\"2025-09\",\"2025-10\",\"2025-11\",\"2025-12\"],\"openMonthIds\":[\"2025-01\",\"2025-02\",\"2025-03\",\"2025-04\",\"2025-05\",\"2025-06\",\"2025-07\",\"2025-08\",\"2025-09\",\"2025-10\",\"2025-11\",\"2025-12\"],\"openSalaryMonthIds\":[\"2025-01\",\"2025-02\",\"2025-03\",\"2025-04\",\"2025-05\",\"2025-06\",\"2025-07\",\"2025-08\",\"2025-09\",\"2025-10\",\"2025-11\",\"2025-12\"],\"closed\":false,\"current\":true,\"isClosed\":false,\"isSalaryClosed\":false,\"isCurrent\":true,\"isTransient\":false},{\"id\":1,\"created\":\"2026-10-23 07:06:40.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:40.0\",\"lastUpdatedBy\":\"SYSTEM\",\"name\":\"2026\",\"start\":\"2026-01-01 00:00:00.0\",\"end\":\"2026-12-31 23:59:59.0\",\"salaryStart\":\"2026-01-01 00:00:00.0\",\"salaryEnd\":\"2026-12-31 23:59:59.0\",\"shortName\":null,\"lastEntryDate\":\"2026-09-30 00:00:00.0\",\"transient\":false,\"salaryClosed\":false,\"closedMonthIds\":[],\"availableMonthIds\":[\"2026-01\",\"2026-02\",\"2026-03\",\"2026-04\",\"2026-05\",\"2026-06\",\"2026-07\",\"2026-08\",\"2026-09\",\"2026-10\",\"2026-11\",\"2026-12\"],\"closedSalaryMonthIds\":[],\"availableSalaryMonthIds\":[\"2026-01\",\"2026-02\",\"2026-03\",\"2026-04\",\"2026-05\",\"2026-06\",\"2026-07\",\"2026-08\",\"2026-09\",\"2026-10\",\"2026-11\",\"2026-12\"],\"openMonthIds\":[\"2026-01\",\"2026-02\",\"2026-03\",\"2026-04\",\"2026-05\",\"2026-06\",\"2026-07\",\"2026-08\",\"2026-09\",\"2026-10\",\"2026-11\",\"2026-12\"],\"openSalaryMonthIds\":[\"2026-01\",\"2026-02\",\"2026-03\",\"2026-04\",\"2026-05\",\"2026-06\",\"2026-07\",\"2026-08\",\"2026-09\",\"2026-10\",\"2026-11\",\"2026-12\"],\"closed\":false,\"current\":false,\"isClosed\":false,\"isSalaryClosed\":false,\"isCurrent\":false,\"isTransient\":false}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Fri, 23 Oct 2026 08:50:47 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

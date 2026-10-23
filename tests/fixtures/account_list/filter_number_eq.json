@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-23T08:48:04.618631Z",
+  "request": {
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/account/list.json?filter=%5B%7B%22comparison%22%3A%22eq%22%2C%22field%22%3A%22number%22%2C%22value%22%3A%221020%22%7D%5D"
+  },
+  "response": {
+    "body": "{\"total\":1,\"data\":[{\"id\":3,\"created\":\"2026-10-23 07:06:39.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:39.0\",\"lastUpdatedBy\":\"SYSTEM\",\"categoryId\":51,\"categoryDisplay\":\"<values><de>Fl\u00fcssige Mittel</de><en>Liquid funds</en><fr>Tr\u00e9sorerie</fr><it>Liquidit\u00e0</it></values>\",\"accountClass\":\"ASSET\",\"taxId\":null,\"taxCode\":null,\"currencyId\":null,\"currencyCode\":\"CHF\",\"number\":\"1020\",\"name\":\"<values><de>Bank</de><en>Bank account</en><fr>Compte courant</fr><it>Conto corrente</it></values>\",\"custom\":null,\"notes\":null,\"attachmentCount\":0,\"allocationCount\":0,\"costCenterIds\":null,\"costCenterNumbers\":null,\"openingAmount\":0,\"endAmount\":101230,\"targetMin\":null,\"targetMax\":null,\"targetDisplay\":null,\"defaultCurrencyOpeningAmount\":0,\"defaultCurrencyEndAmount\":101230,\"inSalaryType\":false,\"bankAccount\":false,\"inactive\":false,\"isInactive\":false,\"isInSalaryType\":false,\"isBankAccount\":false}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Fri, 23 Oct 2026 08:48:04 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

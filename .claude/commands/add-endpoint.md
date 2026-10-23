@@ -18,12 +18,15 @@ Work on a branch `feature/<operation>`. Follow the three layers (ADR-0001) exact
    upstream enumerations become `StrEnum`. No renaming to match another source.
 
 3. **Endpoint wrapper** in `src/xippios/cashctrl/api/<operation>.py`: one async
-   function named after the operation, parameters as upstream names them, calling
-   `xippios.cashctrl._client.client` and returning models via
-   `xippios.core.parse(...)`. No defaults beyond upstream's own, no composition.
+   function named after the operation, taking `org` first and then the parameters as
+   upstream names them, calling `xippios.cashctrl._client.client_for(org)` and returning
+   models via `xippios.core.parse(...)`. No defaults beyond upstream's own, no
+   composition. Refusals (HTTP 200 with `success: false`) are raised by `classify` in
+   `_client.py`; the wrapper never inspects them.
 
 4. **Task function** in `src/xippios/cashctrl/tasks.py`: an async function shaped
-   like what a person or agent wants (`get_<thing>(commodity, year)`), composing wrappers,
+   like what a person or agent wants (`get_<thing>(org, ...)`; `org` is always the first,
+   required parameter, never defaulted, never a list of organisations), composing wrappers,
    resolving pagination with `xippios.core.paginate_*` and reference lookups, and returning
    `Result[T]` with full `ResultMeta` (`source`, `endpoint`, `request`, and `published_at`
    / `vintage` when upstream provides them). Then:
@@ -31,14 +34,16 @@ Work on a branch `feature/<operation>`. Follow the three layers (ADR-0001) exact
    re-export it from `__init__.py`.
 
 5. **Docstring for agents** on the task: first line one sentence; then an `Args:` block
-   explaining every parameter with examples of valid values. The MCP tool description and
+   explaining every parameter with examples of valid values (`org`: the name of a
+   configured organisation, e.g. ``demo``). The MCP tool description and
    the OpenAPI summary are generated from it. Errors must come from the taxonomy in
    `xippios.core.errors`; raise `NotFoundError` where upstream signals absence.
 
 6. **Tests.** Run `/record-fixture <operation> <case> <parameters>` for at least one
-   realistic case, add a replay test in `tests/test_tasks.py` using the `replay_fixture`
-   fixture, and a `@pytest.mark.live` smoke test in `tests/test_live.py`. Grep the fixture
-   for key patterns before committing.
+   realistic case (it records from the demo organisation only), add a replay test in
+   `tests/test_tasks.py` using the `replay_fixture` fixture and `org="demo"`, and a
+   `@pytest.mark.live` smoke test in `tests/test_live.py` that takes the `demo_org`
+   fixture. Grep the fixture for key patterns before committing.
 
 7. **Docs.** `CHANGELOG.md` under Unreleased; the README status table gets a row
    (upstream operation, task function, MCP tool name `cashctrl_<task>`, status).
