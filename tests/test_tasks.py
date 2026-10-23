@@ -4,7 +4,7 @@ import inspect
 import json
 import re
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -110,7 +110,9 @@ async def test_list_fiscal_periods_as_a_tool(
     replay_fixture("fiscalperiod_list", "default")
     payload = await mcp_call(server, "cashctrl_list_fiscal_periods", {"org": DEMO})
     last = payload["data"][-1]
-    assert (last["id"], last["start"], last["end"], last["isCurrent"]) == (
+    assert "is_current" in last, "results carry the snake_case names (validation_alias)"
+    assert "isCurrent" not in last, "never upstream's spelling: the adapters dump by alias"
+    assert (last["id"], last["start"], last["end"], last["is_current"]) == (
         5,
         "2026-01-01",
         "2026-12-31",
@@ -148,7 +150,7 @@ async def test_list_currencies_as_a_tool(
     replay_fixture("currency_list", "default")
     payload = await mcp_call(server, "cashctrl_list_currencies", {"org": DEMO})
     eur = payload["data"][1]
-    assert (eur["code"], eur["rate"], eur["isDefault"]) == ("EUR", 0.920261, False)
+    assert (eur["code"], eur["rate"], eur["is_default"]) == ("EUR", 0.920261, False)
     assert payload["meta"]["endpoint"] == "currency/list.json"
 
 
@@ -188,7 +190,7 @@ async def test_list_tax_codes_as_a_tool(
     payload = await mcp_call(server, "cashctrl_list_tax_codes", {"org": DEMO})
     code = next(tax for tax in payload["data"] if tax["code"] == "UN1")
     assert code["rates"][0]["percentage"] == 8.1
-    assert code["components"][0]["accountId"] == 33
+    assert code["components"][0]["account_id"] == 33
     assert payload["meta"]["endpoint"] == "tax/list.json"
 
 
@@ -347,7 +349,7 @@ async def test_list_accounts_as_a_tool(
     item = {"comparison": "eq", "field": "number", "value": "1000"}
     payload = await mcp_call(server, "cashctrl_list_accounts", {"org": DEMO, "filter": [item]})
     (account,) = payload["data"]
-    assert (account["number"], account["endAmount"], account["isInactive"]) == ("1000", 0, True)
+    assert (account["number"], account["end_amount"], account["is_inactive"]) == ("1000", 0, True)
     assert payload["meta"]["request"]["filter"] == (
         '[{"comparison":"eq","field":"number","value":"1000"}]'
     )
@@ -376,6 +378,8 @@ def test_list_accounts_is_a_post_route(
     body = {"org": DEMO, "only_active": True, "query": "Abschreibungen"}
     response = client.post("/cashctrl/list_accounts", json=body)
     assert response.status_code == 200, response.text
+    row = response.json()["data"][0]
+    assert ("end_amount" in row, "endAmount" in row) == (True, False), "snake_case over HTTP"
     assert [account["number"] for account in response.json()["data"]] == ["6815", "6817"]
     rejected = client.post("/cashctrl/list_accounts", json={"org": DEMO, "dir": "up"})
     assert rejected.status_code == 422
@@ -418,7 +422,7 @@ async def test_get_account_as_a_tool(
 ) -> None:
     replay_fixture("account_read", "by_id")
     payload = await mcp_call(server, "cashctrl_get_account", {"org": DEMO, "id": 223})
-    assert (payload["data"]["number"], payload["data"]["currencyId"]) == ("6781", 2)
+    assert (payload["data"]["number"], payload["data"]["currency_id"]) == ("6781", 2)
     assert payload["meta"]["request"] == {"org": DEMO, "id": 223}
 
 
@@ -455,3 +459,54 @@ async def test_a_recorded_list_is_whole(
     wrapper, arguments = call
     response = await wrapper(DEMO, **arguments)
     assert response.total == len(response.data) > 0
+
+
+SNAKE_CASE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
+
+
+def keys(node: object) -> Iterator[str]:
+    """Every key of a decoded JSON document, at any depth."""
+    if isinstance(node, dict):
+        for name, value in node.items():
+            yield str(name)
+            yield from keys(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from keys(item)
+
+
+TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
+    "cashctrl_list_fiscal_periods": ("fiscalperiod_list/default", {}),
+    "cashctrl_list_currencies": ("currency_list/default", {}),
+    "cashctrl_list_tax_codes": ("tax_list/default", {}),
+    "cashctrl_list_accounts": ("account_list/filter_number_eq", {"filter": [NUMBER_1000]}),
+    "cashctrl_get_account": ("account_read/by_id", {}),
+}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("tool", "case"), TOOL_CASES.items(), ids=TOOL_CASES.keys())
+async def test_tool_results_carry_snake_case_keys(
+    replay_fixture: Callable[[str, str], respx.Route],
+    fixtures_dir: Path,
+    tool: str,
+    case: tuple[str, dict[str, typing.Any]],
+) -> None:
+    """Models read upstream's camelCase with ``validation_alias``; nothing dumps it back.
+
+    ``meta.request`` is not checked: it records the parameters as sent, under upstream's
+    names (``onlyActive``).
+    """
+    fixture, arguments = case
+    endpoint, name = fixture.split("/")
+    replay_fixture(endpoint, name)
+    if tool == "cashctrl_get_account":
+        arguments = {"id": int(recorded_query(fixtures_dir, endpoint, name)["id"])}
+    arguments = {
+        key: [item.model_dump() for item in value] if key == "filter" else value
+        for key, value in arguments.items()
+    }
+    payload = await mcp_call(server, tool, {"org": DEMO, **arguments})
+    found = sorted(set(keys(payload["data"])))
+    assert found
+    assert [key for key in found if not SNAKE_CASE.fullmatch(key)] == []

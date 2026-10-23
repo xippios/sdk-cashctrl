@@ -127,6 +127,8 @@ Run `/add-endpoint <upstream operation>`. In short:
 1. Read the operation in `docs/upstream/`. Names, parameters and semantics come from
    there, snake_cased, nothing renamed, nothing normalised across sources.
 2. `models.py`: an `UpstreamModel` per payload object; dates, numbers and enums typed.
+   Upstream's camelCase spellings are accepted with `Field(validation_alias=...)`, never
+   `Field(alias=...)`: the adapters serialise by alias, and results stay snake_case.
 3. `api/<operation>.py`: one async wrapper that takes `org` first, calls
    `_client.client_for(org)` and returns models through `xippios.core.parse`.
 4. `tasks.py`: an async task, `org` its first parameter, that composes wrappers and

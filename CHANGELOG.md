@@ -56,7 +56,10 @@ All notable changes to this project are documented here. The format follows
   `AccountDetail` (the `read.json` record), the envelopes `ListResponse` and
   `ReadResponse`, and `Filter` for the `filter` parameter. Amounts and rates are
   `Decimal`, dates `date`, timestamps naive `datetime` (`lastEntryDate`, undocumented
-  and seen with a time of day, stays a timestamp).
+  and seen with a time of day, stays a timestamp). Upstream's camelCase spellings are
+  read with `Field(validation_alias=...)`, so every result, in Python, over MCP and
+  over HTTP, carries the snake_case names the tool arguments use (`is_current`,
+  `end_amount`); `meta.request` keeps the parameters as sent, under upstream's names.
 - `dir` and `Filter.comparison` are typed as their documented value sets, `Direction`
   (`ASC`, `DESC`) and `Comparison` (`eq`, `like`, `gt`, `lt`), so the tool schema lists
   them and the adapters refuse another value before the task runs.

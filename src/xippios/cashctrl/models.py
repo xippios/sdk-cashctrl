@@ -1,8 +1,11 @@
 """Pydantic models mirroring CashCtrl payloads.
 
 One model per upstream object, subclassing ``xippios.core.UpstreamModel``, with fields
-named as upstream names them in snake_case and read under the upstream camelCase spelling
-(``Field(alias=...)``); results serialise under the upstream spelling too. Within-source
+named as upstream names them in snake_case. Where upstream spells a field differently
+(``isCurrent``), ``Field(validation_alias=...)`` accepts that spelling on input; never
+``alias=``, which the adapters would serialise, handing agents the upstream spelling. So
+results serialise under the snake_case names in Python, over MCP and over HTTP alike
+(``is_current``, ``end_amount``), the same names the tool arguments use. Within-source
 hygiene only: dates become ``datetime.date``/``datetime``, numbers become ``int`` or
 ``Decimal`` (ADR-0008: JSON numbers on the wire). No cross-source normalisation
 (ADR-0003): an upstream concept stays an upstream concept, and nothing is renamed or
@@ -113,30 +116,30 @@ class FiscalPeriod(UpstreamModel):
 
     id: int
     name: str | None = None
-    short_name: str | None = Field(default=None, alias="shortName")
+    short_name: str | None = Field(default=None, validation_alias="shortName")
     start: UpstreamDate
     end: UpstreamDate
-    salary_start: UpstreamDate | None = Field(default=None, alias="salaryStart")
-    salary_end: UpstreamDate | None = Field(default=None, alias="salaryEnd")
-    last_entry_date: datetime | None = Field(default=None, alias="lastEntryDate")
+    salary_start: UpstreamDate | None = Field(default=None, validation_alias="salaryStart")
+    salary_end: UpstreamDate | None = Field(default=None, validation_alias="salaryEnd")
+    last_entry_date: datetime | None = Field(default=None, validation_alias="lastEntryDate")
     closed: bool
     current: bool
-    salary_closed: bool = Field(alias="salaryClosed")
+    salary_closed: bool = Field(validation_alias="salaryClosed")
     transient: bool
-    is_closed: bool = Field(alias="isClosed")
-    is_current: bool = Field(alias="isCurrent")
-    is_salary_closed: bool = Field(alias="isSalaryClosed")
-    is_transient: bool = Field(alias="isTransient")
-    available_month_ids: list[str] = Field(alias="availableMonthIds")
-    available_salary_month_ids: list[str] = Field(alias="availableSalaryMonthIds")
-    closed_month_ids: list[str] = Field(alias="closedMonthIds")
-    closed_salary_month_ids: list[str] = Field(alias="closedSalaryMonthIds")
-    open_month_ids: list[str] = Field(alias="openMonthIds")
-    open_salary_month_ids: list[str] = Field(alias="openSalaryMonthIds")
+    is_closed: bool = Field(validation_alias="isClosed")
+    is_current: bool = Field(validation_alias="isCurrent")
+    is_salary_closed: bool = Field(validation_alias="isSalaryClosed")
+    is_transient: bool = Field(validation_alias="isTransient")
+    available_month_ids: list[str] = Field(validation_alias="availableMonthIds")
+    available_salary_month_ids: list[str] = Field(validation_alias="availableSalaryMonthIds")
+    closed_month_ids: list[str] = Field(validation_alias="closedMonthIds")
+    closed_salary_month_ids: list[str] = Field(validation_alias="closedSalaryMonthIds")
+    open_month_ids: list[str] = Field(validation_alias="openMonthIds")
+    open_salary_month_ids: list[str] = Field(validation_alias="openSalaryMonthIds")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, alias="createdBy")
-    last_updated: datetime | None = Field(default=None, alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, alias="lastUpdatedBy")
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class Currency(UpstreamModel):
@@ -156,16 +159,16 @@ class Currency(UpstreamModel):
     description: str | None = None
     rate: Decimal | None = None
     default: bool
-    is_default: bool = Field(alias="isDefault")
+    is_default: bool = Field(validation_alias="isDefault")
     auto: bool
-    is_auto: bool = Field(alias="isAuto")
+    is_auto: bool = Field(validation_alias="isAuto")
     index: str | None = None
     text: str | None = None
     value: str | None = None
     created: datetime | None = None
-    created_by: str | None = Field(default=None, alias="createdBy")
-    last_updated: datetime | None = Field(default=None, alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, alias="lastUpdatedBy")
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class TaxComponent(UpstreamModel):
@@ -180,12 +183,12 @@ class TaxComponent(UpstreamModel):
     """
 
     id: int
-    account_id: int = Field(alias="accountId")
-    apply_rule: str = Field(alias="applyRule")
-    calc_type: str = Field(alias="calcType")
+    account_id: int = Field(validation_alias="accountId")
+    apply_rule: str = Field(validation_alias="applyRule")
+    calc_type: str = Field(validation_alias="calcType")
     code: str | None = None
     pos: int | None = None
-    is_input_tax: bool = Field(alias="isInputTax")
+    is_input_tax: bool = Field(validation_alias="isInputTax")
 
 
 class TaxRate(UpstreamModel):
@@ -199,8 +202,8 @@ class TaxRate(UpstreamModel):
 
     id: int
     percentage: Decimal
-    date_valid: UpstreamDate | None = Field(default=None, alias="dateValid")
-    percentage_flat: Decimal | None = Field(default=None, alias="percentageFlat")
+    date_valid: UpstreamDate | None = Field(default=None, validation_alias="dateValid")
+    percentage_flat: Decimal | None = Field(default=None, validation_alias="percentageFlat")
 
 
 class TaxCode(UpstreamModel):
@@ -220,22 +223,24 @@ class TaxCode(UpstreamModel):
     id: int
     code: str
     description: str | None = None
-    document_name: str | None = Field(default=None, alias="documentName")
+    document_name: str | None = Field(default=None, validation_alias="documentName")
     components: list[TaxComponent]
     rates: list[TaxRate]
-    account_display: str | None = Field(default=None, alias="accountDisplay")
-    current_percentage: Decimal | None = Field(default=None, alias="currentPercentage")
-    current_percentage_flat: Decimal | None = Field(default=None, alias="currentPercentageFlat")
-    form_codes: str | None = Field(default=None, alias="formCodes")
-    display_tax_rate: bool = Field(alias="displayTaxRate")
-    is_display_tax_rate: bool = Field(alias="isDisplayTaxRate")
+    account_display: str | None = Field(default=None, validation_alias="accountDisplay")
+    current_percentage: Decimal | None = Field(default=None, validation_alias="currentPercentage")
+    current_percentage_flat: Decimal | None = Field(
+        default=None, validation_alias="currentPercentageFlat"
+    )
+    form_codes: str | None = Field(default=None, validation_alias="formCodes")
+    display_tax_rate: bool = Field(validation_alias="displayTaxRate")
+    is_display_tax_rate: bool = Field(validation_alias="isDisplayTaxRate")
     inactive: bool
-    is_inactive: bool = Field(alias="isInactive")
-    is_flat: bool = Field(alias="isFlat")
+    is_inactive: bool = Field(validation_alias="isInactive")
+    is_flat: bool = Field(validation_alias="isFlat")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, alias="createdBy")
-    last_updated: datetime | None = Field(default=None, alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, alias="lastUpdatedBy")
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class Filter(UpstreamModel):
@@ -266,25 +271,25 @@ class _AccountFields(UpstreamModel):
     id: int
     number: str
     name: str
-    category_id: int = Field(alias="categoryId")
-    currency_id: int | None = Field(default=None, alias="currencyId")
-    currency_code: str | None = Field(default=None, alias="currencyCode")
-    tax_id: int | None = Field(default=None, alias="taxId")
-    account_class: str | None = Field(default=None, alias="accountClass")
+    category_id: int = Field(validation_alias="categoryId")
+    currency_id: int | None = Field(default=None, validation_alias="currencyId")
+    currency_code: str | None = Field(default=None, validation_alias="currencyCode")
+    tax_id: int | None = Field(default=None, validation_alias="taxId")
+    account_class: str | None = Field(default=None, validation_alias="accountClass")
     custom: str | None = None
     notes: str | None = None
-    target_min: Decimal | None = Field(default=None, alias="targetMin")
-    target_max: Decimal | None = Field(default=None, alias="targetMax")
+    target_min: Decimal | None = Field(default=None, validation_alias="targetMin")
+    target_max: Decimal | None = Field(default=None, validation_alias="targetMax")
     inactive: bool
-    is_inactive: bool = Field(alias="isInactive")
-    attachment_count: int = Field(alias="attachmentCount")
-    allocation_count: int = Field(alias="allocationCount")
-    cost_center_ids: JsonValue = Field(default=None, alias="costCenterIds")
-    cost_center_numbers: JsonValue = Field(default=None, alias="costCenterNumbers")
+    is_inactive: bool = Field(validation_alias="isInactive")
+    attachment_count: int = Field(validation_alias="attachmentCount")
+    allocation_count: int = Field(validation_alias="allocationCount")
+    cost_center_ids: JsonValue = Field(default=None, validation_alias="costCenterIds")
+    cost_center_numbers: JsonValue = Field(default=None, validation_alias="costCenterNumbers")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, alias="createdBy")
-    last_updated: datetime | None = Field(default=None, alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, alias="lastUpdatedBy")
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class Account(_AccountFields):
@@ -311,21 +316,21 @@ class Account(_AccountFields):
     ``cost_center_numbers`` were only seen as ``null`` and are kept as sent.
     """
 
-    category_display: str | None = Field(default=None, alias="categoryDisplay")
-    tax_code: str | None = Field(default=None, alias="taxCode")
-    opening_amount: Decimal | None = Field(default=None, alias="openingAmount")
-    end_amount: Decimal | None = Field(default=None, alias="endAmount")
+    category_display: str | None = Field(default=None, validation_alias="categoryDisplay")
+    tax_code: str | None = Field(default=None, validation_alias="taxCode")
+    opening_amount: Decimal | None = Field(default=None, validation_alias="openingAmount")
+    end_amount: Decimal | None = Field(default=None, validation_alias="endAmount")
     default_currency_opening_amount: Decimal | None = Field(
-        default=None, alias="defaultCurrencyOpeningAmount"
+        default=None, validation_alias="defaultCurrencyOpeningAmount"
     )
     default_currency_end_amount: Decimal | None = Field(
-        default=None, alias="defaultCurrencyEndAmount"
+        default=None, validation_alias="defaultCurrencyEndAmount"
     )
-    target_display: str | None = Field(default=None, alias="targetDisplay")
-    bank_account: bool = Field(alias="bankAccount")
-    is_bank_account: bool = Field(alias="isBankAccount")
-    in_salary_type: bool = Field(alias="inSalaryType")
-    is_in_salary_type: bool = Field(alias="isInSalaryType")
+    target_display: str | None = Field(default=None, validation_alias="targetDisplay")
+    bank_account: bool = Field(validation_alias="bankAccount")
+    is_bank_account: bool = Field(validation_alias="isBankAccount")
+    in_salary_type: bool = Field(validation_alias="inSalaryType")
+    is_in_salary_type: bool = Field(validation_alias="isInSalaryType")
 
 
 class AccountDetail(_AccountFields):
@@ -343,8 +348,8 @@ class AccountDetail(_AccountFields):
     items are kept as sent.
     """
 
-    full_name: str | None = Field(default=None, alias="fullName")
+    full_name: str | None = Field(default=None, validation_alias="fullName")
     attachments: list[JsonValue]
     allocations: list[JsonValue]
-    is_default_currency: bool = Field(alias="isDefaultCurrency")
-    is_foreign_currency: bool = Field(alias="isForeignCurrency")
+    is_default_currency: bool = Field(validation_alias="isDefaultCurrency")
+    is_foreign_currency: bool = Field(validation_alias="isForeignCurrency")

@@ -53,8 +53,9 @@ print(record.meta.endpoint, record.meta.request, record.meta.retrieved_at)
 ```
 
 Every task returns `Result[T]`: `data` holds models that mirror CashCtrl's payloads
-(snake_case attributes, serialised under upstream's camelCase names), `meta` the upstream
-operation, the parameters sent and when they were fetched. Async twins are named
+under upstream's names in snake_case (`is_current`, `end_amount`), in Python and in every
+tool and route result alike, `meta` the upstream operation, the parameters as sent under
+upstream's names (`onlyActive`) and when they were fetched. Async twins are named
 `<task>_async`. The tasks are listed in the status table below.
 
 ## MCP

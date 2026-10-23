@@ -139,7 +139,7 @@ async def list_fiscal_periods_async(org: str) -> Result[list[FiscalPeriod]]:
 
     Every fiscal period comes back in upstream's order, with ``start`` and ``end`` as
     dates, whether it is closed, the months still open or closed
-    (``openMonthIds``, ``closedMonthIds``, as ``YYYY-MM``), and ``isCurrent`` for the
+    (``open_month_ids``, ``closed_month_ids``, as ``YYYY-MM``), and ``is_current`` for the
     period upstream uses by default, e.g. for account balances. Use an ``id`` from here as
     ``fiscal_period_id`` in ``list_accounts``.
 
@@ -155,9 +155,9 @@ async def list_currencies_async(org: str) -> Result[list[Currency]]:
 
     Every currency comes back with its three-letter ``code`` (``CHF``, ``EUR``), its
     ``rate`` into the organisation's default currency (``1`` for the default currency
-    itself, marked ``isDefault``) and its ``description``, which may hold localised text
+    itself, marked ``is_default``) and its ``description``, which may hold localised text
     as ``<values><de>...</de></values>``. Use an ``id`` from here where a call asks for a
-    ``currencyId``.
+    ``currency_id``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -170,11 +170,11 @@ async def list_tax_codes_async(org: str) -> Result[list[TaxCode]]:
     """List an organisation's tax codes with their rates and the accounts they book to.
 
     Every tax code comes back with its short ``code`` (``UN1``), its ``rates`` (each a
-    ``percentage`` such as ``8.1``, valid from ``dateValid``; the rate without a date is
-    the fallback), ``currentPercentage``, and its ``components``: the ``accountId`` the
-    tax is collected on, ``calcType`` (``NET`` or ``GROSS``) and ``applyRule``.
-    ``isInactive`` marks codes no longer suggested. Use an ``id`` from here where a call
-    asks for a ``taxId``.
+    ``percentage`` such as ``8.1``, valid from ``date_valid``; the rate without a date is
+    the fallback), ``current_percentage``, and its ``components``: the ``account_id`` the
+    tax is collected on, ``calc_type`` (``NET`` or ``GROSS``) and ``apply_rule``.
+    ``is_inactive`` marks codes no longer suggested. Use an ``id`` from here where a call
+    asks for a ``tax_id``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -199,9 +199,9 @@ async def list_accounts_async(
     """List an organisation's accounts, its chart of accounts, with their balances.
 
     Every matching account comes back with its ``number`` (``"1020"``), ``name``,
-    ``categoryId``, ``currencyCode``, ``isInactive`` and its balances for one fiscal
-    period: ``openingAmount`` and ``endAmount`` in the account's currency,
-    ``defaultCurrencyOpeningAmount`` and ``defaultCurrencyEndAmount`` in the default
+    ``category_id``, ``currency_code``, ``is_inactive`` and its balances for one fiscal
+    period: ``opening_amount`` and ``end_amount`` in the account's currency,
+    ``default_currency_opening_amount`` and ``default_currency_end_amount`` in the default
     currency. Without parameters every account is listed, and a large chart of accounts
     exceeds the MCP result cap (200 rows or 64 KB): the tool result is then truncated
     with a note, so narrow the list with ``query``, ``filter`` or ``only_active``.
@@ -247,7 +247,7 @@ async def get_account_async(org: str, id: int) -> Result[AccountDetail]:
     """Read one account of an organisation by its id.
 
     The account comes back as upstream's read returns it: ``number``, ``name``,
-    ``categoryId``, ``currencyId`` and ``currencyCode``, ``taxId``, ``isInactive``,
+    ``category_id``, ``currency_id`` and ``currency_code``, ``tax_id``, ``is_inactive``,
     ``notes``, the custom fields in ``custom``, ``attachments`` and ``allocations``. It
     carries no balances; ``list_accounts`` has them. An id no account has raises
     ``NotFoundError``.
