@@ -37,7 +37,7 @@ All notable changes to this project are documented here. The format follows
   create it with fictional data only (the main location included, which a new
   organisation lacks) and seed it, the books in full, the assumed account
   numbers and VAT codes, the balances of 1100 the books imply under a gross and a net
-  reading, and a placeholder for what the first run observes.
+  reading, and the write semantics the first seeding run observed on 2026-10-23.
 
 ### Changed
 

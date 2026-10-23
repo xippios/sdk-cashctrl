@@ -153,7 +153,7 @@ semantics": the encoding used, the UTF-8 round trip, the `calcType` of `UN1` and
 the two balances, the status codes per endpoint, the keys of a successful create answer
 and the type of `insertId`, and the exact shape of any refusal, scrubbed. After a stop
 during the writes, the records created and the section are printed as well (the totals
-and the balances only after a complete run). Copy the section into the placeholder
+and the balances only after a complete run). The first run's section is recorded
 below.
 
 A run that stops halfway leaves a partly seeded organisation, which the script then
@@ -181,8 +181,8 @@ The script does not name the organisation: its name is set by hand when it is cr
 | EUR | Euro | 0.95 |
 | USD | US-Dollar | 0.88 |
 
-Created only if `currency/list.json` lacks the code; the retired copy had EUR and USD from
-the start, so a fresh organisation probably has them and nothing is created. The rates are
+Created only if `currency/list.json` lacks the code. A new organisation has both from the
+start: the first run created neither (Observed write semantics, below). The rates are
 fixed and synthetic, and `common.md` says CashCtrl ignores `rate` for the currencies it
 supports (EUR and USD among them) and fetches its own. No journal entry or order uses a
 foreign currency.
@@ -379,6 +379,7 @@ the first write:
   | 2026-09-30 | 4'850.00 | 8'158.85 for 2026 alone, 10'054.25 with 2025 carried forward |
 
   Gross leaves the two open invoices, RE-2026-006 and RE-2026-007, as the only balance.
+  The first run matched the gross reading exactly (Observed write semantics, below).
   Whether the balance at 2026-09-30 includes the 2025 closing balance depends on how
   CashCtrl opens a period, which the documentation does not say; under the gross
   reading it does not matter. If the sales orders booked journal entries (journal total
@@ -406,17 +407,44 @@ the first write:
 
 ## Observed write semantics (filled by the first run)
 
-To be filled from the section the first `--apply --yes` run prints, with its date:
+The first complete `--apply --yes` run, on 2026-10-23 against the new demo organisation,
+printed the following; the balances and totals are quoted as printed.
 
-- Encoding of the writes (form-encoded with `charset=UTF-8`, or `--multipart`): _pending_
-- UTF-8 round trip of Muster Büro AG through `person/read.json`: _pending_
-- `calcType` of the components of `UN1` and `VN1`: _pending_
-- Status codes per endpoint: _pending_
-- Keys of a successful create answer (`success`, `message`, `insertId`, ...) and the type
-  of `insertId`, per create endpoint: _pending_
-- The exact shape of a refusal, if one occurred: _pending_
-- Whether order creation booked journal entries (journal totals above 36 for 2026):
-  _pending_
-- Balance of 1100 at 2025-12-31 and 2026-09-30, and the reading of `amount` with a
-  `taxId` it implies (table above): _pending_
-- The `total` each list endpoint reported after seeding: _pending_
+- Encoding of the writes: form-encoded, `application/x-www-form-urlencoded;
+  charset=UTF-8`. `--multipart` was not needed.
+- UTF-8 round trip: `person/read.json` answered the company `Muster Büro AG` byte for
+  byte.
+- `calcType` of the components of `UN1` and `VN1`: `NET` for both, read from
+  `tax/list.json` (no `tax/read.json` needed). `common.md` defines `calcType` as the
+  calculation basis of the tax, not as how a journal `amount` is read; the balances below
+  show that reading.
+- Status codes: HTTP 200 for every request, 88 in all. The 65 writes were
+  `person/create.json` x10, `fiscalperiod/create.json` x1, `journal/create.json` x48 and
+  `order/create.json` x6. The 23 reads were the guards and lookups, the read-back, the
+  fiscal period re-read and the summary.
+- Create answers: `person/create.json`, `journal/create.json` and `order/create.json`
+  answer with the keys `insertId`, `message` and `success`, `insertId` a JSON integer.
+  `fiscalperiod/create.json` answers with `message` and `success` only, without
+  `insertId`; the seeder finds the new period by reading `fiscalperiod/list.json` again.
+  Every create answer carries a `message`; the seeder never prints its text.
+- Refusals: none.
+- Currencies: the new organisation already had EUR and USD, so the run sent no
+  `currency/create.json` request.
+- Fiscal period 2025: the new organisation had 2026 only. `fiscalperiod/create.json` with
+  `type=EARLIEST` created 2025, and `fiscalperiod/list.json` then listed a period
+  covering the 2025 dates.
+- Whether order creation booked journal entries: `journal/list.json` reports 38 entries
+  for 2026, two more than the 36 manual entries. The balance of 1100 holds no sales order
+  amount, so the four sales invoices did not book to the debtors. Which records the two
+  extra entries are was not read; the two purchase orders are the likeliest source, not
+  verified.
+- Balance of 1100 (`account/balance`): `0.00` at 2025-12-31 and `4850.00` at 2026-09-30,
+  exactly the gross reading in the table above. The `amount` of a manual journal entry
+  with a `taxId` is the gross amount, VAT included, although the tax codes' `calcType` is
+  `NET`.
+- The `total` each list endpoint reported after seeding: `person/list.json` 12 (the ten
+  seeded persons and CashCtrl's two system insurance persons); `journal/list.json` 12 for
+  2025 and 38 for 2026; `order/list.json` 4 `SALES` and 2 `PURCHASE` for 2026;
+  `currency/list.json` 3; `fiscalperiod/list.json` 2.
+- `x-cashctrl-requests-left`: the seeder does not record response headers. The read-only
+  freshness check before the run saw the header on every answer (8 of 8, name only).
