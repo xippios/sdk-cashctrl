@@ -59,6 +59,7 @@ src/xippios/cashctrl/
 scripts/
   refresh_reference.py   fetches the packaged lists through api/ and regenerates enums.py
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
+  seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md)
 tests/
   conftest.py      enables xippios.core.testing.plugin; placeholder key for replay
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
@@ -67,6 +68,7 @@ tests/
   test_layout.py   namespace levels stay empty; py.typed ships
   test_live.py     @pytest.mark.live smoke tests, one per task
 docs/upstream/     documentation snapshot and FETCHED.md
+docs/demo-org.md   the synthetic demo organisation: why, how to create and seed it, its books
 .claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep
 ```
 
@@ -146,6 +148,9 @@ uv run xippios-cashctrl-mcp   # stdio; add --http for streamable HTTP
 - Never edit `docs/upstream/` by hand; `/refresh-upstream` fetches, a PR reviews.
 - Never add `src/xippios/__init__.py`.
 - Never tag, merge, release, force-push, or touch `gh secret`. Those are human actions.
+- Never point fixtures, live tests or the seeder at an organisation with real data: the
+  demo organisation holds synthetic books only, created and seeded as `docs/demo-org.md`
+  describes.
 
 ## When something is unclear
 
