@@ -34,16 +34,18 @@ register. `tests/test_seed_demo.py` checks the rule against the data and this do
    example `Muster Handel AG Demo`. Keep CashCtrl's defaults: the current fiscal period,
    the default Swiss chart of accounts, the default VAT codes and categories. Change no
    settings.
-2. Enter only fictional data, in the organisation creation wizard and in the location
-   (Settings → Locations): a name like the one above, a placeholder address such as
-   `Musterhof 1, 8001 Zürich`, no VAT UID, no IBAN, no logo. The seeder reads
-   `location/list.json`, and that answer can feed fixtures, so whatever the location
-   holds can end up in a public commit.
+2. Enter only fictional data in the organisation creation wizard: a name like the one
+   above and a placeholder address, nothing real. A new organisation has no location:
+   `location/list.json` lists none until one is created under Settings → Locations,
+   whatever the wizard asked (observed in October 2026). Create the main location (type
+   `MAIN`) there before seeding, with fictional data only: a company name that contains
+   `demo`, a placeholder address such as `Musterhof 1, 8001 Zürich`, no VAT UID, no
+   IBAN, no logo. The seeder reads `location/list.json`, and that answer can feed
+   fixtures, so whatever the location holds can end up in a public commit.
 3. Check the company name of the main location: it must contain `demo` as well. The
    seeder reads the organisation's name there (`orgName` in `location/list.json`),
    because the documentation has no organisation read besides `domain/current/logo`
-   (`docs/upstream/meta.md`). If CashCtrl did not copy the organisation's name into the
-   main location, set it to the same name.
+   (`docs/upstream/meta.md`). Without a location, guard 2 refuses.
 4. Settings → Users & Roles → Add → Add API user (`docs/upstream/authentication.md`), with
    a role that may read locations, fiscal periods, accounts and their balances,
    currencies, tax codes, person and order categories, persons, the journal and orders,
@@ -78,14 +80,22 @@ no value, and nothing written, unless
 1. both variables are set and the subdomain is one DNS label;
 2. `location/list.json` answers and the company name (`orgName`) of the main location
    contains `demo` in any case;
-3. the organisation is empty: `person/list.json`, and `journal/list.json` and
-   `order/list.json` for `SALES` and `PURCHASE` in every fiscal period (the lists answer
-   for the current period only unless `fiscalPeriodId` is given), all report `total` 0.
-   An organisation with data, such as a copy of real books, is refused; the script never
-   deletes anything. If a fresh organisation already lists a person or an entry (an
-   example record from CashCtrl or from the wizard, for instance), the guard names the
-   list and refuses as well: delete that record in CashCtrl, or start over with a new
-   organisation;
+3. the organisation is empty: `journal/list.json` and `order/list.json` for `SALES` and
+   `PURCHASE` in every fiscal period (the lists answer for the current period only unless
+   `fiscalPeriodId` is given) report `total` 0, and `person/list.json` (the whole list,
+   `onlyActive` left at its default, false) lists no person but the insurance records
+   CashCtrl creates itself. A new organisation lists two of them, with `createdBy`
+   `SYSTEM` and `isInsurance` true (observed in October 2026): they are expected, the
+   guard tolerates them, and the person `total` after seeding includes them (12, not
+   10). Every other person refuses, a `SYSTEM`-created one that is not an insurance
+   included, so a copy with system-imported data still fails closed; the refusal says
+   how many such persons there are. Persons beyond the records the list returns (a
+   `total` above them) count as others; a person record without `createdBy`, or a list
+   without a numeric `total`, refuses as unconfirmable. An organisation with data, such
+   as a copy of real books, is refused; the script never deletes anything. If a fresh
+   organisation lists any other record (a person or an entry from the wizard, for
+   instance), the guard names the list and refuses as well: delete that record in
+   CashCtrl, or start over with a new organisation;
 4. `account/list.json` has every account number the plan uses, none of them inactive; the
    refusal names the missing or inactive numbers. The script creates no accounts.
 

@@ -34,7 +34,8 @@ All notable changes to this project are documented here. The format follows
   2026-09-30. It reads only `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`, never
   prints either, and scrubs every upstream text it shows.
 - `docs/demo-org.md`: why the demo organisation is synthetic and the naming rule, how to
-  create it with fictional data only and seed it, the books in full, the assumed account
+  create it with fictional data only (the main location included, which a new
+  organisation lacks) and seed it, the books in full, the assumed account
   numbers and VAT codes, the balances of 1100 the books imply under a gross and a net
   reading, and a placeholder for what the first run observes.
 

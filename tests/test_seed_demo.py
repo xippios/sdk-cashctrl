@@ -1259,6 +1259,8 @@ def test_the_document_describes_every_record() -> None:
         "application/x-www-form-urlencoded; charset=UTF-8",
         "Requests start at least 1.2 seconds apart",
         "xippios-cashctrl/<version> (+https://github.com/xippios)",
+        f"with `createdBy` `{seeder.SYSTEM}` and `isInsurance` true",
+        "A new organisation has no location",
     ):
         assert phrase in prose, phrase
     b = debtor_balances()
