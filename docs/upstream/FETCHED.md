@@ -12,9 +12,10 @@ The documentation is one server-rendered HTML page whose table of contents links
 its sections by fragment (`#intro`, `#/account`). The script fetches the page once
 and writes one Markdown file per top-level entry of the table of contents, named
 after the entry: the five general sections, then one file per module holding all of
-the module's controllers. Each file starts with the URL of its entry and the fetch
-date. Headings keep the page's levels: `##` controller, `###` operation, `####`
-Parameters, Endpoint or Example; each paragraph is one line.
+the module's controllers. Each file starts with one line, the URL of its entry; the
+fetch date is recorded only in this file. Headings keep the page's levels: `##`
+controller, `###` operation, `####` Parameters, Endpoint or Example; each paragraph is
+one line.
 
 Navigation (table of contents, breadcrumbs, anchors), scripts, styles, the footer
 and the parameter names the page repeats for small screens are dropped; the arrow
@@ -22,20 +23,28 @@ icons between menu items become →. `toc.js` (scrolling and
 table-of-contents highlighting) and `main.css` are not captured. Endpoints, curl
 examples and JSON responses become fenced code blocks, verbatim. Every table on the
 page is a two-column parameter table; it becomes a pipe table with an empty header
-row and the columns name, labels (mandatory or optional, data type, limits) and
+row and three columns: name, labels (mandatory or optional, data type, limits) and
+description. A table for which the page gives no labels has two columns, name and
 description. A table that nests another (the fields of a JSON parameter) cannot be a
 pipe table and stays an HTML table with the same columns, reduced to code, links and
 line breaks. Links into the page are absolute.
 
 Regenerate: `uv run scripts/refresh_upstream.py`
 
+## Attribution and vendor examples
+
+The documentation is © 2026 CashCtrl Ltd., as the page's footer states. Its text is
+reproduced here verbatim, converted to Markdown, as the reference for this package
+(ADR-0003). The page's examples contain the vendor's placeholder API key and example
+pre-authenticated object-storage URLs; they are reproduced verbatim from the public
+page and are not credentials of this project.
+
 ## Files
 
-The page as fetched:
+The page the snapshot was made from:
 
-- HTTP 200, 1247520 bytes, sha256 `2d5f1e4e3205de122e4fe09738932a6eee50cc3d51a0c0106b155bfabdaefff6`
-- ETag `"1792306289900-gzip"`
-- Last-Modified not sent
+- 1247520 bytes, sha256 `2d5f1e4e3205de122e4fe09738932a6eee50cc3d51a0c0106b155bfabdaefff6`
+- HTTP 200, ETag `"1792306289900-gzip"`, Last-Modified not sent
 
 Fetched is the UTC date of the run.
 

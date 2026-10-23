@@ -1,5 +1,4 @@
-Source: <https://app.cashctrl.com/static/help/en/api/index.html#/inventory/article>\
-Fetched: 2026-10-23 (UTC)
+Source: <https://app.cashctrl.com/static/help/en/api/index.html#/inventory/article>
 
 ## Article
 
