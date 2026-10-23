@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-23T11:47:26.824763Z",
+  "request": {
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/person/read.json?id=3"
+  },
+  "response": {
+    "body": "{\"success\":true,\"data\":{\"id\":3,\"created\":\"2026-10-23 10:29:12.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:12.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"categoryId\":2,\"contacts\":[{\"id\":1,\"personId\":3,\"type\":\"EMAIL_WORK\",\"purpose\":null,\"address\":\"user@example.com\",\"notes\":null,\"pos\":0}],\"addresses\":[{\"id\":1,\"personId\":3,\"titleId\":null,\"type\":\"MAIN\",\"company\":null,\"firstName\":null,\"lastName\":null,\"address\":\"Beispielring 9\",\"zip\":\"9000\",\"city\":\"St. Gallen\",\"canton\":\"SG\",\"country\":\"CHE\",\"pos\":0,\"hideCompany\":false,\"hideName\":false,\"companyForAddress\":\"Muster B\u00fcro AG\",\"firstNameForAddress\":null,\"lastNameForAddress\":null,\"streetName\":\"Beispielring\",\"streetNumber\":\"9\",\"titleName\":\"\",\"cantonCode\":\"SG\",\"countryCode2\":\"CH\",\"countryCode3\":\"CHE\",\"isHideCompany\":false,\"isHideName\":false}],\"bankAccounts\":[],\"servicePeriods\":[],\"children\":[],\"insuranceContracts\":[],\"attachments\":[],\"nr\":\"P-00001\",\"name\":\"Muster B\u00fcro AG\",\"company\":\"Muster B\u00fcro AG\",\"language\":\"DE\",\"emailWork\":\"user@example.com\",\"address\":\"Beispielring 9\",\"zip\":\"9000\",\"city\":\"St. Gallen\",\"canton\":\"SG\",\"country\":\"CHE\",\"attachmentCount\":0,\"fullName\":\"\",\"inactive\":false,\"companyOrFullName\":\"Muster B\u00fcro AG\",\"customer\":false,\"vendor\":true,\"employee\":false,\"insurance\":false,\"family\":false,\"titleName\":\"\",\"numberOfChildren\":0,\"abbreviatedName\":\"Muster B\u00fcro AG\",\"languageName\":\"Deutsch\",\"categoryName\":\"<values><de>Lieferanten</de><en>Vendors</en><fr>Fournisseurs</fr><it>Fornitori</it></values>\",\"languageCode\":\"de\",\"cantonCode\":\"SG\",\"countryCode2\":\"CH\",\"countryCode3\":\"CHE\",\"iconCls\":\"person\",\"certificateValuesMap\":{},\"isCustomer\":false,\"isVendor\":true,\"isEmployee\":false,\"isInsurance\":false,\"isFamily\":false,\"isInactive\":false,\"isAutoFillResponsiblePerson\":false}}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Fri, 23 Oct 2026 11:47:24 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-23T11:46:29.027759Z",
+  "request": {
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/journal/list.json?fiscalPeriodId=1&start=0&limit=5"
+  },
+  "response": {
+    "body": "{\"total\":38,\"data\":[{\"id\":48,\"created\":\"2026-10-23 10:30:17.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:17.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"debitId\":26,\"debitName\":\"6900 <values><de>Finanzaufwand</de><en>Financial expenses</en><fr>Charges financi\u00e8res</fr><it>Costi finanziari</it></values>\",\"creditId\":3,\"creditName\":\"1020 <values><de>Bank</de><en>Bank account</en><fr>Compte courant</fr><it>Conto corrente</it></values>\",\"associateId\":null,\"associateName\":null,\"taxId\":null,\"taxCode\":null,\"taxRate\":null,\"orderId\":null,\"orderBookEntryId\":null,\"salaryBookEntryId\":null,\"statementId\":null,\"inventoryId\":null,\"importEntryId\":null,\"type\":\"MANUAL\",\"dateAdded\":\"2026-09-30 00:00:00.0\",\"title\":\"Bankspesen 3. Quartal 2026\",\"custom\":null,\"notes\":null,\"reference\":null,\"amount\":45,\"currencyId\":null,\"currencyRate\":1,\"currencyCode\":\"CHF\",\"accountId\":null,\"accountCurrencyId\":null,\"accountClass\":null,\"balance\":null,\"nameSingular\":null,\"orderType\":null,\"itemsCount\":0,\"recurrence\":null,\"startDate\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"attachmentCount\":0,\"allocationCount\":0,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"recurring\":false,\"isRecurring\":false},{\"id\":47,\"created\":\"2026-10-23 10:30:16.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:16.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"debitId\":null,\"debitName\":null,\"creditId\":3,\"creditName\":\"1020 <values><de>Bank</de><en>Bank account</en><fr>Compte courant</fr><it>Conto corrente</it></values>\",\"associateId\":null,\"associateName\":null,\"taxId\":null,\"taxCode\":null,\"taxRate\":null,\"orderId\":null,\"orderBookEntryId\":null,\"salaryBookEntryId\":null,\"statementId\":null,\"inventoryId\":null,\"importEntryId\":null,\"type\":\"COLLECTIVE\",\"dateAdded\":\"2026-09-22 00:00:00.0\",\"title\":\"Sammelzahlung Kreditoren September 2026\",\"custom\":null,\"notes\":null,\"reference\":null,\"amount\":2580,\"currencyId\":null,\"currencyRate\":1,\"currencyCode\":\"CHF\",\"accountId\":null,\"accountCurrencyId\":null,\"accountClass\":null,\"balance\":null,\"nameSingular\":null,\"orderType\":null,\"itemsCount\":3,\"recurrence\":null,\"startDate\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"attachmentCount\":0,\"allocationCount\":null,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"recurring\":false,\"isRecurring\":false},{\"id\":46,\"created\":\"2026-10-23 10:30:15.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:15.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"debitId\":4,\"debitName\":\"1100 <values><de>Debitoren</de><en>Accounts receivable</en><fr>Cr\u00e9ances</fr><it>Crediti</it></values>\",\"creditId\":42,\"creditName\":\"3200 <values><de>Handelsertrag</de><en>Trading revenue</en><fr>Produits de marchandises</fr><it>Ricavi merci di rivendita</it></values>\",\"associateId\":7,\"associateName\":\"Muster Consulting GmbH\",\"taxId\":9,\"taxCode\":\"UN1\",\"taxRate\":8.1,\"orderId\":null,\"orderBookEntryId\":null,\"salaryBookEntryId\":null,\"statementId\":null,\"inventoryId\":null,\"importEntryId\":null,\"type\":\"MANUAL\",\"dateAdded\":\"2026-09-15 00:00:00.0\",\"title\":\"Rechnung RE-2026-007 Muster Consulting GmbH\",\"custom\":null,\"notes\":null,\"reference\":\"RE-2026-007\",\"amount\":3600,\"currencyId\":null,\"currencyRate\":1,\"currencyCode\":\"CHF\",\"accountId\":null,\"accountCurrencyId\":null,\"accountClass\":null,\"balance\":null,\"nameSingular\":null,\"orderType\":null,\"itemsCount\":0,\"recurrence\":null,\"startDate\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"attachmentCount\":0,\"allocationCount\":0,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"recurring\":false,\"isRecurring\":false},{\"id\":45,\"created\":\"2026-10-23 10:30:14.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:14.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"debitId\":20,\"debitName\":\"6000 <values><de>Raumaufwand</de><en>Occupancy expenses</en><fr>Charges de loceaux</fr><it>Costi dei locali</it></values>\",\"creditId\":3,\"creditName\":\"1020 <values><de>Bank</de><en>Bank account</en><fr>Compte courant</fr><it>Conto corrente</it></values>\",\"associateId\":5,\"associateName\":\"Fiktiv Immobilien AG\",\"taxId\":null,\"taxCode\":null,\"taxRate\":null,\"orderId\":null,\"orderBookEntryId\":null,\"salaryBookEntryId\":null,\"statementId\":null,\"inventoryId\":null,\"importEntryId\":null,\"type\":\"MANUAL\",\"dateAdded\":\"2026-09-04 00:00:00.0\",\"title\":\"Miete September 2026\",\"custom\":null,\"notes\":null,\"reference\":null,\"amount\":2400,\"currencyId\":null,\"currencyRate\":1,\"currencyCode\":\"CHF\",\"accountId\":null,\"accountCurrencyId\":null,\"accountClass\":null,\"balance\":null,\"nameSingular\":null,\"orderType\":null,\"itemsCount\":0,\"recurrence\":null,\"startDate\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"attachmentCount\":0,\"allocationCount\":0,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"recurring\":false,\"isRecurring\":false},{\"id\":44,\"created\":\"2026-10-23 10:30:13.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:13.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"debitId\":22,\"debitName\":\"6500 <values><de>Verwaltungsaufwand</de><en>Administrative expenses</en><fr>Charges d'administration</fr><it>Costi amministrativi</it></values>\",\"creditId\":3,\"creditName\":\"1020 <values><de>Bank</de><en>Bank account</en><fr>Compte courant</fr><it>Conto corrente</it></values>\",\"associateId\":4,\"associateName\":\"Beispiel Telecom AG\",\"taxId\":null,\"taxCode\":null,\"taxRate\":null,\"orderId\":null,\"orderBookEntryId\":null,\"salaryBookEntryId\":null,\"statementId\":null,\"inventoryId\":null,\"importEntryId\":null,\"type\":\"MANUAL\",\"dateAdded\":\"2026-08-31 00:00:00.0\",\"title\":\"Telefon und Internet August 2026\",\"custom\":null,\"notes\":null,\"reference\":null,\"amount\":180,\"currencyId\":null,\"currencyRate\":1,\"currencyCode\":\"CHF\",\"accountId\":null,\"accountCurrencyId\":null,\"accountClass\":null,\"balance\":null,\"nameSingular\":null,\"orderType\":null,\"itemsCount\":0,\"recurrence\":null,\"startDate\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"attachmentCount\":0,\"allocationCount\":0,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"recurring\":false,\"isRecurring\":false}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Fri, 23 Oct 2026 11:46:26 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}
