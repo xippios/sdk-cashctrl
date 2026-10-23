@@ -99,6 +99,7 @@ scripts/
   refresh_reference.py   stub until a documented value set is needed (refresh-reference-data)
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
   record_fixture.py      records one exchange with the demo organisation; host, e-mails, API user tags scrubbed
+  seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md)
 tests/
   conftest.py      core's plugin; demo-only environment, placeholder demo pair, clients reset per test, demo_org
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
@@ -109,9 +110,11 @@ tests/
   test_errors.py   classify, RequestRejected and the recorded refusals
   test_org_lock.py the --org lock, driven through an in-process MCP client
   test_record_fixture.py  the recorder never writes the demo host or key
+  test_seed_demo.py       the seeder refuses unsafe states before any write, offline
   test_refresh_reference.py  nothing is packaged; the refresh script is a stub
   test_live.py     @pytest.mark.live smoke tests, one per task, demo_org only
 docs/upstream/     documentation snapshot and FETCHED.md
+docs/demo-org.md   the synthetic demo organisation: why, how to create and seed it, its books
 .claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep
 ```
 
@@ -210,6 +213,9 @@ uv run xippios-cashctrl-mcp --org demo   # stdio, locked to demo; --http for str
 - Never edit `docs/upstream/` by hand; `/refresh-upstream` fetches, a PR reviews.
 - Never add `src/xippios/__init__.py`.
 - Never tag, merge, release, force-push, or touch `gh secret`. Those are human actions.
+- Never point fixtures, live tests or the seeder at an organisation with real data: the
+  demo organisation holds synthetic books only, created and seeded as `docs/demo-org.md`
+  describes.
 
 ## When something is unclear
 
