@@ -1,8 +1,7 @@
 """The fixture recorder records the demo organisation only and never writes its host or key.
 
-It also holds to the policies that stand until the demo organisation is confirmed
-synthetic: GET only, .json only, the allowed modules only, no non-zero amount, no e-mail
-address.
+It also holds to its policies: GET only, .json only, no e-mail address. The demo
+organisation is synthetic, so every module and every amount may be recorded.
 """
 
 import base64
@@ -179,11 +178,12 @@ def test_arguments_are_checked() -> None:
     args = recorder.parse_args(["/api/v1/account/read.json", "case", "id=1", "q=a=b"])
     assert args.endpoint == "account/read.json"
     assert args.params == {"id": "1", "q": "a=b"}
-    assert (args.method, args.allow_amounts) == ("GET", False)
-    assert recorder.parse_args(["account/list.json", "case", "--allow-amounts"]).allow_amounts
+    assert args.method == "GET"
+    with pytest.raises(SystemExit):  # lifted with the amount refusal: the demo is synthetic
+        recorder.parse_args(["account/list.json", "case", "--allow-amounts"])
 
 
-# Policies until the demo organisation is confirmed synthetic.
+# The recorder's policies.
 
 
 def test_e_mail_addresses_become_the_placeholder(
@@ -260,74 +260,6 @@ def test_the_check_names_an_address_but_never_shows_it(recorder: ModuleType) -> 
         assert leaks == ["an e-mail address other than user@example.com"]
 
 
-@pytest.mark.parametrize(
-    ("body", "where"),
-    [
-        ({"total": 1, "data": [{"id": 1, "endAmount": 12.5}]}, "body.data[0].endAmount"),
-        ({"data": {"openingAmount": 0, "targetMax": "1000.00"}}, "body.data.targetMax"),
-        ({"data": [{"balance": [0, -3]}]}, "body.data[0].balance"),
-        (
-            {"data": [{"lines": [{"DEFAULTCURRENCYAMOUNT": 1}]}]},
-            "body.data[0].lines[0].DEFAULTCURRENCYAMOUNT",
-        ),
-    ],
-)
-def test_a_non_zero_amount_is_refused(
-    recorder: ModuleType,
-    tmp_path: Path,
-    respx_mock: respx.MockRouter,
-    capsys: pytest.CaptureFixture[str],
-    body: dict[str, Any],
-    where: str,
-) -> None:
-    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
-    route.mock(return_value=httpx.Response(200, json=body))
-    assert recorder.main(["account/list.json", "amounts"]) == 1
-    assert not (tmp_path / "tests" / "fixtures").exists()
-    out = capsys.readouterr().out
-    assert out.startswith("not recorded: the body holds non-zero amounts under ")
-    assert where in out
-    assert "--allow-amounts is only for a synthetic demo organisation" in out
-    for value in ("12.5", "1000", "-3"):
-        assert value not in out
-
-
-def test_zero_amounts_totals_rates_percentages_and_ids_are_recorded(
-    recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter
-) -> None:
-    record = {
-        "id": 7,
-        "accountId": 33,
-        "costCenterIds": [4, 5],
-        "amountId": 9,
-        "openingAmount": 0,
-        "endAmount": 0.0,
-        "defaultCurrencyEndAmount": "0.00",
-        "targetMin": None,
-        "isBalanceSheet": True,
-        "rate": 0.925822,
-        "percentage": 8.1,
-        "percentageFlat": 6.2,
-        "currentPercentage": 8.1,
-        "rates": [{"percentage": 8.1}],
-    }
-    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
-    route.mock(return_value=httpx.Response(200, json={"total": 12, "data": [record]}))
-    assert recorder.main(["account/list.json", "no_amounts"]) == 0
-    assert (tmp_path / "tests" / "fixtures" / "account_list" / "no_amounts.json").exists()
-
-
-def test_allow_amounts_lifts_the_amount_policy_only(
-    recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter
-) -> None:
-    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
-    route.mock(return_value=httpx.Response(200, json={"data": [{"endAmount": 12.5}]}))
-    assert recorder.main(["account/list.json", "synthetic", "--allow-amounts"]) == 0
-    assert (tmp_path / "tests" / "fixtures" / "account_list" / "synthetic.json").exists()
-    assert recorder.main(["journal/list.json", "synthetic", "--allow-amounts"]) == 1
-    assert recorder.main(["account/list.json", "x", "--allow-amounts", "--method", "POST"]) == 1
-
-
 @pytest.mark.parametrize("method", ["POST", "post", "PUT", "DELETE"])
 def test_only_get_is_recorded(
     recorder: ModuleType,
@@ -349,66 +281,6 @@ def test_get_may_be_spelt_in_lower_case(recorder: ModuleType, respx_mock: respx.
     route.mock(return_value=httpx.Response(200, json={"total": 0, "data": []}))
     assert recorder.main(["currency/list.json", "empty", "--method", "get"]) == 0
     assert route.calls.last.request.method == "GET"
-
-
-@pytest.mark.parametrize(
-    "endpoint",
-    [
-        "person/list.json",
-        "person/contact/list.json",
-        "order/document/list.json",
-        "journal/list.json",
-        "salary/statement/list.json",
-        "report/collection/read.json",
-        "file/list.json",
-        "inventory/asset/list.json",
-        "location/list.json",
-        "history/list.json",
-        "customfield/list.json",
-        "rounding/list.json",
-        "sequencenumber/list.json",
-        "setting/read.json",
-        "text/list.json",
-        "domain/list.json",
-    ],
-)
-def test_every_module_but_the_allowed_ones_fails_closed(
-    recorder: ModuleType,
-    tmp_path: Path,
-    respx_mock: respx.MockRouter,
-    capsys: pytest.CaptureFixture[str],
-    endpoint: str,
-) -> None:
-    assert recorder.main([endpoint, "refused", "id=1"]) == 1
-    assert not respx_mock.calls, "refused before any request"
-    assert not (tmp_path / "tests" / "fixtures").exists()
-    out = capsys.readouterr().out
-    module = endpoint.split("/")[0]
-    assert out.startswith(
-        f"not recorded: {module}/ is not yet cleared for recording from the demo organisation; "
-        "only account, currency, fiscalperiod and tax are "
-    )
-    assert "locations carry the company's address and VAT number" in out
-    assert "until the demo organisation is confirmed synthetic" in out
-
-
-@pytest.mark.parametrize(
-    "endpoint", ["account/bank/list.json", "account/bank/read.json", "account/bank.json"]
-)
-def test_bank_accounts_are_refused_within_account(
-    recorder: ModuleType,
-    tmp_path: Path,
-    respx_mock: respx.MockRouter,
-    capsys: pytest.CaptureFixture[str],
-    endpoint: str,
-) -> None:
-    assert recorder.main([endpoint, "bank"]) == 1
-    assert not respx_mock.calls, "refused before any request"
-    assert not (tmp_path / "tests" / "fixtures").exists()
-    out = capsys.readouterr().out
-    assert (
-        out == "not recorded: account/bank/ is refused: bank accounts carry IBAN, BIC and QR-IBAN\n"
-    )
 
 
 @pytest.mark.parametrize(
@@ -444,18 +316,41 @@ def test_only_json_endpoints_are_recorded(
     "endpoint",
     [
         "account/list.json",
-        "account/read.json",
-        "account/category/list.json",
-        "account/costcenter/list.json",
+        "account/bank/list.json",
         "currency/list.json",
         "fiscalperiod/list.json",
         "tax/list.json",
+        "person/list.json",
+        "order/list.json",
+        "journal/list.json",
+        "location/list.json",
+        "history/list.json",
+        "setting/read.json",
     ],
 )
-def test_the_allowed_modules_are_one_list(recorder: ModuleType, endpoint: str) -> None:
-    assert recorder.ALLOWED_MODULES == ("account", "currency", "fiscalperiod", "tax")
-    assert recorder.REFUSED_PATHS == ("account/bank",)
+def test_every_json_get_of_any_module_may_be_recorded(recorder: ModuleType, endpoint: str) -> None:
+    """The demo organisation is synthetic: no module is refused, ``account/bank/`` included."""
     assert recorder.refusal("GET", endpoint) is None
+    for gone in ("ALLOWED_MODULES", "REFUSED_PATHS", "AMOUNT_KEY", "body_amounts"):
+        assert not hasattr(recorder, gone), f"{gone} went with the provisional policies"
+
+
+def test_amounts_are_recorded(
+    recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter
+) -> None:
+    """Non-zero amounts are recorded as sent: the demo organisation's books are invented."""
+    record = {"id": 7, "openingAmount": 100000, "endAmount": "4850.00", "targetMax": 12.5}
+    entry = {"id": 3, "amount": 4800.0, "debitId": 4, "creditId": 9}
+    for endpoint, body in (
+        ("account/list.json", {"total": 1, "data": [record]}),
+        ("journal/list.json", {"total": 1, "data": [entry]}),
+    ):
+        route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}")
+        route.mock(return_value=httpx.Response(200, json=body))
+        assert recorder.main([endpoint, "with_amounts"]) == 0
+        directory = recorder.fixture_endpoint(endpoint)
+        written = tmp_path / "tests" / "fixtures" / directory / "with_amounts.json"
+        assert json.loads(json.loads(written.read_text())["response"]["body"]) == body
 
 
 @pytest.mark.parametrize(

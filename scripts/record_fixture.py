@@ -17,8 +17,10 @@ productive organisation. ``--wrong-key`` sends ``not-a-valid-key`` instead of th
 through a throwaway client with the demo organisation's configuration, to record a 401
 without touching the real key.
 
-Whether the demo organisation's content suits a public repository is its owner's
-decision. Until it is confirmed synthetic, the recorder holds to these policies; every
+The demo organisation holds synthetic books only, seeded by ``scripts/seed_demo.py`` and
+described in ``docs/demo-org.md`` (both arrive with the seed branch, PR #4): invented
+companies on placeholder streets, ``.example`` addresses, invented amounts. So every
+module and every amount may be recorded. These policies stand all the same; every
 refusal writes nothing, says why, never shows a value, and exits with status 1:
 
 - GET only. Any other ``--method`` is refused before a request is sent; the recorder
@@ -27,24 +29,13 @@ refusal writes nothing, says why, never shows a value, and exits with status 1:
   (``account/balance``, ``account/costcenter/balance``, ``fiscalperiod/result``,
   ``setting/get``) and an export (``.pdf``, ``.xlsx``, ``.csv``, ``.zip``) a file; both
   are refused before a request is sent.
-- Allowed modules. Only paths under ``account/``, ``currency/``, ``fiscalperiod/`` and
-  ``tax/`` (``ALLOWED_MODULES``) are recorded, and ``account/bank/`` is refused even so
-  (IBAN, BIC, QR-IBAN). Every other module fails closed before a request is sent: it is
-  not yet cleared for recording from the demo organisation (locations carry the
-  company's address and VAT number, history the audit trail, person, order and journal
-  third parties and amounts).
-- No amounts. A JSON body holding a non-zero number (or numeric string) under a key that
-  matches ``amount``, ``balance``, ``targetMin`` or ``targetMax``, in any case and at any
-  depth, is refused, naming the key; upstream's ``total``, ``rate``, ``percentage*`` and
-  ids are not amounts. ``--allow-amounts`` lifts this policy, and only this one, for a
-  synthetic demo organisation; it is never passed otherwise. The key list is tuned for
-  the allowed modules: before journal or order is allowed it must be revisited
-  (``debit``, ``credit``, ``sum``, ``value``, ``price``, ``net``, ``gross``, and
-  ``total`` outside the list envelope).
 - No e-mail addresses. Every e-mail-shaped string in the request URL, the response
   headers and the body becomes ``user@example.com``, with ``@`` written plainly, as
   ``%40`` or as the HTML entities ``&#64;``, ``&#x40;`` and ``&commat;`` (``notes`` and
   footers are HTML upstream); ``SYSTEM`` in ``createdBy`` is not an address and stays.
+  The synthetic books use reserved ``.example`` addresses, but ``createdBy`` and
+  ``lastUpdatedBy`` may carry the address of the user who wrote a record, a real person,
+  so the scrub stays.
 
 Nothing unscrubbed touches disk. The request goes through the real client with
 ``raise_on_error=False``, and core's ``fixture_from_response`` turns the exchange into a
@@ -73,7 +64,6 @@ import os
 import re
 import sys
 from collections.abc import Callable, Iterator, Sequence
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -99,24 +89,6 @@ KEY_LIKE = re.compile(r"api[_-]?key|token|secret|authorization|password", re.IGN
 _ENDPOINT = re.compile(r"[a-z][a-z0-9_]*(?:/[a-z][a-z0-9_]*)*(?:\.[a-z]+)?")
 _CASE = re.compile(r"[a-z0-9][a-z0-9_]*")
 
-# The modules cleared for recording from the demo organisation, by the first path
-# segment; every other one fails closed. Locations carry the company's address and VAT
-# number, history the audit trail, person, order and journal third parties and amounts.
-# The list is lifted once the demo organisation is confirmed synthetic.
-ALLOWED_MODULES = ("account", "currency", "fiscalperiod", "tax")
-# Refused even within an allowed module: bank accounts carry IBAN, BIC and QR-IBAN.
-REFUSED_PATHS = ("account/bank",)
-
-AMOUNT_KEY = re.compile(r"amount|balance|target(?:min|max)", re.IGNORECASE)
-"""A key whose non-zero value refuses a fixture: ``openingAmount``, ``targetMax``.
-
-Tuned for the allowed modules. Before journal or order is allowed, revisit it: ``debit``,
-``credit``, ``sum``, ``value``, ``price``, ``net``, ``gross``, and ``total`` outside the
-list envelope.
-"""
-_NOT_AN_AMOUNT = re.compile(r"total|rate|percentage\w*", re.IGNORECASE)
-_AN_ID = re.compile(r"^ids?$|Ids?$")
-
 SCRUBBED_EMAIL = "user@example.com"
 EMAIL = re.compile(r"[\w.%+-]+(?P<at>@|%40|&#0*64;?|&#[xX]0*40;?|&commat;)[\w.-]+\.[^\W\d_]{2,}")
 """An e-mail-shaped string: ``@`` plain, as ``%40`` (a query string) or as an HTML entity."""
@@ -141,11 +113,6 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--wrong-key", action="store_true", help=f"send {WRONG_KEY!r} instead of the key"
     )
-    parser.add_argument(
-        "--allow-amounts",
-        action="store_true",
-        help="record non-zero amounts; only for a synthetic demo organisation",
-    )
     args = parser.parse_args(argv)
     args.endpoint = args.endpoint.removeprefix("/").removeprefix("api/v1/")
     if not _ENDPOINT.fullmatch(args.endpoint):
@@ -164,11 +131,7 @@ def fixture_endpoint(endpoint: str) -> str:
 
 
 def refusal(method: str, endpoint: str) -> str | None:
-    """Why the request must not be sent at all, else ``None``.
-
-    Not GET, not a ``.json`` endpoint, a module not cleared for recording, or a refused
-    path within an allowed module.
-    """
+    """Why the request must not be sent at all, else ``None``: not GET, or not ``.json``."""
     if method.upper() != "GET":
         return (
             f"only GET is recorded, not {method.upper()}: recordings are read-only, and the "
@@ -179,18 +142,6 @@ def refusal(method: str, endpoint: str) -> str | None:
             f"only .json endpoints are recorded, not {endpoint}: one without the extension "
             "answers a bare number or a document, and an export is a file"
         )
-    segments = endpoint.removesuffix(".json").split("/")
-    if segments[0] not in ALLOWED_MODULES:
-        allowed = ", ".join(ALLOWED_MODULES[:-1]) + f" and {ALLOWED_MODULES[-1]}"
-        return (
-            f"{segments[0]}/ is not yet cleared for recording from the demo organisation; "
-            f"only {allowed} are (locations carry the company's address and VAT number, "
-            "history the audit trail, person, order and journal third parties and amounts) "
-            "until the demo organisation is confirmed synthetic"
-        )
-    for refused in REFUSED_PATHS:
-        if segments[: refused.count("/") + 1] == refused.split("/"):
-            return f"{refused}/ is refused: bank accounts carry IBAN, BIC and QR-IBAN"
     return None
 
 
@@ -230,60 +181,12 @@ def scrub_emails(fixture: Fixture) -> Fixture:
     return rewrite(fixture, lambda text: _EMAIL_IN_TEXT.sub(_placeholder, text))
 
 
-def _is_amount_key(name: str) -> bool:
-    if _NOT_AN_AMOUNT.fullmatch(name) or _AN_ID.search(name):
-        return False
-    return AMOUNT_KEY.search(name) is not None
-
-
-def _non_zero(value: object) -> bool:
-    """A number, or a numeric string, other than zero; booleans and ``null`` are not."""
-    if isinstance(value, bool) or value is None:
-        return False
-    if isinstance(value, int | float):
-        return value != 0
-    if isinstance(value, str):
-        try:
-            return Decimal(value.strip()) != 0
-        except InvalidOperation:
-            return False
-    return False
-
-
-def _scalars(value: Any) -> Iterator[Any]:
-    """``value`` itself, or the items of a list at any depth; objects are walked on their own."""
-    if isinstance(value, list):
-        for item in value:
-            yield from _scalars(item)
-    elif not isinstance(value, dict):
-        yield value
-
-
-def amounts(node: Any, where: str = "body") -> Iterator[str]:
-    """Where a decoded JSON body holds a non-zero amount: locations only, never values."""
-    if isinstance(node, dict):
-        for name, value in node.items():
-            here = f"{where}.{name}"
-            if _is_amount_key(str(name)) and any(_non_zero(item) for item in _scalars(value)):
-                yield here
-            yield from amounts(value, here)
-    elif isinstance(node, list):
-        for index, item in enumerate(node):
-            yield from amounts(item, f"{where}[{index}]")
-
-
 def _decoded(body: str) -> tuple[bool, Any]:
     """``(True, value)`` for a JSON body, ``(False, None)`` for any other."""
     try:
         return True, json.loads(body)
     except ValueError:
         return False, None
-
-
-def body_amounts(body: str) -> list[str]:
-    """``amounts`` in a JSON body; a body that is not JSON holds none."""
-    is_json, decoded = _decoded(body)
-    return list(amounts(decoded)) if is_json else []
 
 
 def to_json(fixture: Fixture) -> str:
@@ -378,15 +281,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(  # noqa: T201
             f"not recorded: the body of {args.endpoint} is not UTF-8 text; exports are out "
             "of scope for fixtures, and such a body can be neither scrubbed nor reviewed"
-        )
-        return 1
-    found = [] if args.allow_amounts else body_amounts(fixture.response.body)
-    if found:
-        more = f" and {len(found) - 3} more" if len(found) > 3 else ""
-        print(  # noqa: T201
-            f"not recorded: the body holds non-zero amounts under {', '.join(found[:3])}{more}; "
-            "narrow the case to records without amounts (--allow-amounts is only for a "
-            "synthetic demo organisation)"
         )
         return 1
 

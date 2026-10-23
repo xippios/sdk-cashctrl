@@ -36,12 +36,11 @@ All notable changes to this project are documented here. The format follows
   scrubs credentials, rewrites the demo host to `demo.cashctrl.com` and every e-mail
   address to `user@example.com` in memory, checks for the subdomain, the key and any
   other e-mail address before the one write, and refuses bodies that are not UTF-8 text
-  (exports). Until the demo organisation is confirmed synthetic it also refuses any
-  method but GET, any endpoint but `.json`, every module but account, currency,
-  fiscalperiod and tax (`account/bank/` is refused), and bodies with a non-zero amount
-  (`--allow-amounts` is for a synthetic demo organisation only); e-mail addresses
-  written as HTML entities (`&#64;`, `&#x40;`, `&commat;`) are scrubbed too. Fixtures
-  for an unknown id, a missing id and a wrong key.
+  (exports), any method but GET and any endpoint but `.json`; e-mail addresses written
+  as HTML entities (`&#64;`, `&#x40;`, `&commat;`) are scrubbed too. The demo
+  organisation is synthetic (`scripts/seed_demo.py`, `docs/demo-org.md`), so any module
+  and any amount may be recorded. Fixtures for an unknown id, a missing id and a wrong
+  key.
 - Ledger basics, five read-only tasks, each an MCP tool `cashctrl_<task>` and an HTTP
   route `/cashctrl/<task>`, all taking `org` first:
   - `list_fiscal_periods` (`fiscalperiod/list.json`), `list_currencies`

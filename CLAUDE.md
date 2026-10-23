@@ -48,12 +48,12 @@ organisation. `_client.py` is therefore a registry, not one client:
 and nothing else, ever. The recorder takes no organisation; every live test takes the
 `demo_org` fixture, which fails unless `demo` is the only declared organisation;
 `tests/conftest.py` removes every `CASHCTRL_*` variable but the demo pair when pytest
-imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every test. Until the
-demo organisation is confirmed synthetic, the recorder scrubs e-mail addresses to
-`user@example.com` and refuses any method but GET, any endpoint but `.json`, every
-module but account, currency, fiscalperiod and tax (`account/bank/` is refused), and
-bodies with non-zero amounts (`--allow-amounts` is for a synthetic demo organisation
-only). The demo subdomain is treated like a key: never in a file, a commit, a log line
+imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every test. The demo
+organisation is synthetic: invented books seeded by `scripts/seed_demo.py` and described
+in `docs/demo-org.md` (both on the seed branch, merging separately), never a copy of real
+books. So the recorder records any module and any amount; it still scrubs e-mail
+addresses to `user@example.com` and refuses any method but GET and any endpoint but
+`.json`. The demo subdomain is treated like a key: never in a file, a commit, a log line
 or a report. The repository is public.
 
 ## Read first, in this order
