@@ -20,18 +20,22 @@ once and writes:
 
 - ``<entry>.md``: one Markdown file per top-level entry of the table of contents, named
   after the entry (``error-handling.md``, ``common.md``), holding the page's sections for
-  that entry under a two-line provenance header (URL with fragment, fetch date);
-- ``FETCHED.md``: regenerated entirely, with one row per file.
+  that entry under a one-line provenance header (the URL with its fragment);
+- ``FETCHED.md``: regenerated entirely, with the page's fingerprint, the attribution and
+  one row per file with the fetch date.
 
 Every table on the page is a two-column parameter table (a ``<th>`` name, a ``<td>`` with
 labels and description). It becomes a pipe table, or an HTML table where it nests another
-table. The script stops on any other table shape, on an unknown icon and on any other
-change to the page's structure, so that a new construct is looked at before it is
-converted. Files a previous snapshot had and this one does not are removed. The same
-upstream on the same day gives the same bytes on disk. No key is needed or read. Run from
-the repository root::
+table. The script stops on any other table shape, on a tag in a table cell outside
+``CELL_TAGS``, on an unknown icon and on any other change to the page's structure, so that
+a new construct is looked at before it is converted; it also stops unless every section
+shows the same words, in the same order, on the page and in the Markdown. Files a previous
+snapshot had and this one does not are removed. The same page gives the same snapshot
+files on any day; only ``FETCHED.md`` carries the date. No key is needed or read. Run from
+the repository root, or give a saved copy of the page to work offline::
 
     uv run scripts/refresh_upstream.py
+    uv run scripts/refresh_upstream.py --from-file index.html
 """
 
 import argparse
@@ -43,6 +47,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -68,6 +73,14 @@ ICONS = {
 }
 """Font Awesome icons the page uses as text, by class; the arrows separate menu items."""
 
+DROPPED = ".breadcrumbs, code.name.mobile, script, style, noscript"
+"""What the snapshot leaves out: breadcrumbs, names repeated for small screens, scripts."""
+
+CELL_TAGS = frozenset(("p", "code", "a", "br"))
+"""The tags a parameter table's cell may hold besides text; any other stops the script."""
+NESTED_TABLE_TAGS = frozenset(("table", "tr", "th", "td"))
+"""The tags a cell may hold in addition where it nests a table (an HTML table's cell)."""
+
 # fmt: off
 _HTML_ELEMENTS = frozenset((
     "a", "abbr", "address", "area", "article", "aside", "audio", "b", "base", "bdi", "bdo",
@@ -88,13 +101,21 @@ _HTML_ELEMENTS = frozenset((
 _STRAY_TAG = re.compile(r"</?([A-Za-z][A-Za-z0-9]*)(?=[\s/>])[^<>]*>")
 _TAG_OPEN = re.compile(r"<(?=[A-Za-z/!?])")
 _PLACEHOLDER = re.compile(r"XIPPIOSBLOCK(\d+)X")
+_WORD = re.compile(r"\w+")
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+_LINK_TARGET = re.compile(r"\]\([^()\s]*\)")
+_MARKUP_TAG = re.compile(r"(?<!\\)</?[A-Za-z][A-Za-z0-9]*(?=[\s/>])[^<>]*>")
+_COPYRIGHT = re.compile(r"\N{COPYRIGHT SIGN} (\d{4}) CashCtrl Ltd\.+")
 
 
 @dataclass(frozen=True)
 class Response:
-    """The page as served: status, body (decompressed) and the validators sent with it."""
+    """The page: status, body (decompressed) and the validators sent with it.
 
-    status: int
+    ``status`` is None for a page read from a local file, which has no validators either.
+    """
+
+    status: int | None
     body: bytes
     etag: str | None
     last_modified: str | None
@@ -130,6 +151,10 @@ class _Row:
 
 class _RetryableError(Exception):
     """A network error or a 5xx: worth one more attempt."""
+
+
+class _CellError(Exception):
+    """A tag a parameter table's cell may not hold; ``convert_section`` names the operation."""
 
 
 def _log(message: str) -> None:
@@ -177,6 +202,23 @@ def fetch(url: str) -> Response:
         raise SystemExit(f"GET {url}: {error} (after one retry)") from None
 
 
+def read_file(path: Path) -> Response:
+    """The page from a saved copy (``--from-file``): its bytes as they are, no validators."""
+    try:
+        return Response(None, path.read_bytes(), None, None)
+    except OSError as error:
+        raise SystemExit(f"--from-file {path}: {error}") from None
+
+
+def _origin(response: Response) -> str:
+    """Where the page came from: the HTTP status and validators, or a local file."""
+    if response.status is None:
+        return "read from a local file: ETag not available, Last-Modified not available"
+    etag = f"`{response.etag}`" if response.etag else "not sent"
+    modified = response.last_modified or "not sent"
+    return f"HTTP {response.status}, ETag {etag}, Last-Modified {modified}"
+
+
 def _page_changed(what: str) -> SystemExit:
     return SystemExit(
         f"The documentation page changed: {what}.\n"
@@ -207,6 +249,12 @@ def _classes(tag: Tag) -> list[str]:
 
 def _text(node: PageElement) -> str:
     return re.sub(r"\s+", " ", node.get_text()).strip()
+
+
+def _anchor(section: Tag) -> str:
+    """A page section's fragment, from its first anchor: ``#errors``, ``#/journal/list.json``."""
+    anchor = section.select_one("a[id]")
+    return f"#{anchor.get('id')}" if anchor else "a section without an anchor"
 
 
 def split_page(soup: BeautifulSoup) -> list[Part]:
@@ -262,6 +310,16 @@ def split_page(soup: BeautifulSoup) -> list[Part]:
     return parts
 
 
+def copyright_year(soup: BeautifulSoup) -> str:
+    """The year in the footer's copyright notice, which is the alt text of its logo."""
+    logo = soup.select_one("main.content > footer img[alt]")
+    notice = re.sub(r"\s+", " ", str(logo.get("alt"))).strip() if logo else ""
+    match = _COPYRIGHT.fullmatch(notice)
+    if match is None:
+        raise _page_changed(f"the footer's copyright notice is {notice!r}")
+    return match[1]
+
+
 class _Converter(MarkdownConverter):
     """markdownify with ATX headings, backslash line breaks and one line per paragraph.
 
@@ -289,7 +347,7 @@ class _Converter(MarkdownConverter):
 
 def clean(section: Tag) -> None:
     """Drop navigation and duplicates, turn icons into text, make links absolute."""
-    for element in section.select(".breadcrumbs, code.name.mobile, script, style, noscript"):
+    for element in section.select(DROPPED):
         element.decompose()
     for comment in section.find_all(string=lambda value: isinstance(value, Comment)):
         comment.extract()
@@ -362,8 +420,19 @@ def _rows(table: Tag) -> list[_Row]:
     return rows
 
 
+def _check_cell(element: Tag, allowed: frozenset[str]) -> None:
+    """Stop on a tag outside ``allowed``; a nested table's cells are checked when rendered."""
+    for child in element.children:
+        if isinstance(child, Tag):
+            if child.name not in allowed:
+                raise _CellError(child.name)
+            if child.name not in ("th", "td"):
+                _check_cell(child, allowed)
+
+
 def _md_cell(cell: Tag) -> str:
     """A cell as one line of Markdown for a pipe table; paragraphs joined by ``<br>``."""
+    _check_cell(cell, CELL_TAGS)
     markdown = _Converter().convert_soup(BeautifulSoup(cell.decode_contents(), "html.parser"))
     markdown = markdown.replace("\\\n", "<br>")
     paragraphs = (re.sub(r"\s*\n\s*", " ", p).strip() for p in re.split(r"\n\s*\n", markdown))
@@ -385,36 +454,35 @@ def _pipe_table(rows: list[_Row]) -> str:
 
 
 def _html_inline(node: PageElement) -> str:
-    """Inline HTML reduced to code, links, line breaks and emphasis; other tags unwrapped."""
+    """Inline HTML reduced to code, links and line breaks; a paragraph gives its content."""
     if isinstance(node, NavigableString):
         if isinstance(node, Comment):
             return ""
         return html.escape(re.sub(r"\s+", " ", str(node)), quote=False)
     if not isinstance(node, Tag):
         return ""
-    inner = "".join(_html_inline(child) for child in node.children)
     href = node.get("href")
     match node.name:
         case "code":
             return f"<code>{html.escape(_text(node), quote=False)}</code>"
         case "a" if isinstance(href, str):
+            inner = "".join(_html_inline(child) for child in node.children)
             return f'<a href="{html.escape(href)}">{inner.strip()}</a>'
         case "br":
             return "<br>"
-        case "strong" | "b":
-            return f"<strong>{inner.strip()}</strong>"
-        case "em" | "i":
-            return f"<em>{inner.strip()}</em>"
+        case "p":
+            return "".join(_html_inline(child) for child in node.children)
         case _:
-            return inner
+            raise _CellError(node.name)  # such as a table inside a paragraph
 
 
 def _html_cell(tag: str, cell: Tag) -> str:
     """A cell for an HTML table: paragraphs joined by ``<br>``, nested tables on own lines."""
+    _check_cell(cell, CELL_TAGS | NESTED_TABLE_TAGS)
     pieces: list[tuple[str, str]] = []
     run = ""
     for child in [*cell.children, None]:
-        if child is None or (isinstance(child, Tag) and child.name in ("p", "div", "table")):
+        if child is None or (isinstance(child, Tag) and child.name in ("p", "table")):
             if run.strip():
                 pieces.append(("text", run.strip()))
             run = ""
@@ -472,6 +540,10 @@ def convert_section(soup: BeautifulSoup, section: Tag) -> str:
     Tables, endpoints and examples are rendered on their own and put back in place of a
     placeholder after markdownify has converted the rest.
     """
+    operations = {  # before clean() drops the anchors
+        id(table): _anchor(table.find_parent("section") or section)
+        for table in section.select("table")
+    }
     clean(section)
     blocks: list[str] = []
     held: set[int] = set()
@@ -480,7 +552,13 @@ def convert_section(soup: BeautifulSoup, section: Tag) -> str:
             continue  # inside a block already rendered, such as a nested table
         placeholder = soup.new_tag("p")
         placeholder.string = f"XIPPIOSBLOCK{len(blocks)}X"
-        blocks.append(render_block(element))
+        try:
+            blocks.append(render_block(element))
+        except _CellError as error:
+            raise _page_changed(
+                f"a <{error}> in a table cell of {operations.get(id(element))}; cells hold only "
+                "text, <p>, <code>, <a> and <br>, and a table nested in a cell"
+            ) from None
         held.add(id(element))
         element.replace_with(placeholder)
 
@@ -493,10 +571,68 @@ def convert_section(soup: BeautifulSoup, section: Tag) -> str:
     return _PLACEHOLDER.sub(lambda match: blocks[int(match[1])], markdown)
 
 
-def render_part(soup: BeautifulSoup, part: Part, day: str) -> str:
-    """One snapshot file: the provenance header, then the entry's sections."""
-    body = "\n\n".join(convert_section(soup, section) for section in part.sections)
-    return f"Source: <{part.url}>\\\nFetched: {day} (UTC)\n\n{body}\n"
+def render_part(part: Part, sections: list[str]) -> str:
+    """One snapshot file: the provenance header, then the entry's converted sections."""
+    body = "\n\n".join(sections)
+    return f"Source: <{part.url}>\n\n{body}\n"
+
+
+def page_words(section: Tag) -> list[str]:
+    """The words a reader sees in a page section, in order, without what ``clean`` drops.
+
+    Every text node counts on its own, so two elements never run into one word.
+    """
+    dropped = {id(element) for element in section.select(DROPPED)}
+
+    def visible(element: Tag) -> Iterator[str]:
+        for child in element.children:
+            if isinstance(child, Tag):
+                if id(child) not in dropped:
+                    yield from visible(child)
+            elif isinstance(child, NavigableString) and not isinstance(child, Comment):
+                yield str(child)
+
+    return _WORD.findall(" ".join(visible(section)))
+
+
+def markdown_words(markdown: str) -> list[str]:
+    """The words a reader sees in converted Markdown, in order.
+
+    Code blocks and code spans count verbatim. Elsewhere link targets and HTML tags are
+    markup and character references are decoded, as a Markdown renderer shows them.
+    """
+    words: list[str] = []
+    fence = ""
+    for line in markdown.split("\n"):
+        if fence:
+            if line == fence:
+                fence = ""
+            else:
+                words += _WORD.findall(line)
+        elif re.fullmatch(r"`{3,}", line):
+            fence = line
+        else:
+            for index, piece in enumerate(_CODE_SPAN.split(line)):  # text, `, code, text, ...
+                if index % 3 == 0:
+                    text = _MARKUP_TAG.sub(" ", _LINK_TARGET.sub("]", piece))
+                    words += _WORD.findall(html.unescape(text))
+                elif index % 3 == 2:
+                    words += _WORD.findall(piece)
+    return words
+
+
+def check_words(where: str, page: list[str], markdown: list[str]) -> None:
+    """Stop unless the page and the Markdown show the same words in the same order."""
+    if page == markdown:
+        return
+    pairs = zip(page, markdown, strict=False)
+    at = next((i for i, (a, b) in enumerate(pairs) if a != b), min(len(page), len(markdown)))
+    raise SystemExit(
+        f"Conversion changed the words of {where}: {len(page)} on the page, {len(markdown)} "
+        f"in the Markdown; they differ from word {at + 1}, after "
+        f"{' '.join(page[max(0, at - 5) : at])!r}: page {' '.join(page[at : at + 8])!r}, "
+        f"Markdown {' '.join(markdown[at : at + 8])!r}. Nothing was written."
+    )
 
 
 def _headings(markdown: str) -> int:
@@ -509,9 +645,10 @@ def _headings(markdown: str) -> int:
     return count
 
 
-def render_fetched(parts: list[Part], response: Response, day: str) -> str:
-    """The whole of ``FETCHED.md``."""
+def render_fetched(parts: list[Part], response: Response, day: str, year: str) -> str:
+    """The whole of ``FETCHED.md``; ``year`` is the year of the footer's copyright notice."""
     digest = hashlib.sha256(response.body).hexdigest()
+    notice = f"\N{COPYRIGHT SIGN} {year} CashCtrl Ltd."
     lines = [
         "# Upstream documentation snapshot \N{EM DASH} CashCtrl",
         "",
@@ -527,9 +664,10 @@ def render_fetched(parts: list[Part], response: Response, day: str) -> str:
         "its sections by fragment (`#intro`, `#/account`). The script fetches the page once",
         "and writes one Markdown file per top-level entry of the table of contents, named",
         "after the entry: the five general sections, then one file per module holding all of",
-        "the module's controllers. Each file starts with the URL of its entry and the fetch",
-        "date. Headings keep the page's levels: `##` controller, `###` operation, `####`",
-        "Parameters, Endpoint or Example; each paragraph is one line.",
+        "the module's controllers. Each file starts with one line, the URL of its entry; the",
+        "fetch date is recorded only in this file. Headings keep the page's levels: `##`",
+        "controller, `###` operation, `####` Parameters, Endpoint or Example; each paragraph is",
+        "one line.",
         "",
         "Navigation (table of contents, breadcrumbs, anchors), scripts, styles, the footer",
         "and the parameter names the page repeats for small screens are dropped; the arrow",
@@ -537,20 +675,28 @@ def render_fetched(parts: list[Part], response: Response, day: str) -> str:
         "table-of-contents highlighting) and `main.css` are not captured. Endpoints, curl",
         "examples and JSON responses become fenced code blocks, verbatim. Every table on the",
         "page is a two-column parameter table; it becomes a pipe table with an empty header",
-        "row and the columns name, labels (mandatory or optional, data type, limits) and",
+        "row and three columns: name, labels (mandatory or optional, data type, limits) and",
+        "description. A table for which the page gives no labels has two columns, name and",
         "description. A table that nests another (the fields of a JSON parameter) cannot be a",
         "pipe table and stays an HTML table with the same columns, reduced to code, links and",
         "line breaks. Links into the page are absolute.",
         "",
         f"Regenerate: `{COMMAND}`",
         "",
+        "## Attribution and vendor examples",
+        "",
+        f"The documentation is {notice}, as the page's footer states. Its text is",
+        "reproduced here verbatim, converted to Markdown, as the reference for this package",
+        "(ADR-0003). The page's examples contain the vendor's placeholder API key and example",
+        "pre-authenticated object-storage URLs; they are reproduced verbatim from the public",
+        "page and are not credentials of this project.",
+        "",
         "## Files",
         "",
-        "The page as fetched:",
+        "The page the snapshot was made from:",
         "",
-        f"- HTTP {response.status}, {len(response.body)} bytes, sha256 `{digest}`",
-        f"- ETag `{response.etag or 'not sent'}`",
-        f"- Last-Modified {response.last_modified or 'not sent'}",
+        f"- {len(response.body)} bytes, sha256 `{digest}`",
+        f"- {_origin(response)}",
         "",
         "Fetched is the UTC date of the run.",
         "",
@@ -576,23 +722,32 @@ def write_snapshot(out: Path, files: dict[str, str], fetched_md: str) -> None:
 
 
 def main() -> None:
-    """Fetch the page, split and convert it, then write the snapshot."""
+    """Fetch the page, split and convert it, check the words, then write the snapshot."""
     parser = argparse.ArgumentParser(description="Refresh docs/upstream/ from CashCtrl.")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="snapshot directory")
-    out: Path = parser.parse_args().out
+    parser.add_argument(
+        "--from-file",
+        type=Path,
+        metavar="PATH",
+        help="read the page from a saved copy instead of fetching it (no ETag is recorded)",
+    )
+    args = parser.parse_args()
+    out: Path = args.out
+    from_file: Path | None = args.from_file
     day = datetime.now(UTC).date().isoformat()
 
-    _log(f"Page: {PAGE_URL}")
-    response = fetch(PAGE_URL)
+    if from_file is None:
+        _log(f"Page: {PAGE_URL}")
+        response = fetch(PAGE_URL)
+    else:
+        _log(f"Page: {PAGE_URL}, read from {from_file}")
+        response = read_file(from_file)
     digest = hashlib.sha256(response.body).hexdigest()
-    _log(
-        f"  HTTP {response.status}, {len(response.body)} bytes, sha256 {digest}, "
-        f"ETag {response.etag or '-'}, Last-Modified {response.last_modified or '-'}"
-    )
+    _log(f"  {len(response.body)} bytes, sha256 {digest}, {_origin(response)}")
     try:
         source = response.body.decode("utf-8")
     except UnicodeDecodeError as error:
-        raise SystemExit(f"GET {PAGE_URL}: not UTF-8 ({error})") from None
+        raise SystemExit(f"{from_file or PAGE_URL}: not UTF-8 ({error})") from None
     if _PLACEHOLDER.search(source):
         raise _page_changed("the page contains the converter's placeholder text")
     source, stray = escape_stray_tags(source)
@@ -601,14 +756,26 @@ def main() -> None:
 
     soup = BeautifulSoup(source, "html.parser")
     parts = split_page(soup)
+    year = copyright_year(soup)
     expected = sum(len(s.select("h2, h3")) for part in parts for s in part.sections)
-    files = {part.file: render_part(soup, part, day) for part in parts}
+    files: dict[str, str] = {}
+    words = 0
+    for part in parts:
+        sections: list[str] = []
+        for section in part.sections:
+            where = f"{part.file}, section {_anchor(section)}"
+            seen = page_words(section)  # before convert_section changes the section
+            sections.append(convert_section(soup, section))
+            check_words(where, seen, markdown_words(sections[-1]))
+            words += len(seen)
+        files[part.file] = render_part(part, sections)
     converted = sum(_headings(text) for text in files.values())
     if converted != expected:
         raise SystemExit(f"{expected} h2/h3 headings on the page, {converted} converted")
     for part in parts:
         _log(f"  {part.file}: {part.label}, {len(part.sections)} sections, {part.url}")
-    write_snapshot(out, files, render_fetched(parts, response, day))
+    _log(f"  {words} words, the same on the page and in the Markdown, section by section")
+    write_snapshot(out, files, render_fetched(parts, response, day, year))
     _log(f"Wrote {len(files)} files and FETCHED.md under {out}")
 
 
