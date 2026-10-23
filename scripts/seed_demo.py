@@ -62,6 +62,8 @@ API_KEY_ENV = "CASHCTRL_DEMO_API_KEY"  # pragma: allowlist secret (a variable na
 USER_AGENT = "xippios-cashctrl-seed"
 PACE_SECONDS = 1.0
 """The least time between the starts of two requests: at most one request per second."""
+FORM_CONTENT_TYPE = "application/x-www-form-urlencoded; charset=UTF-8"
+"""The content type of every form-encoded write, the charset declared explicitly."""
 TIMEOUT_SECONDS = 30.0
 DEMO_MARK = "demo"
 """What the organisation's name must contain, in any case."""
@@ -632,10 +634,16 @@ class Observed:
     answer_keys: dict[str, set[str]] = field(default_factory=dict)
     insert_id_types: dict[str, set[str]] = field(default_factory=dict)
     refusals: list[str] = field(default_factory=list)
+    encoding: str = FORM_CONTENT_TYPE
+    utf8: str = "not checked: no person was created"
 
     def lines(self) -> list[str]:
         """The section "Observed write semantics", one line per finding."""
-        out = ["Observed write semantics"]
+        out = [
+            "Observed write semantics",
+            f"  writes sent as: {self.encoding}",
+            f"  UTF-8 round trip: {self.utf8}",
+        ]
         for (method, path, status), count in sorted(self.statuses.items()):
             out.append(f"  {method} {path}: HTTP {status} x{count}")
         for path in sorted(self.answer_keys):
@@ -672,11 +680,16 @@ class Session:
         path: str,
         what: str,
         params: Mapping[str, str] | None = None,
-        data: Mapping[str, str] | None = None,
+        form: Mapping[str, str] | None = None,
     ) -> httpx.Response:
         self.pacer.wait()
         try:
-            response = self.client.request(method, path, params=params, data=data)
+            if form is None:
+                response = self.client.request(method, path, params=params)
+            else:
+                response = self.client.request(
+                    method, path, data=form, headers={"Content-Type": FORM_CONTENT_TYPE}
+                )
         except httpx.HTTPError as error:
             reason = self.scrub(f"{type(error).__name__}: {error}")
             raise Failed(f"{what}: {method} {path} sent no answer ({reason})") from None
@@ -727,9 +740,9 @@ class Session:
             )
         return body
 
-    def create(self, path: str, data: Mapping[str, str], what: str) -> dict[str, Any]:
-        """POST the form ``data`` to ``path``; HTTP 200 with ``success: true`` or ``Failed``."""
-        response = self._send("POST", path, what, data=data)
+    def create(self, path: str, form: Mapping[str, str], what: str) -> dict[str, Any]:
+        """POST ``form`` to ``path``; HTTP 200 with ``success: true`` or ``Failed``."""
+        response = self._send("POST", path, what, form=form)
         body = _json_or_none(response)
         if (
             response.status_code != 200
@@ -1147,8 +1160,60 @@ def _insert_id(body: Mapping[str, Any], what: str) -> int:
     return int(value)
 
 
+def _record(body: Any) -> Any:
+    """The record of a read answer: ``data`` when it is an object, else the answer itself."""
+    if isinstance(body, dict) and isinstance(body.get("data"), dict):
+        return body["data"]
+    return body
+
+
+def check_round_trip(session: Session, person: Person, person_id: int, what: str) -> None:
+    """Read the first person back; stop unless ``company`` is what was sent, byte for byte.
+
+    Its company name carries an umlaut, so a backend that decoded the form in another
+    charset than the declared UTF-8 shows here, after one record and before any other.
+    """
+    path = "person/read.json"
+    body = session.read(path, f"{what}, UTF-8 check", {"id": str(person_id)})
+    record = _record(body)
+    company = record.get("company") if isinstance(record, dict) else None
+    if not isinstance(company, str):
+        session.observed.utf8 = f"not checked: {path} answered no company"
+        raise Failed(
+            f"{what}: {path} answered no company, so the UTF-8 round trip cannot be "
+            "checked; nothing further is written"
+        )
+    if company.encode("utf-8") != person.company.encode("utf-8"):
+        shown = session.scrub(company)
+        session.observed.utf8 = f"garbled: sent {person.company!a}, {path} answered {shown!a}"
+        raise Failed(
+            f"{what}: the backend garbled UTF-8: sent {person.company!r}, {path} answers "
+            f"{shown!r} (code points: sent {person.company!a}, answered {shown!a}); "
+            "nothing further is written (docs/demo-org.md, Seeding)"
+        )
+    session.observed.utf8 = f"{path} answers company {person.company!r} byte for byte"
+    say(f"{what}: read back byte for byte, the umlaut arrived as UTF-8")
+
+
 def seed(session: Session, context: Context, created: Counter[str]) -> int:
-    """Create everything in dependency order; returns the 2025 fiscal period's id."""
+    """Create everything in dependency order; returns the 2025 fiscal period's id.
+
+    The persons come first: ``person/create.json`` has a mandatory field, so a body
+    upstream cannot read is refused instead of saved with defaults (every parameter of
+    ``fiscalperiod/create.json`` is optional), and the first person is read back
+    (``check_round_trip``) before anything else is written.
+    """
+    persons: dict[str, int] = {}
+    for number, person in enumerate(PERSONS, start=1):
+        what = f"person {number}/{len(PERSONS)} {person.company}"
+        category = context.person_categories.get(person.role)
+        body = session.create("person/create.json", person_form(person, category), what)
+        persons[person.key] = _insert_id(body, what)
+        created["persons"] += 1
+        say(f"{what}: insertId {persons[person.key]}")
+        if number == 1:
+            check_round_trip(session, person, persons[person.key], what)
+
     for currency in context.missing_currencies:
         what = f"currency {currency.code}"
         body = session.create("currency/create.json", currency_form(currency), what)
@@ -1165,15 +1230,6 @@ def seed(session: Session, context: Context, created: Counter[str]) -> int:
         if not covering:
             raise Failed(f"{what}: created, but no fiscal period covers {SPAN_2025[0]} now")
         period_2025 = covering[0].id
-
-    persons: dict[str, int] = {}
-    for number, person in enumerate(PERSONS, start=1):
-        what = f"person {number}/{len(PERSONS)} {person.company}"
-        category = context.person_categories.get(person.role)
-        body = session.create("person/create.json", person_form(person, category), what)
-        persons[person.key] = _insert_id(body, what)
-        created["persons"] += 1
-        say(f"{what}: insertId {persons[person.key]}")
 
     entries = all_entries()
     for number, entry in enumerate(entries, start=1):
@@ -1213,7 +1269,7 @@ def report_totals(session: Session, context: Context, period_2025: int) -> None:
 
 def report_created(created: Counter[str]) -> None:
     """The count of records created per resource."""
-    resources = ("currencies", "fiscal periods", "persons", "journal entries", "orders")
+    resources = ("persons", "currencies", "fiscal periods", "journal entries", "orders")
     say("Created: " + ", ".join(f"{resource} {created[resource]}" for resource in resources))
 
 
@@ -1230,15 +1286,16 @@ def plan_lines() -> list[str]:
         f"Plan: synthetic books of {COMPANY} (fictional), Zürich, CHF, for a fresh CashCtrl "
         "demo organisation",
         "",
+        f"  persons           {len(PERSONS):>3}  {customers} customers, "
+        f"{len(PERSONS) - customers} vendors; the first, {PERSONS[0].company}, is read back "
+        "to check UTF-8 before any other write",
         f"  currencies        {len(CURRENCIES):>3}  {rates}; only those missing are created",
         "  fiscal periods      1  2025 (type EARLIEST); only if no period covers 2025",
-        f"  persons           {len(PERSONS):>3}  {customers} customers, "
-        f"{len(PERSONS) - customers} vendors",
         f"  journal entries   {len(all_entries()):>3}  {len(ENTRIES_2025)} in 2025, "
         f"{len(ENTRIES_2026)} in 2026, {collective} of them collective",
         f"  orders            {len(ORDERS):>3}  {sales} SALES invoices, "
         f"{len(ORDERS) - sales} PURCHASE orders",
-        f"  writes, at most   {max_writes():>3}",
+        f"  writes, at most   {max_writes():>3}  in this order, form-encoded, {FORM_CONTENT_TYPE}",
         "",
         f"Account numbers: {' '.join(account_numbers())}",
         f"Tax codes: {TAX_CODES['sales']} on sales, {TAX_CODES['purchase']} on purchases",

@@ -90,6 +90,8 @@ class FakeCashCtrl:
         self.requests: list[httpx.Request] = []
         self.insert_ids: dict[str, list[int]] = defaultdict(list)
         self.next_id = 500
+        self.persons: dict[int, dict[str, Any]] = {}
+        self.read_without_company = False
 
     @staticmethod
     def _period(id_: int, year: int) -> dict[str, Any]:
@@ -106,7 +108,15 @@ class FakeCashCtrl:
         path = request.url.path.removeprefix("/api/v1/")
         if request.method == "GET":
             return self.get(path, request.url.params)
-        return self.post(path, {k: v[0] for k, v in parse_qs(request.content.decode()).items()})
+        return self.post(path, self.decode(request))
+
+    @staticmethod
+    def decode(request: httpx.Request) -> dict[str, str]:
+        """The form as a servlet reads it: in the declared charset, else ISO-8859-1."""
+        kind = request.headers.get("content-type", "")
+        charset = "utf-8" if "charset=utf-8" in kind.replace(" ", "").lower() else "iso-8859-1"
+        pairs = parse_qs(request.content.decode("ascii"), encoding=charset)
+        return {key: values[0] for key, values in pairs.items()}
 
     def get(self, path: str, params: httpx.QueryParams) -> httpx.Response:
         if path == "location/list.json":
@@ -115,6 +125,11 @@ class FakeCashCtrl:
             return _list(self.periods)
         if path == "person/list.json":
             return _total(self.existing["person"] + self.created["person/create.json"])
+        if path == "person/read.json":
+            record = dict(self.persons[int(params["id"])])
+            if self.read_without_company:
+                del record["company"]
+            return httpx.Response(200, json={"success": True, "data": record})
         if path == "journal/list.json":
             period = int(params["fiscalPeriodId"])
             return _total(self.existing["journal"] * (period == 1) + self.journal_in[period])
@@ -154,6 +169,8 @@ class FakeCashCtrl:
             self.orders_of["SALES" if form["categoryId"] in sales else "PURCHASE"] += 1
         self.next_id += 1
         self.insert_ids[path].append(self.next_id)
+        if path == "person/create.json":
+            self.persons[self.next_id] = {"id": self.next_id, "company": form["company"]}
         return httpx.Response(
             200, json={"success": True, "message": "Saved", "insertId": self.next_id}
         )
@@ -193,7 +210,7 @@ def run(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
 
 
 def form_of(request: httpx.Request) -> dict[str, str]:
-    assert request.headers["content-type"] == "application/x-www-form-urlencoded"
+    assert request.headers["content-type"] == "application/x-www-form-urlencoded; charset=UTF-8"
     return {key: values[0] for key, values in parse_qs(request.content.decode()).items()}
 
 
@@ -438,9 +455,9 @@ def test_a_full_run_creates_everything_in_dependency_order(
     assert (status, err) == (0, "")
     writes = [r.url.path.removeprefix("/api/v1/") for r in fake.posts()]
     assert writes == (
-        ["currency/create.json"]
+        ["person/create.json"] * 10
+        + ["currency/create.json"]
         + ["fiscalperiod/create.json"]
-        + ["person/create.json"] * 10
         + ["journal/create.json"] * 48
         + ["order/create.json"] * 6
     )
@@ -453,7 +470,7 @@ def test_a_full_run_creates_everything_in_dependency_order(
     }
     assert form_of(fake.posts("fiscalperiod/create.json")[0]) == {"type": "EARLIEST"}
     assert (
-        "Created: currencies 1, fiscal periods 1, persons 10, journal entries 48, orders 6" in out
+        "Created: persons 10, currencies 1, fiscal periods 1, journal entries 48, orders 6" in out
     )
     for line in [
         "person/list.json: total 10",
@@ -471,6 +488,56 @@ def test_a_full_run_creates_everything_in_dependency_order(
     assert "refusals: none" in out
     assert "Saved" not in out
     assert len(fake.posts()) <= 120
+
+
+def test_the_first_write_is_the_umlaut_person_read_back_byte_for_byte(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
+) -> None:
+    status, out, _ = run(capsys, "--apply", "--yes")
+    assert status == 0
+    first = fake.posts()[0]
+    assert first.url.path == "/api/v1/person/create.json"
+    assert form_of(first)["company"] == "Muster Büro AG"
+    assert "Muster B%C3%BCro AG".replace(" ", "+") in first.content.decode("ascii")
+    check = fake.requests[fake.requests.index(first) + 1]
+    assert (check.method, check.url.path) == ("GET", "/api/v1/person/read.json")
+    assert check.url.params["id"] == str(fake.insert_ids["person/create.json"][0])
+    assert all(r.headers["content-type"].endswith("; charset=UTF-8") for r in fake.posts())
+    assert "person 1/10 Muster Büro AG: read back byte for byte" in out
+    assert "UTF-8 round trip: person/read.json answers company 'Muster Büro AG' byte for" in out
+
+
+def test_a_garbled_umlaut_stops_before_any_further_write(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Without the declared charset the fake decodes as a servlet does, in ISO-8859-1.
+    monkeypatch.setattr(seeder, "FORM_CONTENT_TYPE", "application/x-www-form-urlencoded")
+    status, out, err = run(capsys, "--apply", "--yes")
+    assert status == 1
+    assert len(fake.posts()) == 1
+    last = fake.requests[-1]
+    assert (last.method, last.url.path) == ("GET", "/api/v1/person/read.json")
+    assert (
+        "stopped at person 1/10 Muster Büro AG: the backend garbled UTF-8: sent 'Muster Büro AG', "
+        "person/read.json answers 'Muster BÃ¼ro AG'"
+    ) in err
+    assert "no further request was sent" in err
+    assert "Created: persons 1, currencies 0, fiscal periods 0, journal entries 0" in out
+    assert "UTF-8 round trip: garbled: sent 'Muster B\\xfcro AG'" in out
+    assert "answered 'Muster B\\xc3\\xbcro AG'" in out
+
+
+def test_a_read_back_without_company_stops_before_any_further_write(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake.read_without_company = True
+    status, out, err = run(capsys, "--apply", "--yes")
+    assert status == 1
+    assert len(fake.posts()) == 1
+    assert fake.requests[-1].url.path == "/api/v1/person/read.json"
+    assert "answered no company, so the UTF-8 round trip cannot be checked" in err
+    assert "Created: persons 1," in out
+    assert "UTF-8 round trip: not checked: person/read.json answered no company" in out
 
 
 def test_an_existing_2025_period_is_used_not_created(
@@ -502,7 +569,7 @@ def test_persons_without_a_fitting_category_get_none(
             "person/create.json",
             3,
             "person 3/10 Fiktiv Immobilien AG",
-            "persons 2, journal entries 0",
+            "persons 2, currencies 0, fiscal periods 0, journal entries 0",
         ),
         ("journal/create.json", 5, "journal entry 5/48 2025-04-14", "journal entries 4, orders 0"),
         ("order/create.json", 2, "order 2/6 SALES RE-2026-102", "journal entries 48, orders 1"),
