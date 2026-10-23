@@ -106,6 +106,19 @@ class FakeCashCtrl:
         self.insert_ids: dict[str, list[int]] = defaultdict(list)
         self.next_id = 500
         self.persons: dict[int, dict[str, Any]] = {}
+        self.system_persons: list[dict[str, Any]] = [
+            {
+                "id": n,
+                "company": f"Muster Ausgleichskasse {n}",
+                "categoryId": 9,
+                "isInsurance": True,
+                "createdBy": "SYSTEM",
+            }
+            for n in (1, 2)
+        ]
+        """The two insurance persons CashCtrl creates in every new organisation."""
+        self.person_limit: int | None = None
+        """How many records ``person/list.json`` lists at most; ``total`` counts them all."""
         self.read_without_company = False
         self.unreadable_period_after_create = False
         self.odd_ids = False
@@ -151,7 +164,13 @@ class FakeCashCtrl:
         if path == "fiscalperiod/list.json":
             return _list(self.periods)
         if path == "person/list.json":
-            return _total(self.existing["person"] + self.created["person/create.json"])
+            people = self.system_persons + [
+                {"id": 300 + n, "company": f"Beispiel Kunde {n} AG", "createdBy": OWNER}
+                for n in range(self.existing["person"])
+            ]
+            people += [{**record, "createdBy": OWNER} for record in self.persons.values()]
+            listed = people[: self.person_limit] if self.person_limit is not None else people
+            return httpx.Response(200, json={"total": len(people), "data": listed})
         if path == "person/read.json":
             record = dict(self.persons[int(params["id"])])
             if self.read_without_company:
@@ -453,6 +472,97 @@ def test_a_missing_total_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
     assert "cannot confirm the organisation is empty" in err
 
 
+@pytest.mark.parametrize("system", [2, 0])
+def test_cashctrls_system_insurance_persons_pass_guard_3(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str], system: int
+) -> None:
+    """A new organisation lists two insurance persons CashCtrl created; they are tolerated."""
+    fake.system_persons = fake.system_persons[:system]
+    status, out, err = run(capsys, "--apply", "--yes")
+    assert (status, err) == (0, "")
+    assert (
+        f"guard 3: no journal entries or orders, and no persons but the {system} insurance "
+        "record(s) CashCtrl creates itself (createdBy SYSTEM)" in out
+    )
+    assert len(fake.posts("person/create.json")) == len(seeder.PERSONS)
+    assert f"person/list.json: total {system + len(seeder.PERSONS)}" in out
+
+
+def test_a_user_created_person_beside_the_system_insurances_is_refused(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake.existing["person"] = 1
+    status, out, err = run(capsys, "--apply", "--yes")
+    assert status == 1
+    assert fake.posts() == []
+    assert "the organisation is not empty (person/list.json total 3, 1 of them not one of" in err
+    assert "never deletes" in err
+    assert OWNER not in out + err
+    assert "Beispiel Kunde" not in out + err
+
+
+@pytest.mark.parametrize("insurance", [False, None, "true"])
+def test_a_system_created_person_that_is_not_an_insurance_is_refused(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str], insurance: object
+) -> None:
+    """SYSTEM alone is not enough: a copy with system-imported persons fails closed."""
+    if insurance is None:
+        del fake.system_persons[1]["isInsurance"]
+    else:
+        fake.system_persons[1]["isInsurance"] = insurance
+    status, _, err = run(capsys, "--apply", "--yes")
+    assert status == 1
+    assert fake.posts() == []
+    assert "the organisation is not empty (person/list.json total 2, 1 of them not one of" in err
+
+
+@pytest.mark.parametrize("creator", ["absent", None, "", "  "])
+def test_a_person_without_created_by_is_refused(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str], creator: str | None
+) -> None:
+    if creator == "absent":
+        del fake.system_persons[0]["createdBy"]
+    else:
+        fake.system_persons[0]["createdBy"] = creator
+    status, _, err = run(capsys, "--apply", "--yes")
+    assert status == 1
+    assert fake.posts() == []
+    assert (
+        "cannot confirm the organisation is empty: 1 record(s) in person/list.json "
+        "without createdBy" in err
+    )
+
+
+def test_persons_beyond_the_listed_ones_count_as_others(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``person/list.json`` lists 100 records unless asked; the unlisted ones refuse."""
+    fake.existing["person"] = 1
+    fake.person_limit = 2  # only the two system insurances are listed; total says 3
+    status, _, err = run(capsys, "--apply", "--yes")
+    assert status == 1
+    assert fake.posts() == []
+    assert "person/list.json total 3, 1 of them not one of" in err
+
+
+def test_a_person_total_below_the_records_listed_is_refused(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    upstream = FakeCashCtrl()
+    with respx.mock(assert_all_called=False) as router:
+        router.get(f"https://{SUB}.cashctrl.com/api/v1/person/list.json").mock(
+            return_value=httpx.Response(200, json={"total": 1, "data": upstream.system_persons})
+        )
+        router.route(host=f"{SUB}.cashctrl.com").mock(side_effect=upstream)
+        status, _, err = run(capsys, "--apply", "--yes")
+    assert status == 1
+    assert upstream.posts() == []
+    assert (
+        "cannot confirm the organisation is empty: person/list.json lists 2 records but "
+        "reports total 1" in err
+    )
+
+
 def test_missing_or_inactive_account_numbers_are_refused_by_number(
     fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -566,7 +676,7 @@ def test_a_full_run_creates_everything_in_dependency_order(
         "Created: persons 10, currencies 1, fiscal periods 1, journal entries 48, orders 6" in out
     )
     for line in [
-        "person/list.json: total 10",
+        "person/list.json: total 12",
         "journal/list.json 2025: total 12",
         "journal/list.json 2026: total 36",
         "order/list.json SALES 2026: total 4",

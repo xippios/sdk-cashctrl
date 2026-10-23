@@ -24,8 +24,12 @@ its ``insertId``. It never deletes anything.
 2. ``location/list.json`` answers and the company name (``orgName``) of the main
    location contains ``demo`` in any case. The documentation has no organisation read
    besides ``domain/current/logo``, so the main location stands for the organisation;
-3. the organisation is empty: ``person/list.json``, and ``journal/list.json`` and
-   ``order/list.json`` (SALES and PURCHASE) for every fiscal period, report ``total`` 0;
+3. the organisation is empty: ``journal/list.json`` and ``order/list.json`` (SALES and
+   PURCHASE) for every fiscal period report ``total`` 0, and ``person/list.json`` lists
+   no person but the insurance records CashCtrl creates in every new organisation
+   (``createdBy`` SYSTEM and ``isInsurance`` true); any other person refuses, a
+   SYSTEM-created one that is not an insurance included, and so does a person record
+   without ``createdBy`` or a ``total`` above the records listed;
 4. ``account/list.json`` has every account number the plan uses, none of them inactive;
 
 and unless the lookups the writes need resolve: a fiscal period covering the 2026 dates;
@@ -976,16 +980,50 @@ def read_periods(session: Session) -> list[Period]:
     return periods
 
 
-def check_empty(session: Session, periods: Sequence[Period]) -> None:
-    """Guard 3: no person; no journal entry, sales or purchase order in any fiscal period.
+SYSTEM = "SYSTEM"
+"""The ``createdBy`` of the records CashCtrl creates itself."""
 
-    The journal and order lists answer for the current fiscal period unless
-    ``fiscalPeriodId`` is given (``docs/upstream/meta.md``, Switch fiscal period).
+
+def is_system_insurance(record: Mapping[str, Any]) -> bool:
+    """Whether CashCtrl created the person itself as an insurance.
+
+    A new organisation lists two such persons in ``person/list.json``, ``createdBy``
+    SYSTEM and ``isInsurance`` true; guard 3 tolerates them and nothing else.
+    """
+    return record.get("createdBy") == SYSTEM and record.get("isInsurance") is True
+
+
+def _without_creator(record: Mapping[str, Any]) -> bool:
+    creator = record.get("createdBy")
+    return not isinstance(creator, str) or not creator.strip()
+
+
+def check_empty(session: Session, periods: Sequence[Period]) -> int:
+    """Guard 3: no person but CashCtrl's own insurances; no journal entry or order.
+
+    ``person/list.json`` (the whole list, ``onlyActive`` left at its default, false) may
+    list the persons CashCtrl creates in every new organisation, ``createdBy`` SYSTEM and
+    ``isInsurance`` true; every other person refuses, a SYSTEM-created one that is not an
+    insurance included, so a copy with imported data fails closed. Persons beyond the
+    records listed (``total`` above them) count as others. A person record without
+    ``createdBy`` refuses as unconfirmable. The journal and order lists answer for the
+    current fiscal period unless ``fiscalPeriodId`` is given (``docs/upstream/meta.md``,
+    Switch fiscal period). Returns the number of system insurance persons tolerated.
     """
     what = "guard 3, empty organisation"
-    totals: list[tuple[str, int | None]] = [
-        ("person/list.json", total_of(session.read("person/list.json", what)))
-    ]
+    path = "person/list.json"
+    body = session.read(path, what)
+    persons = records(body, path)
+    person_total = total_of(body)
+    system = sum(is_system_insurance(record) for record in persons)
+    others = None if person_total is None else person_total - system
+    unconfirmed: list[str] = []
+    without_creator = sum(_without_creator(record) for record in persons)
+    if without_creator:
+        unconfirmed.append(f"{without_creator} record(s) in {path} without createdBy")
+    if person_total is not None and person_total < len(persons):
+        unconfirmed.append(f"{path} lists {len(persons)} records but reports total {person_total}")
+    totals: list[tuple[str, int | None]] = []
     for period in periods:
         scope = {"fiscalPeriodId": str(period.id)}
         body = session.read("journal/list.json", what, scope)
@@ -994,17 +1032,26 @@ def check_empty(session: Session, periods: Sequence[Period]) -> None:
             body = session.read("order/list.json", what, {"type": order_type, **scope})
             label = f"order/list.json type {order_type} fiscal period {period.start.year}"
             totals.append((label, total_of(body)))
-    unknown = [name for name, total in totals if total is None]
-    found = [f"{name} total {total}" for name, total in totals if total]
+    unknown = ([path] if person_total is None else []) + [
+        name for name, total in totals if total is None
+    ]
     if unknown:
-        raise Refused(
-            f"cannot confirm the organisation is empty: no numeric total from {', '.join(unknown)}"
+        unconfirmed.insert(0, f"no numeric total from {', '.join(unknown)}")
+    if unconfirmed:
+        raise Refused(f"cannot confirm the organisation is empty: {'; '.join(unconfirmed)}")
+    found = [f"{name} total {total}" for name, total in totals if total]
+    if others:
+        found.insert(
+            0,
+            f"{path} total {person_total}, {others} of them not one of the insurance "
+            "persons CashCtrl creates itself (createdBy SYSTEM, isInsurance true)",
         )
     if found:
         raise Refused(
             f"the organisation is not empty ({'; '.join(found)}): seed only a fresh, empty "
             "organisation; this script never deletes anything"
         )
+    return system
 
 
 def resolve_accounts(session: Session, numbers: Sequence[str]) -> dict[str, int]:
@@ -1139,8 +1186,11 @@ def run_guards(session: Session) -> Context:
     check_organisation_name(session)
     say("guard 2: the organisation's name contains 'demo'")
     periods = read_periods(session)
-    check_empty(session, periods)
-    say("guard 3: no persons, journal entries or orders")
+    system = check_empty(session, periods)
+    say(
+        "guard 3: no journal entries or orders, and no persons but the "
+        f"{system} insurance record(s) CashCtrl creates itself (createdBy SYSTEM)"
+    )
     accounts = resolve_accounts(session, account_numbers())
     say(f"guard 4: the chart of accounts has {', '.join(accounts)}")
     period_2026, period_2025 = plan_periods(periods)
