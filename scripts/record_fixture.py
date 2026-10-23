@@ -1,0 +1,414 @@
+"""Record one exchange with the demo organisation into a fixture (``/record-fixture``).
+
+Run from the repository root with the demo pair (``CASHCTRL_DEMO_SUBDOMAIN``,
+``CASHCTRL_DEMO_API_KEY``) in the environment::
+
+    uv run scripts/record_fixture.py account/read.json unknown_id id=999999999
+    uv run scripts/record_fixture.py account/list.json wrong_key --wrong-key
+
+``<endpoint>`` is the upstream path after ``/api/v1/`` as ``docs/upstream/`` writes it;
+the fixture lands at ``tests/fixtures/<endpoint>/<case>.json`` with the endpoint's slashes
+as underscores and without its extension: ``tests/fixtures/account_read/unknown_id.json``.
+``key=value`` arguments are query parameters, named as upstream names them.
+
+The organisation is not a parameter. The recorder removes ``CASHCTRL_ORGS`` from its own
+environment and always records through ``client_for("demo")``, so it cannot reach a
+productive organisation. ``--wrong-key`` sends ``not-a-valid-key`` instead of the real key,
+through a throwaway client with the demo organisation's configuration, to record a 401
+without touching the real key.
+
+Whether the demo organisation's content suits a public repository is its owner's
+decision. Until it is confirmed synthetic, the recorder holds to these policies; every
+refusal writes nothing, says why, never shows a value, and exits with status 1:
+
+- GET only. Any other ``--method`` is refused before a request is sent; the recorder
+  for the write tools will add writes deliberately.
+- ``.json`` only. An endpoint without the extension answers a bare number or a document
+  (``account/balance``, ``account/costcenter/balance``, ``fiscalperiod/result``,
+  ``setting/get``) and an export (``.pdf``, ``.xlsx``, ``.csv``, ``.zip``) a file; both
+  are refused before a request is sent.
+- Allowed modules. Only paths under ``account/``, ``currency/``, ``fiscalperiod/`` and
+  ``tax/`` (``ALLOWED_MODULES``) are recorded, and ``account/bank/`` is refused even so
+  (IBAN, BIC, QR-IBAN). Every other module fails closed before a request is sent: it is
+  not yet cleared for recording from the demo organisation (locations carry the
+  company's address and VAT number, history the audit trail, person, order and journal
+  third parties and amounts).
+- No amounts. A JSON body holding a non-zero number (or numeric string) under a key that
+  matches ``amount``, ``balance``, ``targetMin`` or ``targetMax``, in any case and at any
+  depth, is refused, naming the key; upstream's ``total``, ``rate``, ``percentage*`` and
+  ids are not amounts. ``--allow-amounts`` lifts this policy, and only this one, for a
+  synthetic demo organisation; it is never passed otherwise. The key list is tuned for
+  the allowed modules: before journal or order is allowed it must be revisited
+  (``debit``, ``credit``, ``sum``, ``value``, ``price``, ``net``, ``gross``, and
+  ``total`` outside the list envelope).
+- No e-mail addresses. Every e-mail-shaped string in the request URL, the response
+  headers and the body becomes ``user@example.com``, with ``@`` written plainly, as
+  ``%40`` or as the HTML entities ``&#64;``, ``&#x40;`` and ``&commat;`` (``notes`` and
+  footers are HTML upstream); ``SYSTEM`` in ``createdBy`` is not an address and stays.
+
+Nothing unscrubbed touches disk. The request goes through the real client with
+``raise_on_error=False``, and core's ``fixture_from_response`` turns the exchange into a
+fixture in memory, credentials scrubbed. Then every occurrence of the demo host
+(``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``) in the request URL, the response headers and
+the body becomes ``demo.cashctrl.com``, the host offline tests replay against, and every
+e-mail address becomes ``user@example.com``. The fixture is checked last, before the one
+write: the real subdomain, the real key (plain or as a basic-auth token) or an e-mail
+address other than ``user@example.com`` anywhere in it means nothing is written and the
+exit status is 1; a key-like name whose value is not ``REDACTED`` is written for review,
+also with exit status 1. Only the status and the scrubbed URL are printed.
+
+A body that is not UTF-8 text, which core would keep as base64, is refused before
+anything is written, should a ``.json`` endpoint ever send one: such a body can be
+neither scrubbed nor reviewed.
+
+Host and e-mail scrubbing are local to this repository for now: they are the pattern
+that moves into core's recorder (``xippios.core.testing.record``) later, for every
+multi-tenant source.
+"""
+
+import argparse
+import base64
+import json
+import os
+import re
+import sys
+from collections.abc import Callable, Iterator, Sequence
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from typing import Any
+
+import httpx
+from xippios.core import AsyncClient, BasicKeyAuth, sync
+from xippios.core.testing import REDACTED, Fixture, fixture_path
+from xippios.core.testing.fixtures import fixture_from_response
+
+from xippios.cashctrl._client import (
+    DEMO,
+    ORGS_ENV,
+    SOURCE,
+    api_key_env,
+    client_for,
+    subdomain_env,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "tests" / "fixtures"
+REPLAY_HOST = "demo.cashctrl.com"
+WRONG_KEY = "not-a-valid-key"  # pragma: allowlist secret (a deliberately invalid key)
+KEY_LIKE = re.compile(r"api[_-]?key|token|secret|authorization|password", re.IGNORECASE)
+_ENDPOINT = re.compile(r"[a-z][a-z0-9_]*(?:/[a-z][a-z0-9_]*)*(?:\.[a-z]+)?")
+_CASE = re.compile(r"[a-z0-9][a-z0-9_]*")
+
+# The modules cleared for recording from the demo organisation, by the first path
+# segment; every other one fails closed. Locations carry the company's address and VAT
+# number, history the audit trail, person, order and journal third parties and amounts.
+# The list is lifted once the demo organisation is confirmed synthetic.
+ALLOWED_MODULES = ("account", "currency", "fiscalperiod", "tax")
+# Refused even within an allowed module: bank accounts carry IBAN, BIC and QR-IBAN.
+REFUSED_PATHS = ("account/bank",)
+
+AMOUNT_KEY = re.compile(r"amount|balance|target(?:min|max)", re.IGNORECASE)
+"""A key whose non-zero value refuses a fixture: ``openingAmount``, ``targetMax``.
+
+Tuned for the allowed modules. Before journal or order is allowed, revisit it: ``debit``,
+``credit``, ``sum``, ``value``, ``price``, ``net``, ``gross``, and ``total`` outside the
+list envelope.
+"""
+_NOT_AN_AMOUNT = re.compile(r"total|rate|percentage\w*", re.IGNORECASE)
+_AN_ID = re.compile(r"^ids?$|Ids?$")
+
+SCRUBBED_EMAIL = "user@example.com"
+EMAIL = re.compile(r"[\w.%+-]+(?P<at>@|%40|&#0*64;?|&#[xX]0*40;?|&commat;)[\w.-]+\.[^\W\d_]{2,}")
+"""An e-mail-shaped string: ``@`` plain, as ``%40`` (a query string) or as an HTML entity."""
+# The same, but never starting inside a JSON escape (\n, \u00e9): scrubbing the raw text
+# of a JSON body then keeps it JSON.
+_EMAIL_IN_TEXT = re.compile(r"(?:(?<=\\[nrtbf])|(?<![\w.%+\\-]))" + EMAIL.pattern)
+_SCRUBBED_EMAILS = frozenset({SCRUBBED_EMAIL, SCRUBBED_EMAIL.replace("@", "%40")})
+
+
+def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
+    """The command line: endpoint, case, query parameters and the options."""
+    parser = argparse.ArgumentParser(
+        prog="record_fixture.py",
+        description="Record one request to the demo organisation as a test fixture.",
+    )
+    parser.add_argument("endpoint", help="upstream path after /api/v1/, e.g. account/read.json")
+    parser.add_argument("case", help="fixture name, e.g. unknown_id")
+    parser.add_argument(
+        "params", nargs="*", metavar="key=value", help="query parameters, e.g. id=999999999"
+    )
+    parser.add_argument("--method", default="GET", help="HTTP method; only GET is recorded")
+    parser.add_argument(
+        "--wrong-key", action="store_true", help=f"send {WRONG_KEY!r} instead of the key"
+    )
+    parser.add_argument(
+        "--allow-amounts",
+        action="store_true",
+        help="record non-zero amounts; only for a synthetic demo organisation",
+    )
+    args = parser.parse_args(argv)
+    args.endpoint = args.endpoint.removeprefix("/").removeprefix("api/v1/")
+    if not _ENDPOINT.fullmatch(args.endpoint):
+        parser.error(f"endpoint {args.endpoint!r} is not an upstream path like account/read.json")
+    if not _CASE.fullmatch(args.case):
+        parser.error(f"case {args.case!r}: use lower-case letters, digits and underscores")
+    if any("=" not in item for item in args.params):
+        parser.error("query parameters are key=value")
+    args.params = {key: value for key, _, value in (item.partition("=") for item in args.params)}
+    return args
+
+
+def fixture_endpoint(endpoint: str) -> str:
+    """``account/read.json`` → ``account_read``: the fixture directory of an endpoint."""
+    return endpoint.rsplit(".", 1)[0].replace("/", "_")
+
+
+def refusal(method: str, endpoint: str) -> str | None:
+    """Why the request must not be sent at all, else ``None``.
+
+    Not GET, not a ``.json`` endpoint, a module not cleared for recording, or a refused
+    path within an allowed module.
+    """
+    if method.upper() != "GET":
+        return (
+            f"only GET is recorded, not {method.upper()}: recordings are read-only, and the "
+            "recorder for the write tools will add writes deliberately"
+        )
+    if not endpoint.endswith(".json"):
+        return (
+            f"only .json endpoints are recorded, not {endpoint}: one without the extension "
+            "answers a bare number or a document, and an export is a file"
+        )
+    segments = endpoint.removesuffix(".json").split("/")
+    if segments[0] not in ALLOWED_MODULES:
+        allowed = ", ".join(ALLOWED_MODULES[:-1]) + f" and {ALLOWED_MODULES[-1]}"
+        return (
+            f"{segments[0]}/ is not yet cleared for recording from the demo organisation; "
+            f"only {allowed} are (locations carry the company's address and VAT number, "
+            "history the audit trail, person, order and journal third parties and amounts) "
+            "until the demo organisation is confirmed synthetic"
+        )
+    for refused in REFUSED_PATHS:
+        if segments[: refused.count("/") + 1] == refused.split("/"):
+            return f"{refused}/ is refused: bank accounts carry IBAN, BIC and QR-IBAN"
+    return None
+
+
+async def exchange_async(
+    client: AsyncClient, method: str, path: str, params: dict[str, str]
+) -> httpx.Response:
+    """One request through the real client; an error status is returned, not raised."""
+    return await client.request(method, path, params=params, raise_on_error=False)
+
+
+exchange = sync(exchange_async)
+
+
+def rewrite(fixture: Fixture, sub: Callable[[str], str]) -> Fixture:
+    """``fixture`` with ``sub`` applied to the request URL, every header and the body."""
+    request = fixture.request.model_copy(update={"url": sub(fixture.request.url)})
+    response = fixture.response.model_copy(
+        update={
+            "headers": [(sub(name), sub(value)) for name, value in fixture.response.headers],
+            "body": sub(fixture.response.body),
+        }
+    )
+    return fixture.model_copy(update={"request": request, "response": response})
+
+
+def scrub_host(fixture: Fixture, host: re.Pattern[str]) -> Fixture:
+    """``fixture`` with every match of ``host`` in URL, headers and body made the replay host."""
+    return rewrite(fixture, lambda text: host.sub(REPLAY_HOST, text))
+
+
+def _placeholder(match: re.Match[str]) -> str:
+    return SCRUBBED_EMAIL.replace("@", "%40") if match["at"] == "%40" else SCRUBBED_EMAIL
+
+
+def scrub_emails(fixture: Fixture) -> Fixture:
+    """``fixture`` with every e-mail address in URL, headers and body made the placeholder."""
+    return rewrite(fixture, lambda text: _EMAIL_IN_TEXT.sub(_placeholder, text))
+
+
+def _is_amount_key(name: str) -> bool:
+    if _NOT_AN_AMOUNT.fullmatch(name) or _AN_ID.search(name):
+        return False
+    return AMOUNT_KEY.search(name) is not None
+
+
+def _non_zero(value: object) -> bool:
+    """A number, or a numeric string, other than zero; booleans and ``null`` are not."""
+    if isinstance(value, bool) or value is None:
+        return False
+    if isinstance(value, int | float):
+        return value != 0
+    if isinstance(value, str):
+        try:
+            return Decimal(value.strip()) != 0
+        except InvalidOperation:
+            return False
+    return False
+
+
+def _scalars(value: Any) -> Iterator[Any]:
+    """``value`` itself, or the items of a list at any depth; objects are walked on their own."""
+    if isinstance(value, list):
+        for item in value:
+            yield from _scalars(item)
+    elif not isinstance(value, dict):
+        yield value
+
+
+def amounts(node: Any, where: str = "body") -> Iterator[str]:
+    """Where a decoded JSON body holds a non-zero amount: locations only, never values."""
+    if isinstance(node, dict):
+        for name, value in node.items():
+            here = f"{where}.{name}"
+            if _is_amount_key(str(name)) and any(_non_zero(item) for item in _scalars(value)):
+                yield here
+            yield from amounts(value, here)
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            yield from amounts(item, f"{where}[{index}]")
+
+
+def _decoded(body: str) -> tuple[bool, Any]:
+    """``(True, value)`` for a JSON body, ``(False, None)`` for any other."""
+    try:
+        return True, json.loads(body)
+    except ValueError:
+        return False, None
+
+
+def body_amounts(body: str) -> list[str]:
+    """``amounts`` in a JSON body; a body that is not JSON holds none."""
+    is_json, decoded = _decoded(body)
+    return list(amounts(decoded)) if is_json else []
+
+
+def to_json(fixture: Fixture) -> str:
+    """The fixture as text, laid out as core's ``write_fixture`` lays it out."""
+    return json.dumps(fixture.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
+
+
+def _key_like_values(node: Any, where: str) -> Iterator[str]:
+    """Locations whose name looks like a credential and whose value is not REDACTED."""
+    if isinstance(node, dict):
+        for name, value in node.items():
+            if KEY_LIKE.search(str(name)) and value != REDACTED:
+                yield f"{where}.{name}"
+            yield from _key_like_values(value, f"{where}.{name}")
+    elif isinstance(node, list):
+        if len(node) == 2 and all(isinstance(item, str) for item in node):
+            name, value = node
+            if KEY_LIKE.search(name) and value != REDACTED:
+                yield f"{where} header {name!r}"
+        for index, item in enumerate(node):
+            yield from _key_like_values(item, f"{where}[{index}]")
+
+
+def _body_mentions(body: str) -> list[str]:
+    return sorted({match.group(0).lower() for match in KEY_LIKE.finditer(body)})
+
+
+def _strings(node: Any) -> Iterator[str]:
+    """Every key and string value of a decoded JSON document."""
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for name, value in node.items():
+            yield str(name)
+            yield from _strings(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _strings(item)
+
+
+def _holds_an_address(fixture: dict[str, Any]) -> bool:
+    """An e-mail address other than the placeholder in the URL, a header or the body.
+
+    The raw texts are searched as they are scrubbed; the decoded strings of a JSON body
+    with the plain pattern, so an address the scrub could not reach is still found.
+    """
+    request, response = fixture.get("request", {}), fixture.get("response", {})
+    body = response.get("body", "")
+    raw = [request.get("url", ""), body]
+    raw += [part for header in response.get("headers", []) for part in header]
+    found = [match.group(0) for text in raw for match in _EMAIL_IN_TEXT.finditer(text)]
+    is_json, decoded = _decoded(body)
+    if is_json:
+        found += [match.group(0) for text in _strings(decoded) for match in EMAIL.finditer(text)]
+    return any(address not in _SCRUBBED_EMAILS for address in found)
+
+
+def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
+    """``(leaks, suspicions)`` in a serialised fixture; neither ever contains a value."""
+    leaks: list[str] = []
+    if subdomain != DEMO and subdomain in text.lower():
+        leaks.append(f"the value of {subdomain_env(DEMO)}")
+    token = base64.b64encode(f"{key}:".encode()).decode("ascii")
+    if key and (key in text or token in text):
+        leaks.append(f"the value of {api_key_env(DEMO)}")
+    fixture = json.loads(text)
+    if _holds_an_address(fixture):
+        leaks.append(f"an e-mail address other than {SCRUBBED_EMAIL}")
+    suspicions = list(_key_like_values(fixture, "fixture"))
+    url = fixture.get("request", {}).get("url", "")
+    suspicions += [f"request URL mentions {word!r}" for word in _body_mentions(url)]
+    body = fixture.get("response", {}).get("body", "")
+    suspicions += [f"response body mentions {word!r}" for word in _body_mentions(body)]
+    return leaks, suspicions
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Refuse or record, scrub in memory, check, write; return the exit status."""
+    args = parse_args(argv)
+    refused = refusal(args.method, args.endpoint)
+    if refused:
+        print(f"not recorded: {refused}")  # noqa: T201
+        return 1
+    os.environ.pop(ORGS_ENV, None)  # the recorder sees the demo organisation and nothing else
+    client = client_for(DEMO)
+    if args.wrong_key:
+        auth = BasicKeyAuth(api_key_env(DEMO), key=WRONG_KEY, source=SOURCE)
+        client = AsyncClient(client.config, auth=auth)
+    path = fixture_path(FIXTURES, fixture_endpoint(args.endpoint), args.case)
+    fixture = fixture_from_response(exchange(client, "GET", f"/{args.endpoint}", args.params))
+    if fixture.response.body_base64:
+        print(  # noqa: T201
+            f"not recorded: the body of {args.endpoint} is not UTF-8 text; exports are out "
+            "of scope for fixtures, and such a body can be neither scrubbed nor reviewed"
+        )
+        return 1
+    found = [] if args.allow_amounts else body_amounts(fixture.response.body)
+    if found:
+        more = f" and {len(found) - 3} more" if len(found) > 3 else ""
+        print(  # noqa: T201
+            f"not recorded: the body holds non-zero amounts under {', '.join(found[:3])}{more}; "
+            "narrow the case to records without amounts (--allow-amounts is only for a "
+            "synthetic demo organisation)"
+        )
+        return 1
+
+    subdomain = os.environ[subdomain_env(DEMO)].strip().lower()
+    host = re.compile(re.escape(f"{subdomain}.cashctrl.com"), re.IGNORECASE)
+    fixture = scrub_emails(scrub_host(fixture, host))
+    text = to_json(fixture)
+
+    leaks, suspicions = check(text, subdomain, os.environ.get(api_key_env(DEMO), ""))
+    if leaks:
+        print(f"not written {path.relative_to(ROOT)}: it would contain " + "; ".join(leaks))  # noqa: T201
+        return 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    print(fixture.response.status, fixture.request.url)  # noqa: T201
+    if suspicions:
+        print(f"review {path.relative_to(ROOT)} before committing:")  # noqa: T201
+        for item in suspicions:
+            print(f"  {item}")  # noqa: T201
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
