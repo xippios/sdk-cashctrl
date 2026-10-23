@@ -32,6 +32,8 @@ TOKEN = base64.b64encode(f"{KEY}:".encode()).decode("ascii")
 OWNER = "owner@organisation-owner.test"
 NUMBERS = ("1020", "1100", "2000", "2800", "3200", "4200", "6000", "6500", "6940")
 DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+CURRENT_PERIOD = 1
+"""The fake's current fiscal period, 2026: lists without ``fiscalPeriodId`` answer for it."""
 
 
 def load_seeder() -> ModuleType:
@@ -96,7 +98,7 @@ class FakeCashCtrl:
         self.refuse_status = 200
         self.created: Counter[str] = Counter()
         self.journal_in: Counter[int] = Counter()
-        self.orders_of: Counter[str] = Counter()
+        self.orders_in: Counter[tuple[str, int]] = Counter()
         self.requests: list[httpx.Request] = []
         self.insert_ids: dict[str, list[int]] = defaultdict(list)
         self.next_id = 500
@@ -146,10 +148,12 @@ class FakeCashCtrl:
                 del record["company"]
             return httpx.Response(200, json={"success": True, "data": record})
         if path == "journal/list.json":
-            period = int(params["fiscalPeriodId"])
+            period = int(params.get("fiscalPeriodId", CURRENT_PERIOD))
             return _total(self.existing["journal"] * (period == 1) + self.journal_in[period])
         if path == "order/list.json":
-            return _total(self.existing["order"] + self.orders_of[params["type"]])
+            period = int(params.get("fiscalPeriodId", CURRENT_PERIOD))
+            existing = self.existing["order"] * (period == 1)
+            return _total(existing + self.orders_in[(params["type"], period)])
         if path == "account/list.json":
             return _list(self.accounts)
         if path == "currency/list.json":
@@ -192,7 +196,8 @@ class FakeCashCtrl:
             self.journal_in[2 if form["dateAdded"].startswith("2025") else 1] += 1
         elif path == "order/create.json":
             sales = {str(c["id"]) for c in self.order_categories["SALES"]}
-            self.orders_of["SALES" if form["categoryId"] in sales else "PURCHASE"] += 1
+            order_type = "SALES" if form["categoryId"] in sales else "PURCHASE"
+            self.orders_in[(order_type, 2 if form["date"].startswith("2025") else 1)] += 1
         self.next_id += 1
         self.insert_ids[path].append(self.next_id)
         insert_id: int | str = self.next_id
@@ -408,6 +413,23 @@ def test_the_journal_of_every_fiscal_period_is_checked(
     assert {"1", "2"} <= set(periods)
 
 
+def test_the_orders_of_every_fiscal_period_are_checked(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake.periods.append(fake._period(2, 2025))
+    fake.orders_in[("PURCHASE", 2)] = 1  # not in the current period, 2026
+    status, _, err = run(capsys, "--apply", "--yes")
+    assert status == 1
+    assert fake.posts() == []
+    assert "order/list.json type PURCHASE fiscal period 2025 total 1" in err
+    scopes = {
+        (r.url.params["type"], r.url.params["fiscalPeriodId"])
+        for r in fake.requests
+        if r.url.path == "/api/v1/order/list.json"
+    }
+    assert scopes == {("SALES", "1"), ("PURCHASE", "1"), ("SALES", "2"), ("PURCHASE", "2")}
+
+
 def test_a_missing_total_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
     upstream = FakeCashCtrl()
     with respx.mock(assert_all_called=False) as router:
@@ -519,8 +541,8 @@ def test_a_full_run_creates_everything_in_dependency_order(
         "person/list.json: total 10",
         "journal/list.json 2025: total 12",
         "journal/list.json 2026: total 36",
-        "order/list.json SALES: total 4",
-        "order/list.json PURCHASE: total 2",
+        "order/list.json SALES 2026: total 4",
+        "order/list.json PURCHASE 2026: total 2",
         "currency/list.json: total 3",
         "fiscalperiod/list.json: total 2",
     ]:

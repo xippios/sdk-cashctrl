@@ -964,17 +964,23 @@ def read_periods(session: Session) -> list[Period]:
 
 
 def check_empty(session: Session, periods: Sequence[Period]) -> None:
-    """Guard 3: no person, no journal entry in any period, no sales or purchase order."""
+    """Guard 3: no person; no journal entry, sales or purchase order in any fiscal period.
+
+    The journal and order lists answer for the current fiscal period unless
+    ``fiscalPeriodId`` is given (``docs/upstream/meta.md``, Switch fiscal period).
+    """
     what = "guard 3, empty organisation"
     totals: list[tuple[str, int | None]] = [
         ("person/list.json", total_of(session.read("person/list.json", what)))
     ]
     for period in periods:
-        body = session.read("journal/list.json", what, {"fiscalPeriodId": str(period.id)})
+        scope = {"fiscalPeriodId": str(period.id)}
+        body = session.read("journal/list.json", what, scope)
         totals.append((f"journal/list.json fiscal period {period.start.year}", total_of(body)))
-    for order_type in ("SALES", "PURCHASE"):
-        body = session.read("order/list.json", what, {"type": order_type})
-        totals.append((f"order/list.json type {order_type}", total_of(body)))
+        for order_type in ("SALES", "PURCHASE"):
+            body = session.read("order/list.json", what, {"type": order_type, **scope})
+            label = f"order/list.json type {order_type} fiscal period {period.start.year}"
+            totals.append((label, total_of(body)))
     unknown = [name for name, total in totals if total is None]
     found = [f"{name} total {total}" for name, total in totals if total]
     if unknown:
@@ -1345,8 +1351,16 @@ def report_totals(session: Session, context: Context, period_2025: int) -> None:
             "journal/list.json",
             {"fiscalPeriodId": str(context.period_2026)},
         ),
-        ("order/list.json SALES", "order/list.json", {"type": "SALES"}),
-        ("order/list.json PURCHASE", "order/list.json", {"type": "PURCHASE"}),
+        (
+            "order/list.json SALES 2026",
+            "order/list.json",
+            {"type": "SALES", "fiscalPeriodId": str(context.period_2026)},
+        ),
+        (
+            "order/list.json PURCHASE 2026",
+            "order/list.json",
+            {"type": "PURCHASE", "fiscalPeriodId": str(context.period_2026)},
+        ),
         ("currency/list.json", "currency/list.json", None),
         ("fiscalperiod/list.json", "fiscalperiod/list.json", None),
     ]
