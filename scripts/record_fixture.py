@@ -46,9 +46,10 @@ never shows a value, and exits with status 1:
   (``api_key``, ``api-key``), in any case, has its text value replaced by ``REDACTED``.
   ``order/read.json`` sends ``hash``, an undocumented 32-character text that may be the
   token of a public link to the order document (observed on 2026-10-23, not verified);
-  the others were never seen and are scrubbed should they appear. A 32-character
-  mixed-case alphanumeric value the scrub cannot reach under such a name (an escaped
-  key) is refused by the final check.
+  the others were never seen and are scrubbed should they appear. The final check
+  refuses any value under such a name but ``null`` or ``REDACTED``, whatever its type or
+  shape: text behind an escaped field name, a number, an array, an object. A compound
+  name (``publicHash``) is not scrubbed; it is written for review.
 
 Nothing unscrubbed touches disk. The request goes through the real client with
 ``raise_on_error=False``, and core's ``fixture_from_response`` turns the exchange into a
@@ -62,8 +63,8 @@ subdomain, the real key (plain or as a basic-auth token), an e-mail address othe
 ``user@example.com``, an API user tag other than ``API:REDACTED`` in any case and
 position (the key's own tag also with ``:`` URL-encoded, as an HTML entity or followed by
 a space), the key's first four characters on their own, reported as a possible key
-prefix, or a 32-character mixed-case alphanumeric value under a token-like field name
-means nothing is written and the exit status is 1; a key-like name whose value is not
+prefix, or any value but ``null`` or ``REDACTED`` under a token-like field name means
+nothing is written and the exit status is 1; a key-like name whose value is not
 ``REDACTED`` is written for review, also with exit status 1. Only the status and the
 scrubbed URL are printed.
 
@@ -105,7 +106,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 REPLAY_HOST = "demo.cashctrl.com"
 WRONG_KEY = "not-a-valid-key"  # pragma: allowlist secret (a deliberately invalid key)
-KEY_LIKE = re.compile(r"api[_-]?key|token|secret|authorization|password", re.IGNORECASE)
+KEY_LIKE = re.compile(r"api[_-]?key|token|secret|authorization|password|hash", re.IGNORECASE)
 _ENDPOINT = re.compile(r"[a-z][a-z0-9_]*(?:/[a-z][a-z0-9_]*)*(?:\.[a-z]+)?")
 _CASE = re.compile(r"[a-z0-9][a-z0-9_]*")
 
@@ -124,8 +125,14 @@ _TOKEN_FIELD = re.compile(
     re.IGNORECASE,
 )
 """A token-like field with a text value in raw JSON: ``"hash": "..."``."""
-TOKEN_VALUE = re.compile(r"(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])[A-Za-z0-9]{32}")
-"""The shape of the observed ``hash``: 32 letters and digits, both cases."""
+_SETTLED_TOKEN_FIELD = re.compile(
+    r'"(?i:' + TOKEN_FIELD_NAME.pattern + r')"\s*:\s*(?:null|"' + REDACTED + r'")'
+)
+"""A token-like field whose value is ``null`` or ``"REDACTED"``: no mention to review.
+
+The final check refuses every other value under such a name, so a settled one needs no
+review; a compound name (``publicHash``) is not settled and goes to review.
+"""
 
 SCRUBBED_API_USER = "API:REDACTED"
 _NOT_SCRUBBED = r"(?!REDACTED(?![A-Za-z0-9]))"
@@ -334,20 +341,20 @@ def scrub_token_fields(fixture: Fixture) -> Fixture:
     )
 
 
-def _token_like_fields(node: Any) -> Iterator[str]:
-    """Names of token-like fields whose value has the shape of a token, at any depth."""
+def _unsettled_token_fields(node: Any) -> Iterator[str]:
+    """Names of token-like fields, at any depth, whose value is not ``null`` or ``REDACTED``.
+
+    Any other value is refused, whatever its type or shape: text the scrub could not
+    reach (an escaped field name), a number, an array, an object.
+    """
     if isinstance(node, dict):
         for name, value in node.items():
-            if (
-                TOKEN_FIELD_NAME.fullmatch(str(name))
-                and isinstance(value, str)
-                and TOKEN_VALUE.fullmatch(value)
-            ):
+            if TOKEN_FIELD_NAME.fullmatch(str(name)) and value is not None and value != REDACTED:
                 yield str(name)
-            yield from _token_like_fields(value)
+            yield from _unsettled_token_fields(value)
     elif isinstance(node, list):
         for item in node:
-            yield from _token_like_fields(item)
+            yield from _unsettled_token_fields(item)
 
 
 def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
@@ -369,16 +376,17 @@ def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
             "find them in the response before recording again)"
         )
     is_json, decoded = _decoded(fixture.get("response", {}).get("body", ""))
-    tokens = sorted(set(_token_like_fields(decoded))) if is_json else []
+    tokens = sorted(set(_unsettled_token_fields(decoded))) if is_json else []
     if tokens:
-        leaks.append(f"a token-like value under {', '.join(tokens)}")
+        leaks.append(f"a value other than null or {REDACTED} under {', '.join(tokens)}")
     if _holds_an_address(fixture):
         leaks.append(f"an e-mail address other than {SCRUBBED_EMAIL}")
     suspicions = list(_key_like_values(fixture, "fixture"))
     url = fixture.get("request", {}).get("url", "")
     suspicions += [f"request URL mentions {word!r}" for word in _body_mentions(url)]
     body = fixture.get("response", {}).get("body", "")
-    suspicions += [f"response body mentions {word!r}" for word in _body_mentions(body)]
+    unsettled = _SETTLED_TOKEN_FIELD.sub("", body)
+    suspicions += [f"response body mentions {word!r}" for word in _body_mentions(unsettled)]
     return leaks, suspicions
 
 

@@ -66,8 +66,9 @@ All notable changes to this project are documented here. The format follows
   `REDACTED`, all in memory; checks the serialised fixture and the decoded strings of its
   body for the subdomain, the key, any other e-mail address, any other API user tag in
   any case and position, the key's first four characters on their own (a possible key
-  prefix) and a 32-character mixed-case alphanumeric value under a token-like name
-  before the one write; and refuses bodies that are not UTF-8 text
+  prefix) and any value but `null` or `REDACTED` under a token-like name (a compound
+  name such as `publicHash` goes to review, `hash` being key-like) before the one
+  write; and refuses bodies that are not UTF-8 text
   (exports), any method but GET and any endpoint but `.json`. The demo organisation is
   synthetic (`scripts/seed_demo.py`, `docs/demo-org.md`), so any module and any amount
   may be recorded.

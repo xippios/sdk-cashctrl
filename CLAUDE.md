@@ -122,7 +122,7 @@ src/xippios/cashctrl/
 scripts/
   refresh_reference.py   stub until a documented value set is needed (refresh-reference-data)
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
-  record_fixture.py      records one exchange with the demo organisation; host, e-mails, API user tags, token fields scrubbed
+  record_fixture.py      records one exchange with the demo organisation; host, e-mails, API tags, tokens scrubbed
   seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md)
 tests/
   conftest.py      core's plugin; demo-only environment, placeholder demo pair, clients reset per test, demo_org
@@ -200,10 +200,11 @@ the fixture in memory with credentials scrubbed, the demo host rewritten to
 `tests/fixtures/<endpoint>/<case>.json`. It writes nothing when the fixture, in its text
 or in a decoded string of its body, still holds the subdomain, the key, an e-mail
 address, an API user tag in any case and position, the key's first four characters on
-their own (a possible key prefix) or a 32-character mixed-case alphanumeric value under
-a token-like name, when the body is not UTF-8 text (exports are out of scope), or when a
-policy of the demo-only rule above refuses it. Grep the file for key patterns, e-mail addresses, API user tags and
-token-like fields before committing. Fixtures are never typed in by hand.
+their own (a possible key prefix) or any value but `null` or `REDACTED` under a
+token-like name, when the body is not UTF-8 text (exports are out of scope), or when a
+policy of the demo-only rule above refuses it. A compound name such as `publicHash` is
+not scrubbed and goes to review. Grep the file for key patterns, e-mail addresses, API
+user tags and token-like fields before committing. Fixtures are never typed in by hand.
 
 ## Commands
 

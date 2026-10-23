@@ -40,9 +40,10 @@ writes nothing and exits non-zero:
   `secret` or `apiKey` (`api_key`, `api-key`), in any case and at any depth, becomes
   `REDACTED`. `order/read.json` sends `hash`, an undocumented 32-character text that may
   be the token of a public link to the order document (observed on 2026-10-23, not
-  verified); the others were never seen. The final check refuses a 32-character
-  mixed-case alphanumeric value under such a name that the scrub could not reach (an
-  escaped field name).
+  verified); the others were never seen. The final check refuses any value under such
+  a name but `null` or `REDACTED`, whatever its type or shape (text behind an escaped
+  field name, a number, an array, an object). A compound name (`publicHash`) is not
+  scrubbed; `hash` is a key-like word, so the file is written for review.
 
 1. The demo pair comes from direnv in `~/github/sdk`. Confirm it without printing it:
    `direnv exec ~/github/sdk sh -c '[ -n "$CASHCTRL_DEMO_SUBDOMAIN" ] && [ -n "$CASHCTRL_DEMO_API_KEY" ] && echo ok'`.
@@ -73,12 +74,12 @@ writes nothing and exits non-zero:
    decoded strings of its body: if the real subdomain, the real key, an e-mail address
    other than `user@example.com`, an API user tag other than `API:REDACTED` (in any case
    and position), the key's first four characters on their own ("possible key
-   prefix") or a token-shaped value under a token-like field name is in it, nothing is
-   written and the script exits non-zero; if a key-like name carries a value other than
-   `REDACTED`, it writes the file and exits non-zero for review. Either way, stop and
-   report what it named; never print the file to find out. A possible key prefix may
-   be a coincidence of four characters: find them in the response by other means
-   before recording again, never by printing the key.
+   prefix") or a value other than `null` or `REDACTED` under a token-like field name is
+   in it, nothing is written and the script exits non-zero; if a key-like name carries a
+   value other than `REDACTED`, it writes the file and exits non-zero for review. Either
+   way, stop and report what it named; never print the file to find out. A possible key
+   prefix may be a coincidence of four characters: find them in the response by other
+   means before recording again, never by printing the key.
 5. Check again before committing, never echoing a value:
 
    ```bash

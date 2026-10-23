@@ -9,8 +9,9 @@ characters of a key, in `createdBy` and `lastUpdatedBy`) becomes `API:REDACTED`,
 the text value of every token-like body field (`hash`, `token`, `secret`, `apiKey`, by
 name in any case; `order/read.json` sends `hash`) becomes `REDACTED`, in memory before the
 file is written. The final check refuses any other tag in any case and position, the
-key's first four characters on their own as a possible key prefix, and a 32-character
-mixed-case alphanumeric value under a token-like name.
+key's first four characters on their own as a possible key prefix, and any value but
+`null` or `REDACTED` under a token-like name; a compound name such as `publicHash` is
+written for review.
 Bodies that are not UTF-8 text, methods other than GET and endpoints other than `.json`
 are refused. Still grep before committing:
 
