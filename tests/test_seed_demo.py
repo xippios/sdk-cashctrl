@@ -110,6 +110,8 @@ class FakeCashCtrl:
         self.unreadable_period_after_create = False
         self.odd_ids = False
         self.refuse_headers: dict[str, str] = {}
+        self.time_out_at: tuple[str, int] | None = None
+        """``(path, nth)``: the nth request to ``path`` gets no answer in time."""
 
     @staticmethod
     def _period(id_: int, year: int) -> dict[str, Any]:
@@ -124,6 +126,11 @@ class FakeCashCtrl:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         path = request.url.path.removeprefix("/api/v1/")
+        if self.time_out_at == (path, sum(r.url.path == request.url.path for r in self.requests)):
+            raise httpx.ReadTimeout(
+                f"read timed out: https://{SUB}.cashctrl.com/api/v1/{path} as {KEY}:",
+                request=request,
+            )
         if request.method == "GET":
             return self.get(path, request.url.params)
         return self.post(path, self.decode(request))
@@ -530,7 +537,25 @@ def test_a_full_run_creates_everything_in_dependency_order(
         + ["order/create.json"] * 6
     )
     first_write = fake.requests.index(fake.posts()[0])
-    assert all(r.method == "GET" for r in fake.requests[:first_write])
+    guard_reads = [
+        (r.method, r.url.path.removeprefix("/api/v1/"), dict(r.url.params))
+        for r in fake.requests[:first_write]
+    ]
+    assert guard_reads == [
+        ("GET", "location/list.json", {}),
+        ("GET", "fiscalperiod/list.json", {}),
+        ("GET", "person/list.json", {}),
+        ("GET", "journal/list.json", {"fiscalPeriodId": "1"}),
+        ("GET", "order/list.json", {"type": "SALES", "fiscalPeriodId": "1"}),
+        ("GET", "order/list.json", {"type": "PURCHASE", "fiscalPeriodId": "1"}),
+        ("GET", "account/list.json", {}),
+        ("GET", "tax/list.json", {}),
+        ("GET", "tax/read.json", {"id": "6"}),
+        ("GET", "person/category/list.json", {}),
+        ("GET", "order/category/list.json", {"type": "SALES"}),
+        ("GET", "order/category/list.json", {"type": "PURCHASE"}),
+        ("GET", "currency/list.json", {}),
+    ]
     assert form_of(fake.posts("currency/create.json")[0]) == {
         "code": "USD",
         "description": "US-Dollar",
@@ -891,6 +916,61 @@ def test_the_subdomain_key_and_e_mail_never_reach_the_output(
     shown = "\n".join(texts).lower()
     assert "<subdomain>" in shown
     assert "<e-mail>" in shown
+    for secret in (SUB, KEY, TOKEN, OWNER):
+        assert secret.lower() not in shown
+
+
+@pytest.mark.parametrize(
+    ("path", "nth", "stopped"),
+    [
+        ("location/list.json", 1, "refused: guard 2, organisation name: GET location/list.json"),
+        ("journal/create.json", 3, "stopped at journal entry 3/48 2025-03-05 Zahlung RE-2025-001"),
+    ],
+)
+def test_a_transport_error_is_reported_scrubbed_and_stops_the_run(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str], path: str, nth: int, stopped: str
+) -> None:
+    fake.time_out_at = (path, nth)
+    status, out, err = run(capsys, "--apply", "--yes")
+    assert status == 1
+    assert fake.requests[-1].url.path == f"/api/v1/{path}"
+    assert stopped in err
+    assert (
+        f"sent no answer (ReadTimeout: read timed out: https://<subdomain>.cashctrl.com/api/v1/"
+        f"{path} as <key>:)"
+    ) in err
+    shown = (out + err).lower()
+    for secret in (SUB, KEY, TOKEN):
+        assert secret.lower() not in shown
+    if path == "journal/create.json":
+        assert "Created: persons 10, currencies 1, fiscal periods 1, journal entries 2" in out
+        assert "Observed write semantics" in out
+
+
+def test_refusals_that_list_upstream_text_show_it_scrubbed(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    taxes = FakeCashCtrl()
+    taxes.taxes = [
+        {"id": 1, "code": "UN1"},
+        {"id": 5, "code": f"{SUB}-X"},
+        {"id": 7, "code": OWNER},
+    ]
+    with serving(taxes):
+        status, out, err = run(capsys, "--apply", "--yes")
+    assert (status, taxes.posts()) == (1, [])
+    assert "no active tax code VN1 (active codes: UN1, <subdomain>-X, <e-mail>)" in err
+    shown = out + err
+
+    categories = FakeCashCtrl()
+    categories.order_categories["PURCHASE"] = [
+        {"id": 8, "nameSingular": _localized(f"Gutschrift {OWNER}", f"Credit {SUB.upper()}")}
+    ]
+    with serving(categories):
+        status, out, err = run(capsys, "--apply", "--yes")
+    assert (status, categories.posts()) == (1, [])
+    assert "id 8: credit <subdomain> / gutschrift <e-mail>" in err
+    shown = (shown + out + err).lower()
     for secret in (SUB, KEY, TOKEN, OWNER):
         assert secret.lower() not in shown
 
