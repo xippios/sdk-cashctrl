@@ -92,6 +92,9 @@ class FakeCashCtrl:
         self.next_id = 500
         self.persons: dict[int, dict[str, Any]] = {}
         self.read_without_company = False
+        self.unreadable_period_after_create = False
+        self.odd_ids = False
+        self.refuse_headers: dict[str, str] = {}
 
     @staticmethod
     def _period(id_: int, year: int) -> dict[str, Any]:
@@ -157,8 +160,10 @@ class FakeCashCtrl:
                     {"field": "debitId", "message": f"Unknown at {SUB}.cashctrl.com, ask {OWNER}"}
                 ],
             }
-            return httpx.Response(self.refuse_status, json=body)
-        if path == "fiscalperiod/create.json":
+            return httpx.Response(self.refuse_status, json=body, headers=self.refuse_headers)
+        if path == "fiscalperiod/create.json" and self.unreadable_period_after_create:
+            self.periods.append({"id": 2, "name": "2025", "start": None, "end": None})
+        elif path == "fiscalperiod/create.json":
             self.periods.append(self._period(2, 2025))
         elif path == "currency/create.json":
             self.currencies.append({"id": 10 + len(self.currencies), "code": form["code"]})
@@ -169,10 +174,13 @@ class FakeCashCtrl:
             self.orders_of["SALES" if form["categoryId"] in sales else "PURCHASE"] += 1
         self.next_id += 1
         self.insert_ids[path].append(self.next_id)
+        insert_id: int | str = self.next_id
         if path == "person/create.json":
             self.persons[self.next_id] = {"id": self.next_id, "company": form["company"]}
+        elif self.odd_ids:
+            insert_id = f"{SUB}-{self.next_id} {OWNER}"
         return httpx.Response(
-            200, json={"success": True, "message": "Saved", "insertId": self.next_id}
+            200, json={"success": True, "message": "Saved", "insertId": insert_id}
         )
 
     def posts(self, path: str | None = None) -> list[httpx.Request]:
@@ -609,6 +617,24 @@ def test_a_status_other_than_200_stops_the_run(
     assert "POST person/create.json: HTTP 403 x1" in out
 
 
+def test_a_refusal_after_the_first_write_still_prints_the_summary(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake.unreadable_period_after_create = True  # the re-read after the create refuses
+    status, out, err = run(capsys, "--apply", "--yes")
+    assert status == 1
+    last = fake.requests[-1]
+    assert (last.method, last.url.path) == ("GET", "/api/v1/fiscalperiod/list.json")
+    assert fake.posts()[-1].url.path == "/api/v1/fiscalperiod/create.json"
+    assert (
+        "stopped at fiscalperiod/list.json: a fiscal period without a readable start and end "
+        "date; no further request was sent"
+    ) in err
+    assert "Created: persons 10, currencies 1, fiscal periods 1, journal entries 0" in out
+    assert "Observed write semantics" in out
+    assert "fiscalperiod/create.json success answer keys: insertId, message, success" in out
+
+
 def test_writes_are_form_encoded_with_json_items_and_iso_dates(
     fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -734,6 +760,36 @@ def test_the_subdomain_key_and_e_mail_never_reach_the_output(
     shown = "\n".join(texts).lower()
     assert "<subdomain>" in shown
     assert "<e-mail>" in shown
+    for secret in (SUB, KEY, TOKEN, OWNER):
+        assert secret.lower() not in shown
+
+
+def test_insert_ids_and_refusal_headers_are_shown_scrubbed(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    upstream = FakeCashCtrl()
+    upstream.odd_ids = True
+    with serving(upstream):
+        status, out, err = run(capsys, "--apply", "--yes")
+    assert status == 0
+    assert 'journal entry 1/48 2025-01-06 Einzahlung Aktienkapital: insertId "<subdomain>-' in out
+    assert re.search(r'order 6/6 PURCHASE EK-2026-002: insertId "<subdomain>-\d+ <e-mail>"', out)
+    assert (
+        "journal/create.json success answer keys: insertId, message, success; insertId type: str"
+        in out
+    )
+
+    refusing = FakeCashCtrl()
+    refusing.refuse = ("journal/create.json", 1)
+    refusing.refuse_headers = {"content-type": f"application/json; origin={SUB}.cashctrl.com"}
+    with serving(refusing):
+        status, more_out, more_err = run(capsys, "--apply", "--yes")
+    assert status == 1
+    assert (
+        "refusal: POST journal/create.json: HTTP 200, application/json; origin=<subdomain>"
+        in more_out
+    )
+    shown = "\n".join([out, err, more_out, more_err]).lower()
     for secret in (SUB, KEY, TOKEN, OWNER):
         assert secret.lower() not in shown
 

@@ -73,6 +73,8 @@ _EMAIL = re.compile(r"[\w.%+-]+(?:@|%40|&#0*64;?|&#[xX]0*40;?|&commat;)[\w-]+(?:
 _LOCALIZED = re.compile(r"<([a-z]{2})>(.*?)</\1>", re.DOTALL)
 _SHOWN_CHARS = 600
 """The most characters of an upstream refusal body shown, after scrubbing."""
+_SHOWN_ID_CHARS = 40
+"""The most characters of an ``insertId`` that is not a number shown, after scrubbing."""
 
 Role = Literal["customer", "vendor"]
 OrderType = Literal["SALES", "PURCHASE"]
@@ -715,7 +717,7 @@ class Session:
 
     def _refusal_shape(self, method: str, path: str, response: httpx.Response) -> str:
         body = _json_or_none(response)
-        kind = response.headers.get("content-type", "no content type")
+        kind = self.scrub(response.headers.get("content-type", "no content type"))
         if body is None:
             return f"{method} {path}: HTTP {response.status_code}, {kind}, body not JSON"
         shown = self.scrub(json.dumps(body, ensure_ascii=False, sort_keys=True))
@@ -761,11 +763,21 @@ class Session:
                 )
                 + (f" ({message})" if message else "")
             )
-        self.observed.answer_keys.setdefault(path, set()).update(str(key) for key in body)
+        self.observed.answer_keys.setdefault(path, set()).update(
+            self.scrub(str(key)) for key in body
+        )
         insert_id = body.get("insertId")
         kind = "absent" if insert_id is None else type(insert_id).__name__
         self.observed.insert_id_types.setdefault(path, set()).add(kind)
         return body
+
+    def shown_id(self, body: Mapping[str, Any]) -> str:
+        """The ``insertId`` of a create answer as printed: a number, else scrubbed JSON."""
+        value = body.get("insertId")
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
+        shown = self.scrub(json.dumps(value, ensure_ascii=False))
+        return shown if len(shown) <= _SHOWN_ID_CHARS else shown[:_SHOWN_ID_CHARS] + " ..."
 
 
 # --- Reading upstream answers --------------------------------------------------------
@@ -1218,14 +1230,14 @@ def seed(session: Session, context: Context, created: Counter[str]) -> int:
         what = f"currency {currency.code}"
         body = session.create("currency/create.json", currency_form(currency), what)
         created["currencies"] += 1
-        say(f"{what}: insertId {body.get('insertId')}")
+        say(f"{what}: insertId {session.shown_id(body)}")
 
     period_2025 = context.period_2025
     if period_2025 is None:
         what = "fiscal period 2025"
         body = session.create("fiscalperiod/create.json", {"type": "EARLIEST"}, what)
         created["fiscal periods"] += 1
-        say(f"{what}: insertId {body.get('insertId')}")
+        say(f"{what}: insertId {session.shown_id(body)}")
         covering = [p for p in read_periods(session) if p.covers(*SPAN_2025)]
         if not covering:
             raise Failed(f"{what}: created, but no fiscal period covers {SPAN_2025[0]} now")
@@ -1236,13 +1248,13 @@ def seed(session: Session, context: Context, created: Counter[str]) -> int:
         what = f"journal entry {number}/{len(entries)} {entry.day} {entry.title}"
         body = session.create("journal/create.json", journal_form(entry, context, persons), what)
         created["journal entries"] += 1
-        say(f"{what}: insertId {body.get('insertId')}")
+        say(f"{what}: insertId {session.shown_id(body)}")
 
     for number, order in enumerate(ORDERS, start=1):
         what = f"order {number}/{len(ORDERS)} {order.type} {order.nr}"
         body = session.create("order/create.json", order_form(order, context, persons), what)
         created["orders"] += 1
-        say(f"{what}: insertId {body.get('insertId')}")
+        say(f"{what}: insertId {session.shown_id(body)}")
     return period_2025
 
 
@@ -1378,14 +1390,14 @@ def apply(environ: Mapping[str, str]) -> int:
         status = 0
         try:
             period_2025 = seed(session, context, created)
-        except Failed as failure:
+        except (Refused, Failed) as failure:
             say(f"stopped at {failure}; no further request was sent", err=True)
             status = 1
         report_created(created)
         if status == 0:
             try:
                 report_totals(session, context, period_2025)
-            except Failed as failure:
+            except (Refused, Failed) as failure:
                 say(f"summary incomplete: {failure}", err=True)
                 status = 1
     for line in observed.lines():
