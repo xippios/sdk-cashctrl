@@ -90,8 +90,16 @@ All notable changes to this project are documented here. The format follows
   fiscal periods) are per-organisation data, served live by the list tasks. Only value
   sets the documentation fixes may ship, generated from `docs/upstream/`; none is needed
   yet, so `scripts/refresh_reference.py` is a stub that exits non-zero.
+- The placeholder-key test follows the registry:
+  `test_replay_tests_send_the_placeholder_key` sends a request through
+  `client_for("demo")` and checks that the basic auth user name is the placeholder and
+  that the shell's `CASHCTRL_DEMO_API_KEY` is nowhere in the request. Instead of pinning
+  a module-level `auth.key`, `tests/conftest.py` drops every cached client before and
+  after each test, and a `pytester` run of the conftest proves that a key a live test
+  cached never reaches the next offline test (and that it would without the reset).
 
 ### Removed
 
-- The scaffold's single client and its `CASHCTRL_API_KEY` variable, replaced by the
-  organisation registry above.
+- The scaffold's single client (`client`, `auth`, `config`, `BASE_URL` and `API_KEY_ENV`
+  in `_client.py`) and its `CASHCTRL_API_KEY` variable, replaced by the organisation
+  registry above.

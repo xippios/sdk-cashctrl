@@ -1,7 +1,9 @@
 """Structural checks every task must satisfy. Per-task tests with recorded fixtures go below."""
 
+import base64
 import inspect
 import json
+import os
 import re
 import typing
 from collections.abc import Callable, Iterator
@@ -17,8 +19,14 @@ from xippios.core import InvalidRequestError, NotFoundError, sync
 from xippios.core.testing import fixture_path, load_fixture, mcp_call
 
 from xippios.cashctrl import __version__, api, tasks, tasks_write
+from xippios.cashctrl._client import DEMO, api_key_env, client_for
 from xippios.cashctrl.mcp import server
 from xippios.cashctrl.models import Account, Filter
+
+SHELL_KEY = os.environ.get(api_key_env(DEMO))
+"""The demo key the shell held when the tests were collected, before any fixture; never printed."""
+CONFTEST = Path(__file__).with_name("conftest.py")
+LIST_URL = "https://demo.cashctrl.com/api/v1/fiscalperiod/list.json"
 
 TASKS = [getattr(tasks, name) for name in tasks.__all__]
 EVERY_TASK: dict[str, Callable[..., object]] = {
@@ -30,6 +38,105 @@ EVERY_TASK: dict[str, Callable[..., object]] = {
 
 def test_package_has_a_version() -> None:
     assert __version__
+
+
+def basic_user(request: httpx.Request) -> str:
+    """The basic auth user name of ``request``, where CashCtrl expects the key."""
+    encoded = request.headers.get("Authorization", "").removeprefix("Basic ")
+    return base64.b64decode(encoded).decode().partition(":")[0]
+
+
+@pytest.mark.anyio
+async def test_replay_tests_send_the_placeholder_key(
+    demo_only: str | None, respx_mock: respx.MockRouter
+) -> None:
+    """A request through the registry outside a live test carries the placeholder only.
+
+    The demo client is ``client_for("demo")``; the shell's ``CASHCTRL_DEMO_API_KEY``, if
+    direnv loaded one, appears nowhere in the request, neither plain nor as the basic auth
+    token. Every assertion is on a boolean, so a failure says where the key went, never
+    the key.
+    """
+    assert demo_only is not None
+    variable = api_key_env(DEMO)
+    env_holds_placeholder = os.environ[variable] == demo_only
+    assert env_holds_placeholder, f"{variable} does not hold the placeholder"
+    route = respx_mock.get(LIST_URL).respond(200, json={"total": 0, "data": []})
+    await client_for(DEMO).get_json("/fiscalperiod/list.json")
+    sent = route.calls.last.request
+    sends_placeholder = basic_user(sent) == demo_only
+    assert sends_placeholder, "the basic auth user name does not carry the placeholder"
+    if SHELL_KEY and demo_only != SHELL_KEY:
+        token = base64.b64encode(f"{SHELL_KEY}:".encode()).decode()
+        outgoing = [str(sent.url), *sent.headers.values(), basic_user(sent), sent.content.decode()]
+        leaked = any(SHELL_KEY in part or token in part for part in outgoing)
+        assert not leaked, f"the key in {variable} went out with the request"
+
+
+# Run by pytester in a subprocess, with this repository's conftest: a live test caches a
+# key in the demo client's auth, then an offline test sends a request. The live run uses
+# the replay host too, so a client the live test left in the cache would be handed to the
+# offline test as it is: only the conftest's reset_clients() keeps the key away.
+LIVE_THEN_OFFLINE = f"""
+import base64
+
+import httpx
+import pytest
+import respx
+
+from xippios.cashctrl._client import DEMO, client_for
+
+LIVE_KEY = "key-a-live-test-cached"  # pragma: allowlist secret
+URL = "{LIST_URL}"
+
+
+def user(request: httpx.Request) -> str:
+    encoded = request.headers["Authorization"].removeprefix("Basic ")
+    return base64.b64decode(encoded).decode().partition(":")[0]
+
+
+@pytest.mark.live
+@pytest.mark.anyio
+async def test_1_live(respx_mock: respx.MockRouter) -> None:
+    route = respx_mock.get(URL).respond(200, json={{"total": 0, "data": []}})
+    await client_for(DEMO).get_json("/fiscalperiod/list.json")
+    assert user(route.calls.last.request) == LIVE_KEY
+
+
+@pytest.mark.anyio
+async def test_2_offline(respx_mock: respx.MockRouter, demo_only: str | None) -> None:
+    route = respx_mock.get(URL).respond(200, json={{"total": 0, "data": []}})
+    await client_for(DEMO).get_json("/fiscalperiod/list.json")
+    sent = route.calls.last.request
+    assert user(sent) == demo_only == "placeholder-for-fixture-replay"
+    assert LIVE_KEY not in str(sent.headers)
+"""
+
+
+@pytest.mark.parametrize("reset", [True, False], ids=["conftest", "without-reset"])
+def test_a_key_a_live_test_cached_never_reaches_the_next(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, reset: bool
+) -> None:
+    """The cached auth of a live test's client cannot carry its key into an offline test.
+
+    ``conftest.py`` drops every cached client before and after each test; with those
+    calls removed, the same two tests fail, so the check is not vacuous. No network: the
+    inner tests are respx-mocked, and the live gate is opened with a made-up demo pair.
+    """
+    conftest = CONFTEST.read_text(encoding="utf-8")
+    if not reset:
+        assert conftest.count("    reset_clients()\n") == 2
+        conftest = conftest.replace("    reset_clients()\n", "    pass\n")
+    pytester.makeconftest(conftest)
+    pytester.makepyfile(test_live_then_offline=LIVE_THEN_OFFLINE)
+    monkeypatch.setenv("XIPPIOS_LIVE_TESTS", "1")
+    monkeypatch.setenv(api_key_env(DEMO), "key-a-live-test-cached")  # pragma: allowlist secret
+    outcome = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-q")
+    if reset:
+        outcome.assert_outcomes(passed=2)
+    else:
+        outcome.assert_outcomes(passed=1, failed=1)
+        outcome.stdout.fnmatch_lines(["FAILED test_live_then_offline.py::test_2_offline - *"])
 
 
 def org_comes_first(fn: Callable[..., object]) -> bool:
@@ -78,8 +185,6 @@ def test_task_is_a_sync_facade_with_an_agent_docstring(task: object) -> None:
 
 
 # Per-task tests. Every fixture was recorded from the demo organisation on 2026-10-23.
-
-DEMO = "demo"
 
 
 def test_list_fiscal_periods_replays_the_recorded_list(

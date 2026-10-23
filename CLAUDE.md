@@ -100,7 +100,7 @@ scripts/
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
   record_fixture.py      records one exchange with the demo organisation, host and e-mails scrubbed
 tests/
-  conftest.py      core's plugin; demo-only environment, placeholder demo pair, demo_org
+  conftest.py      core's plugin; demo-only environment, placeholder demo pair, clients reset per test, demo_org
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
   test_tasks.py    structural checks on every task plus per-task replay tests
   test_adapters.py the adapters expose exactly tasks.__all__
