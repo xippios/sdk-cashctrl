@@ -21,7 +21,14 @@ from xippios.core.testing import fixture_path, load_fixture, mcp_call
 from xippios.cashctrl import __version__, api, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, api_key_env, client_for
 from xippios.cashctrl.mcp import server
-from xippios.cashctrl.models import Account, Filter
+from xippios.cashctrl.models import (
+    Account,
+    Filter,
+    JournalItem,
+    OrderItem,
+    PersonAddress,
+    PersonDetail,
+)
 
 SHELL_KEY = os.environ.get(api_key_env(DEMO))
 """The demo key the shell held when the tests were collected, before any fixture; never printed."""
@@ -208,6 +215,7 @@ def test_list_fiscal_periods_replays_the_recorded_list(
     assert result.meta.endpoint == "fiscalperiod/list.json"
     assert result.meta.request == {"org": DEMO}
     assert (result.meta.published_at, result.meta.vintage) == (None, None)
+    assert result.meta.total == 2, "upstream's total (ADR-0012)"
     assert [(period.id, period.name) for period in result.data] == [(2, "2025"), (1, "2026")]
     first = result.data[0]  # created by the seeder, as the API user
     assert (first.start, first.end) == (date(2025, 1, 1), date(2025, 12, 31)), "date part kept"
@@ -249,6 +257,7 @@ def test_list_currencies_replays_the_recorded_list(
     assert not route.calls.last.request.url.params, "the operation documents no parameters"
     assert result.meta.endpoint == "currency/list.json"
     assert result.meta.request == {"org": DEMO}
+    assert result.meta.total == 3
     assert [(c.id, c.code, c.is_default) for c in result.data] == [
         (1, "CHF", True),
         (2, "EUR", False),
@@ -286,7 +295,7 @@ def test_list_tax_codes_replays_the_recorded_list(
     assert not route.calls.last.request.url.params, "the operation documents no parameters"
     assert result.meta.endpoint == "tax/list.json"
     assert result.meta.request == {"org": DEMO}
-    assert len(result.data) == 20, "CashCtrl's default tax codes"
+    assert len(result.data) == result.meta.total == 20, "CashCtrl's default tax codes"
     code = next(tax for tax in result.data if tax.code == "UN1")
     assert code.id == 9
     assert code.current_percentage == Decimal("8.1")
@@ -348,6 +357,7 @@ def test_list_accounts_replays_a_narrowed_list(
     assert sent == recorded_query(fixtures_dir, "account_list", "only_active_finanz")
     assert result.meta.endpoint == "account/list.json"
     assert result.meta.request == {"org": DEMO, **sent}
+    assert result.meta.total == 8
     assert [account.number for account in result.data] == [
         "1400",
         "1430",
@@ -611,6 +621,618 @@ async def test_an_unknown_account_is_an_error_text_for_the_tool(
         await mcp_call(server, "cashctrl_get_account", {"org": DEMO, "id": 999999999})
 
 
+# Journal entries, persons and orders: the offset-paged lists and their reads. The 2025
+# journal holds 12 entries (docs/demo-org.md), recorded in pages of five: 5, 5 and 2, and
+# the page past the end; 2026 holds 38, recorded as its first page of five.
+
+JOURNAL_LIST_URL = "https://demo.cashctrl.com/api/v1/journal/list.json"
+FP2025 = 2
+FP2026 = 1
+FP2025_PAGES = {
+    0: "fp2025_start_0_limit_5",
+    5: "fp2025_start_5_limit_5",
+    10: "fp2025_start_10_limit_5",
+    15: "fp2025_start_15_limit_5",
+}
+
+
+def recorded_body(fixtures_dir: Path, endpoint: str, case: str) -> dict[str, typing.Any]:
+    """The decoded JSON body of a recorded answer."""
+    body: dict[str, typing.Any] = json.loads(
+        load_fixture(fixture_path(fixtures_dir, endpoint, case)).response.body
+    )
+    return body
+
+
+def answer_with(body: dict[str, typing.Any]) -> httpx.Response:
+    return httpx.Response(200, json=body)
+
+
+@pytest.fixture
+def journal_2025_pages(fixtures_dir: Path) -> dict[int, dict[str, typing.Any]]:
+    """The recorded 2025 pages of five, keyed by the ``start`` they were recorded with."""
+    return {
+        start: recorded_body(fixtures_dir, "journal_list", case)
+        for start, case in FP2025_PAGES.items()
+    }
+
+
+def serve_by_start(
+    respx_mock: respx.MockRouter, pages: dict[int, dict[str, typing.Any]]
+) -> respx.Route:
+    """A route answering each request with the page recorded for its ``start``.
+
+    ``replay_fixture`` ignores query strings, so the multi-page replay dispatches on the
+    ``start`` each request sends; a ``start`` nothing was recorded for fails the test.
+    """
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return answer_with(pages[int(request.url.params["start"])])
+
+    return respx_mock.get(JOURNAL_LIST_URL).mock(side_effect=answer)
+
+
+def starts(route: respx.Route) -> list[int]:
+    return [int(call.request.url.params["start"]) for call in route.calls]
+
+
+def test_list_journal_entries_with_limit_is_one_page_and_upstreams_total(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    route = replay_fixture("journal_list", "fp2026_start_0_limit_5")
+    result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2026, limit=5)
+    sent = dict(route.calls.last.request.url.params)
+    assert route.call_count == 1, "limit given: one request"
+    assert sent == {"fiscalPeriodId": "1", "start": "0", "limit": "5"}
+    assert sent == recorded_query(fixtures_dir, "journal_list", "fp2026_start_0_limit_5")
+    assert result.meta.endpoint == "journal/list.json"
+    assert result.meta.request == {"org": DEMO, "fiscalPeriodId": 1, "start": 0, "limit": 5}
+    assert (len(result.data), result.meta.total) == (5, 38), "upstream's count, not len(data)"
+    # Newest first (upstream's default: dateAdded, DESC).
+    assert [entry.date_added for entry in result.data] == [
+        date(2026, 9, 30),
+        date(2026, 9, 22),
+        date(2026, 9, 15),
+        date(2026, 9, 4),
+        date(2026, 8, 31),
+    ]
+    fees, collective, invoice = result.data[:3]
+    assert (fees.id, fees.type, fees.amount) == (48, "MANUAL", Decimal(45))
+    assert isinstance(fees.amount, Decimal)
+    assert (fees.debit_id, fees.credit_id, fees.associate_id) == (26, 3, None)
+    assert fees.debit_name is not None
+    assert fees.debit_name.startswith("6900 <values>")
+    assert (collective.id, collective.type, collective.items_count) == (47, "COLLECTIVE", 3)
+    assert (collective.debit_id, collective.credit_id) == (None, 3), "lines are in the read"
+    assert (invoice.reference, invoice.tax_code) == ("RE-2026-007", "UN1")
+    assert invoice.tax_rate == Decimal("8.1")
+    assert isinstance(invoice.tax_rate, Decimal)
+    assert (invoice.associate_id, invoice.associate_name) == (7, "Muster Consulting GmbH")
+    assert (invoice.currency_code, invoice.currency_rate) == ("CHF", Decimal(1))
+    assert (invoice.order_id, invoice.is_recurring) == (None, False)
+    assert invoice.created_by == "API:REDACTED"
+
+
+def test_list_journal_entries_pages_from_start(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    route = replay_fixture("journal_list", "fp2025_start_10_limit_5")
+    result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025, start=10, limit=5)
+    assert dict(route.calls.last.request.url.params) == {
+        "fiscalPeriodId": "2",
+        "start": "10",
+        "limit": "5",
+    }
+    assert [entry.id for entry in result.data] == [2, 1]
+    assert result.meta.total == 12
+    assert result.data[-1].amount == Decimal(100000), "the share capital, January 2025"
+
+
+def test_a_page_past_the_end_is_empty_with_upstreams_total(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """Observed on 2026-10-23: HTTP 200, ``data`` empty, ``total`` unchanged."""
+    route = replay_fixture("journal_list", "fp2025_start_15_limit_5")
+    result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025, start=15, limit=5)
+    assert route.call_count == 1
+    assert (result.data, result.meta.total) == ([], 12)
+
+
+def test_list_journal_entries_without_limit_collects_every_page(
+    respx_mock: respx.MockRouter,
+    journal_2025_pages: dict[int, dict[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 5)  # the size the pages were recorded with
+    route = serve_by_start(respx_mock, journal_2025_pages)
+    result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
+    assert [dict(call.request.url.params) for call in route.calls] == [
+        {"fiscalPeriodId": "2", "start": str(start), "limit": "5"} for start in (0, 5, 10)
+    ], "three requests: the third page is short"
+    assert [entry.id for entry in result.data] == list(range(12, 0, -1))
+    assert result.meta.total == 12
+    assert result.meta.request == {"org": DEMO, "fiscalPeriodId": 2, "start": 0}, (
+        "limit, the page size, is left out: the same arguments collect the same entries"
+    )
+
+
+def test_start_without_limit_collects_every_page_from_start(
+    respx_mock: respx.MockRouter,
+    journal_2025_pages: dict[int, dict[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 5)
+    route = serve_by_start(respx_mock, journal_2025_pages)
+    result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025, start=5)
+    assert starts(route) == [5, 10]
+    assert [entry.id for entry in result.data] == [7, 6, 5, 4, 3, 2, 1]
+    assert result.meta.total == 12
+    assert result.meta.request == {"org": DEMO, "fiscalPeriodId": 2, "start": 5}
+
+
+def test_the_default_page_size_is_upstreams_100(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    assert tasks.PAGE_SIZE == 100
+    route = replay_fixture("journal_list", "fp2025_start_10_limit_5")
+    tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
+    assert route.call_count == 1, "a page shorter than 100 ends the collection"
+    assert route.calls.last.request.url.params["limit"] == "100", "sent explicitly"
+
+
+def test_collecting_stops_at_upstreams_total_without_a_further_request(
+    respx_mock: respx.MockRouter,
+    journal_2025_pages: dict[int, dict[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pages of four end exactly at the 12 upstream counts: no fourth, empty request.
+
+    The answers are cut from the recorded 2025 entries by each request's ``start`` and
+    ``limit``, as upstream cuts them.
+    """
+    entries = [entry for start in (0, 5, 10) for entry in journal_2025_pages[start]["data"]]
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 4)
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        start, limit = (int(request.url.params[name]) for name in ("start", "limit"))
+        return answer_with({"total": 12, "data": entries[start : start + limit]})
+
+    route = respx_mock.get(JOURNAL_LIST_URL).mock(side_effect=answer)
+    result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
+    assert starts(route) == [0, 4, 8]
+    assert (len(result.data), result.meta.total) == (12, 12)
+
+
+def test_the_count_kept_is_the_last_pages_and_never_corrected(
+    respx_mock: respx.MockRouter,
+    journal_2025_pages: dict[int, dict[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Conventions §4: a mismatch with ``len(data)`` is upstream's and stays."""
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 5)
+    pages = {**journal_2025_pages, 10: {**journal_2025_pages[10], "total": 11}}
+    serve_by_start(respx_mock, pages)
+    result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
+    assert (len(result.data), result.meta.total) == (12, 11)
+
+
+@pytest.mark.anyio
+async def test_list_journal_entries_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("journal_list", "fp2026_start_0_limit_5")
+    arguments = {"org": DEMO, "fiscal_period_id": FP2026, "limit": 5}
+    payload = await mcp_call(server, "cashctrl_list_journal_entries", arguments)
+    assert payload["meta"]["total"] == 38
+    assert payload["meta"]["request"] == {
+        "org": DEMO,
+        "fiscalPeriodId": 1,
+        "start": 0,
+        "limit": 5,
+    }
+    first = payload["data"][0]
+    assert (first["id"], first["date_added"], first["amount"]) == (48, "2026-09-30", 45)
+    with pytest.raises(ToolError, match=r"limit[\s\S]*int_parsing"):
+        await mcp_call(server, "cashctrl_list_journal_entries", {"org": DEMO, "limit": "many"})
+
+
+def collective_line_associates(fixtures_dir: Path) -> list[object]:
+    """``associateId`` of each line as recorded: text, though the entry's own is a number."""
+    body = recorded_body(fixtures_dir, "journal_read", "collective")
+    return [item["associateId"] for item in body["data"]["items"]]
+
+
+def test_get_journal_entry_replays_a_taxed_entry(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    assert recorded_query(fixtures_dir, "journal_read", "by_id") == {"id": "11"}
+    route = replay_fixture("journal_read", "by_id")
+    result = tasks.get_journal_entry(DEMO, 11)
+    assert dict(route.calls.last.request.url.params) == {"id": "11"}
+    assert result.meta.endpoint == "journal/read.json"
+    assert result.meta.request == {"org": DEMO, "id": 11}
+    assert result.meta.total is None, "a read reports no count"
+    entry = result.data
+    assert (entry.id, entry.type, entry.date_added) == (11, "MANUAL", date(2025, 10, 20))
+    assert (entry.title, entry.reference, entry.nr) == (
+        "Rechnung RE-2025-003 Beispiel Logistik AG",
+        "RE-2025-003",
+        "RE-2025-003",
+    )
+    assert (entry.amount, entry.default_currency_amount) == (Decimal(3600), Decimal(3600))
+    assert (entry.debit_id, entry.credit_id, entry.tax_id, entry.taxed) == (4, 42, 9, True)
+    assert entry.items == [], "a simple entry has no lines"
+    # The amount is gross (docs/demo-org.md): the revenue row is net, the tax row apart.
+    receivable, revenue, vat = entry.rows
+    assert (receivable.account_id, receivable.dc_debit) == (4, Decimal(3600))
+    assert (revenue.account_id, revenue.dc_credit, revenue.is_taxed) == (
+        42,
+        Decimal("3330.25"),
+        True,
+    )
+    assert (vat.account_id, vat.dc_credit, vat.is_tax) == (33, Decimal("269.75"), True)
+    assert vat.tax_percentage == Decimal("8.1")
+    (partner,) = entry.associates
+    assert isinstance(partner, PersonDetail)
+    assert (partner.id, partner.company, partner.is_customer) == (8, "Beispiel Logistik AG", True)
+    assert [(a.type, a.zip, a.city) for a in partner.addresses] == [("MAIN", "4051", "Basel")]
+    assert [(c.type, c.address) for c in partner.contacts] == [("EMAIL_WORK", "user@example.com")]
+    assert entry.account_ids == '["33","4","42"]', "kept as sent"
+
+
+def test_get_journal_entry_replays_a_collective_entry(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    replay_fixture("journal_read", "collective")
+    entry = tasks.get_journal_entry(DEMO, 47).data
+    assert (entry.type, entry.amount, entry.debit_id, entry.credit_id) == (
+        "COLLECTIVE",
+        Decimal(2580),
+        None,
+        3,
+    )
+    assert all(isinstance(item, JournalItem) for item in entry.items)
+    assert [(i.account_id, i.debit, i.credit, i.associate_id) for i in entry.items] == [
+        (9, Decimal(2400), None, 3),
+        (22, Decimal(180), None, 4),
+        (3, None, Decimal(2580), None),
+    ]
+    assert collective_line_associates(fixtures_dir) == ["3", "4", None], "sent as text"
+    assert [item.description for item in entry.items] == [
+        "Zahlung ER-2026-003",
+        "Telefon und Internet September 2026",
+        "Zahlungsausgang",
+    ]
+    assert [item.associate_name for item in entry.items][:2] == [
+        "Muster Büro AG",
+        "Beispiel Telecom AG",
+    ]
+    assert sum(row.dc_debit for row in entry.rows) == sum(row.dc_credit for row in entry.rows)
+    assert [person.id for person in entry.associates] == [3, 4]
+
+
+def test_get_journal_entry_raises_not_found_for_an_unknown_id(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("journal_read", "unknown_id")
+    with pytest.raises(NotFoundError, match="This book entry does not exist"):
+        tasks.get_journal_entry(DEMO, 999999999)
+
+
+@pytest.mark.anyio
+async def test_get_journal_entry_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("journal_read", "collective")
+    payload = await mcp_call(server, "cashctrl_get_journal_entry", {"org": DEMO, "id": 47})
+    first = payload["data"]["items"][0]
+    assert (first["account_id"], first["debit"], first["associate_id"]) == (9, 2400, 3)
+    assert payload["meta"]["request"] == {"org": DEMO, "id": 47}
+
+
+def test_list_persons_replays_every_person(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    route = replay_fixture("person_list", "default")
+    result = tasks.list_persons(DEMO)
+    sent = dict(route.calls.last.request.url.params)
+    assert sent == {"start": "0", "limit": "100"}, "every page: 100 a request, from 0"
+    assert sent == recorded_query(fixtures_dir, "person_list", "default")
+    assert route.call_count == 1, "12 < 100: the first page is the last"
+    assert result.meta.endpoint == "person/list.json"
+    assert result.meta.request == {"org": DEMO, "start": 0}
+    assert len(result.data) == result.meta.total == 12, "ten seeded and two system insurances"
+    assert [person.name for person in result.data][:3] == [
+        "Beispiel Logistik AG",
+        "Beispiel Telecom AG",
+        "Demo Bau AG",
+    ], "upstream's default order: by name"
+    insurances = [person for person in result.data if person.is_insurance]
+    assert [(p.nr, p.created_by) for p in insurances] == [
+        ("INAHV01", "SYSTEM"),
+        ("INBVG01", "SYSTEM"),
+    ]
+    buero = next(person for person in result.data if person.nr == "P-00001")
+    assert (buero.company, buero.is_vendor, buero.is_customer) == ("Muster Büro AG", True, False)
+    assert (buero.zip, buero.city, buero.canton, buero.country) == (
+        "9000",
+        "St. Gallen",
+        "SG",
+        "CHE",
+    )
+    assert (buero.email_work, buero.language, buero.first_name) == ("user@example.com", "DE", None)
+    assert buero.created == datetime(2026, 10, 23, 10, 29, 12)
+    assert (buero.discount_percentage, buero.date_birth, buero.iban) == (None, None, None)
+
+
+def test_list_persons_only_vendors(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    route = replay_fixture("person_list", "only_vendors")
+    result = tasks.list_persons(DEMO, only_vendors=True)
+    sent = dict(route.calls.last.request.url.params)
+    assert sent == {"onlyVendors": "true", "start": "0", "limit": "100"}
+    assert sent == recorded_query(fixtures_dir, "person_list", "only_vendors")
+    assert result.meta.request == {"org": DEMO, "onlyVendors": "true", "start": 0}
+    assert result.meta.total == 4
+    assert [person.nr for person in result.data] == ["P-00002", "P-00003", "P-00001", "P-00004"]
+    assert all(person.is_vendor for person in result.data)
+
+
+@pytest.mark.anyio
+async def test_list_persons_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("person_list", "only_vendors")
+    payload = await mcp_call(server, "cashctrl_list_persons", {"org": DEMO, "only_vendors": True})
+    assert (payload["meta"]["total"], len(payload["data"])) == (4, 4)
+    assert payload["data"][0]["is_vendor"] is True
+
+
+def test_get_person_replays_the_recorded_read(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    assert recorded_query(fixtures_dir, "person_read", "by_id") == {"id": "3"}
+    route = replay_fixture("person_read", "by_id")
+    result = tasks.get_person(DEMO, 3)
+    assert dict(route.calls.last.request.url.params) == {"id": "3"}
+    assert result.meta.endpoint == "person/read.json"
+    assert result.meta.request == {"org": DEMO, "id": 3}
+    person = result.data
+    assert (person.id, person.nr, person.company) == (3, "P-00001", "Muster Büro AG"), "UTF-8"
+    assert (person.is_vendor, person.category_id, person.language_code) == (True, 2, "de")
+    assert person.category_name is not None
+    assert "<en>Vendors</en>" in person.category_name
+    (address,) = person.addresses
+    assert isinstance(address, PersonAddress)
+    assert (address.type, address.street_name, address.street_number) == (
+        "MAIN",
+        "Beispielring",
+        "9",
+    )
+    assert (address.zip, address.city, address.country_code2) == ("9000", "St. Gallen", "CH")
+    assert (address.company_for_address, address.is_hide_company) == ("Muster Büro AG", False)
+    (contact,) = person.contacts
+    assert (contact.type, contact.address, contact.pos) == ("EMAIL_WORK", "user@example.com", 0)
+    assert (person.bank_accounts, person.children, person.attachments) == ([], [], [])
+    # The read leaves out null fields; they come back empty.
+    assert "firstName" not in recorded_body(fixtures_dir, "person_read", "by_id")["data"]
+    assert (person.first_name, person.notes, person.vat_uid) == (None, None, None)
+
+
+@pytest.mark.anyio
+async def test_get_person_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("person_read", "by_id")
+    payload = await mcp_call(server, "cashctrl_get_person", {"org": DEMO, "id": 3})
+    assert payload["data"]["addresses"][0]["city"] == "St. Gallen"
+    assert payload["data"]["contacts"][0]["type"] == "EMAIL_WORK"
+
+
+def test_list_orders_replays_the_sales_orders(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    route = replay_fixture("order_list", "fp2026_sales")
+    result = tasks.list_orders(DEMO, type="SALES", fiscal_period_id=FP2026)
+    sent = dict(route.calls.last.request.url.params)
+    assert sent == {"fiscalPeriodId": "1", "type": "SALES", "start": "0", "limit": "100"}
+    assert sent == recorded_query(fixtures_dir, "order_list", "fp2026_sales")
+    assert result.meta.endpoint == "order/list.json"
+    assert result.meta.request == {"org": DEMO, "fiscalPeriodId": 1, "type": "SALES", "start": 0}
+    assert len(result.data) == result.meta.total == 4
+    assert [order.nr for order in result.data] == [
+        "RE-2026-104",
+        "RE-2026-103",
+        "RE-2026-102",
+        "RE-2026-101",
+    ], "upstream's default order: by date, DESC"
+    order = result.data[0]
+    assert (order.type, order.book_type, order.date) == ("SALES", "DEBIT", date(2026, 9, 7))
+    assert (order.associate_id, order.associate_name) == (12, "Probe Gastro GmbH")
+    # 20 x 45.00 (docs/demo-org.md), the unit price read as gross, VAT 8.1 % included.
+    assert (order.sub_total, order.tax, order.total) == (
+        Decimal("832.56"),
+        Decimal("67.44"),
+        Decimal(900),
+    )
+    assert isinstance(order.sub_total, Decimal)
+    assert (order.is_book, order.open, order.date_due) == (False, None, None)
+    assert order.status_name is not None
+    assert "<en>Draft</en>" in order.status_name
+    assert order.date_last_booked == datetime(2026, 9, 7)
+
+
+def test_list_orders_replays_the_purchase_orders(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("order_list", "fp2026_purchase")
+    result = tasks.list_orders(DEMO, type="PURCHASE", fiscal_period_id=FP2026)
+    assert result.meta.total == 2
+    assert [(o.nr, o.book_type, o.is_book, o.open) for o in result.data] == [
+        ("EK-2026-002", "CREDIT", True, Decimal(830)),
+        ("EK-2026-001", "CREDIT", True, Decimal(4650)),
+    ], "their status Open books them"
+
+
+@pytest.mark.anyio
+async def test_list_orders_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("order_list", "fp2026_sales")
+    arguments = {"org": DEMO, "type": "SALES", "fiscal_period_id": FP2026}
+    payload = await mcp_call(server, "cashctrl_list_orders", arguments)
+    assert payload["meta"]["total"] == 4
+    assert (payload["data"][0]["nr"], payload["data"][0]["sub_total"]) == ("RE-2026-104", 832.56)
+    with pytest.raises(ToolError, match=r"type[\s\S]*literal_error"):
+        await mcp_call(server, "cashctrl_list_orders", {"org": DEMO, "type": "sales"})
+
+
+def test_get_order_replays_the_recorded_read(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    assert recorded_query(fixtures_dir, "order_read", "by_id") == {"id": "3"}
+    route = replay_fixture("order_read", "by_id")
+    result = tasks.get_order(DEMO, 3)
+    assert dict(route.calls.last.request.url.params) == {"id": "3"}
+    assert result.meta.endpoint == "order/read.json"
+    assert result.meta.request == {"org": DEMO, "id": 3}
+    order = result.data
+    assert (order.nr, order.type, order.date, order.associate_name) == (
+        "RE-2026-103",
+        "SALES",
+        date(2026, 6, 8),
+        "Demo Bau AG",
+    )
+    assert (order.sub_total, order.tax, order.total, order.total_to_pay) == (
+        Decimal("7169.29"),
+        Decimal("580.71"),
+        Decimal(7750),
+        Decimal(7750),
+    )
+    assert (order.tax_type, order.due, order.is_book) == ("AGREED", False, False)
+    assert all(isinstance(item, OrderItem) for item in order.items)
+    assert [(i.name, i.quantity, i.unit_price, i.gross_total) for i in order.items] == [
+        ("Bürostuhl Ergo", Decimal(10), Decimal(420), Decimal(4200)),
+        ("Schreibtisch Basic", Decimal(5), Decimal(680), Decimal(3400)),
+        ("Lieferung", Decimal(1), Decimal(150), Decimal(150)),
+    ]
+    chair = order.items[0]
+    assert (chair.net_unit_price, chair.net_total, chair.tax_total) == (
+        Decimal("388.52913969"),
+        Decimal("3885.29"),
+        Decimal("314.71"),
+    ), "Decimal keeps upstream's digits"
+    assert (chair.type, chair.tax_code, chair.tax_calc_type, chair.base_value) == (
+        "ARTICLE",
+        "UN1",
+        "NET",
+        "GROSS",
+    )
+    assert sum(item.gross_total or 0 for item in order.items) == order.total
+
+
+@pytest.mark.anyio
+async def test_get_order_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("order_read", "by_id")
+    payload = await mcp_call(server, "cashctrl_get_order", {"org": DEMO, "id": 3})
+    assert [item["quantity"] for item in payload["data"]["items"]] == [10, 5, 1]
+    assert payload["data"]["total"] == 7750
+
+
+PAGED_LISTS: dict[str, Callable[..., typing.Any]] = {
+    "list_journal_entries": tasks.list_journal_entries,
+    "list_persons": tasks.list_persons,
+    "list_orders": tasks.list_orders,
+}
+
+
+@pytest.mark.parametrize("task", PAGED_LISTS.values(), ids=PAGED_LISTS.keys())
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"dir": "up"}, "dir must be ASC or DESC, not 'up'"),
+        (
+            {"filter": [{"comparison": "equals", "field": "nr", "value": "1"}]},
+            "filter[0].comparison must be one of eq, like, gt, lt, not 'equals'",
+        ),
+        ({"filter": [UNVALIDATED]}, "filter[0].comparison must be one of eq, like, gt, lt"),
+        ({"query": 1}, "query must be a string, not int"),
+        ({"start": -1}, "start must be a whole number of at least 0, not -1"),
+        ({"start": "5"}, "start must be a whole number of at least 0, not '5'"),
+        ({"limit": 0}, "limit must be a whole number of at least 1, not 0"),
+        ({"limit": True}, "limit must be a whole number of at least 1, not True"),
+    ],
+)
+def test_the_paged_lists_refuse_what_upstream_would_ignore(
+    respx_mock: respx.MockRouter,
+    task: Callable[..., typing.Any],
+    arguments: dict[str, typing.Any],
+    message: str,
+) -> None:
+    with pytest.raises(InvalidRequestError, match=re.escape(message)):
+        task(DEMO, **arguments)
+    assert not respx_mock.calls
+
+
+@pytest.mark.parametrize("value", ["sales", "BOTH", ""])
+def test_list_orders_refuses_an_unknown_type(respx_mock: respx.MockRouter, value: str) -> None:
+    arguments: dict[str, typing.Any] = {"type": value}
+    with pytest.raises(InvalidRequestError, match=re.escape(f"not {value!r}")):
+        tasks.list_orders(DEMO, **arguments)
+    assert not respx_mock.calls
+
+
+@pytest.mark.anyio
+async def test_the_paged_tool_schemas_show_paging_and_value_sets() -> None:
+    tools = {tool.name: tool for tool in await server.list_tools()}
+    for name in PAGED_LISTS:
+        properties = tools[f"cashctrl_{name}"].input_schema["properties"]
+        assert (properties["start"]["type"], properties["start"]["default"]) == ("integer", 0)
+        assert {"type": "integer"} in properties["limit"]["anyOf"]
+        assert {"enum": ["ASC", "DESC"], "type": "string"} in properties["dir"]["anyOf"]
+    order_type = tools["cashctrl_list_orders"].input_schema["properties"]["type"]
+    assert {"enum": ["SALES", "PURCHASE"], "type": "string"} in order_type["anyOf"]
+
+
+PAGED_ROUTES: dict[str, tuple[str, dict[str, typing.Any], int]] = {
+    "list_journal_entries": (
+        "journal_list/fp2026_start_0_limit_5",
+        {"fiscal_period_id": FP2026, "limit": 5},
+        38,
+    ),
+    "list_persons": ("person_list/only_vendors", {"only_vendors": True}, 4),
+    "list_orders": ("order_list/fp2026_sales", {"type": "SALES", "fiscal_period_id": FP2026}, 4),
+}
+
+
+@pytest.mark.parametrize(("task", "case"), PAGED_ROUTES.items(), ids=PAGED_ROUTES.keys())
+def test_the_paged_lists_are_post_routes_with_upstreams_total(
+    replay_fixture: Callable[[str, str], respx.Route],
+    task: str,
+    case: tuple[str, dict[str, typing.Any], int],
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from xippios.cashctrl.http import router
+
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    fixture, arguments, total = case
+    replay_fixture(*fixture.split("/"))
+    response = client.post(f"/cashctrl/{task}", json={"org": DEMO, **arguments})
+    assert response.status_code == 200, response.text
+    assert response.json()["meta"]["total"] == total
+    rejected = client.post(f"/cashctrl/{task}", json={"org": DEMO, "start": -1})
+    assert rejected.status_code == 422
+    assert rejected.json()["title"] == "InvalidRequestError"
+    assert "start must be a whole number" in rejected.json()["detail"]
+
+
 RECORDED_LISTS: dict[str, tuple[Callable[..., typing.Any], dict[str, typing.Any]]] = {
     "fiscalperiod_list/default": (api.fiscalperiod_list, {}),
     "currency_list/default": (api.currency_list, {}),
@@ -620,6 +1242,10 @@ RECORDED_LISTS: dict[str, tuple[Callable[..., typing.Any], dict[str, typing.Any]
         {"only_active": True, "query": "Finanz"},
     ),
     "account_list/filter_number_eq": (api.account_list, {"filter": [NUMBER_1020]}),
+    "person_list/default": (api.person_list, {"start": 0, "limit": 100}),
+    "person_list/only_vendors": (api.person_list, {"only_vendors": True}),
+    "order_list/fp2026_sales": (api.order_list, {"type": "SALES", "fiscal_period_id": 1}),
+    "order_list/fp2026_purchase": (api.order_list, {"type": "PURCHASE", "fiscal_period_id": 1}),
 }
 
 
@@ -630,7 +1256,10 @@ async def test_a_recorded_list_is_whole(
     case: str,
     call: tuple[Callable[..., typing.Any], dict[str, typing.Any]],
 ) -> None:
-    """Upstream's ``total`` equals the records in the one answer: nothing is left behind."""
+    """Upstream's ``total`` equals the records in the one answer: nothing is left behind.
+
+    The journal pages are not whole by design (``journal_list/fp2025_*``, ``fp2026_*``).
+    """
     replay_fixture(*case.split("/"))
     wrapper, arguments = call
     response = await wrapper(DEMO, **arguments)
@@ -657,16 +1286,25 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
     "cashctrl_list_tax_codes": ("tax_list/default", {}),
     "cashctrl_list_accounts": ("account_list/filter_number_eq", {"filter": [NUMBER_1020]}),
     "cashctrl_get_account": ("account_read/by_id", {}),
+    "cashctrl_list_journal_entries": (
+        "journal_list/fp2026_start_0_limit_5",
+        {"fiscal_period_id": 1, "limit": 5},
+    ),
+    "cashctrl_get_journal_entry": ("journal_read/collective", {}),
+    "cashctrl_list_persons": ("person_list/default", {}),
+    "cashctrl_get_person": ("person_read/by_id", {}),
+    "cashctrl_list_orders": ("order_list/fp2026_sales", {"type": "SALES", "fiscal_period_id": 1}),
+    "cashctrl_get_order": ("order_read/by_id", {}),
 }
 
 
 def tool_arguments(
     tool: str, case: tuple[str, dict[str, typing.Any]], fixtures_dir: Path
 ) -> dict[str, typing.Any]:
-    """The arguments ``case`` was recorded with, as JSON: the read takes 1020's id."""
+    """The arguments ``case`` was recorded with, as JSON: a read takes the recorded id."""
     arguments = case[1]
-    if tool == "cashctrl_get_account":
-        arguments = {"id": account_1020_id(fixtures_dir)}
+    if tool.startswith("cashctrl_get_"):
+        arguments = {"id": int(recorded_query(fixtures_dir, *case[0].split("/"))["id"])}
     return {
         key: [item.model_dump() for item in value] if key == "filter" else value
         for key, value in arguments.items()

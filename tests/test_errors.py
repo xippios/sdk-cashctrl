@@ -92,6 +92,12 @@ def test_the_observed_unknown_id_is_not_found(fixtures_dir: Path) -> None:
     assert str(error) == "CashCtrl: This account does not exist. (/account/read.json)"
 
 
+def test_the_observed_unknown_journal_entry_is_not_found(fixtures_dir: Path) -> None:
+    error = classify(recorded(fixtures_dir, "journal_read", "unknown_id"))
+    assert isinstance(error, NotFoundError)
+    assert str(error) == "CashCtrl: This book entry does not exist. (/journal/read.json)"
+
+
 def test_the_observed_missing_id_is_a_rejection_with_a_message(fixtures_dir: Path) -> None:
     error = classify(recorded(fixtures_dir, "account_read", "missing_id"))
     assert isinstance(error, RequestRejected)
