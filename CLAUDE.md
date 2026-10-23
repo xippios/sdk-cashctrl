@@ -50,11 +50,11 @@ and nothing else, ever. The recorder takes no organisation; every live test take
 `tests/conftest.py` removes every `CASHCTRL_*` variable but the demo pair when pytest
 imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every test. The demo
 organisation is synthetic: invented books seeded by `scripts/seed_demo.py` and described
-in `docs/demo-org.md` (both on the seed branch, merging separately), never a copy of real
-books. So the recorder records any module and any amount; it still scrubs e-mail
-addresses to `user@example.com` and API user tags to `API:REDACTED`, and refuses any
-method but GET and any endpoint but `.json`. The demo subdomain is treated like a key: never in a file, a commit, a log line
-or a report. The repository is public.
+in `docs/demo-org.md`, never a copy of real books. So the recorder records any module and
+any amount; it still scrubs e-mail addresses to `user@example.com` and API user tags to
+`API:REDACTED`, and refuses any method but GET and any endpoint but `.json`. The demo
+subdomain is treated like a key: never in a file, a commit, a log line or a report. The
+repository is public.
 
 ## Read first, in this order
 

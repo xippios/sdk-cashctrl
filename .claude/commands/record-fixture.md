@@ -14,11 +14,11 @@ The demo subdomain is treated exactly like a key: never in a file, a commit, a l
 a report. Never print `CASHCTRL_DEMO_SUBDOMAIN` or any variable ending in `_API_KEY`.
 
 **The demo organisation is synthetic.** It holds invented books only, seeded by
-`scripts/seed_demo.py` and described in `docs/demo-org.md` (both on the seed branch,
-PR #4, merging separately): placeholder companies, `.example` addresses, invented
-amounts. Any module and any amount may therefore be recorded. If the demo pair ever
-points at an organisation that is not that synthetic one, stop: never record from it.
-These policies stand all the same, and each refusal writes nothing and exits non-zero:
+`scripts/seed_demo.py` and described in `docs/demo-org.md`: placeholder companies,
+`.example` addresses, invented amounts. Any module and any amount may therefore be
+recorded. If the demo pair ever points at an organisation that is not that synthetic
+one, stop: never record from it. These policies stand all the same, and each refusal
+writes nothing and exits non-zero:
 
 - **GET only.** Any other `--method` is refused before a request is sent. The recorder
   for the write tools will add writes deliberately; never work around this.

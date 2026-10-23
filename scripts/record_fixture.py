@@ -18,10 +18,10 @@ through a throwaway client with the demo organisation's configuration, to record
 without touching the real key.
 
 The demo organisation holds synthetic books only, seeded by ``scripts/seed_demo.py`` and
-described in ``docs/demo-org.md`` (both arrive with the seed branch, PR #4): invented
-companies on placeholder streets, ``.example`` addresses, invented amounts. So every
-module and every amount may be recorded. These policies stand all the same; every
-refusal writes nothing, says why, never shows a value, and exits with status 1:
+described in ``docs/demo-org.md``: invented companies on placeholder streets,
+``.example`` addresses, invented amounts. So every module and every amount may be
+recorded. These policies stand all the same; every refusal writes nothing, says why,
+never shows a value, and exits with status 1:
 
 - GET only. Any other ``--method`` is refused before a request is sent; the recorder
   for the write tools will add writes deliberately.
