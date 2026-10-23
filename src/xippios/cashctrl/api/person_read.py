@@ -1,8 +1,10 @@
 """``GET /api/v1/person/read.json``: one person by its id.
 
 Reference: ``docs/upstream/person.md``, "Read person" ("Returns a single person by ID."),
-one parameter, ``id`` (mandatory, NUMBER). An unknown id is answered with HTTP 200 and
-``"success": false``, which ``_client.classify`` raises as ``NotFoundError``.
+one parameter, ``id`` (mandatory, NUMBER). An unknown id is assumed to be answered with
+HTTP 200 and ``"success": false``, which ``_client.classify`` raises as
+``NotFoundError``: observed for ``account``, ``currency`` and ``journal`` reads on
+2026-10-23, not for ``person``.
 """
 
 from xippios.core import parse

@@ -132,14 +132,19 @@ from Python, a mapping with the same keys.
 The paged lists (`list_journal_entries`, `list_persons`, `list_orders`) take `start`
 (default 0) and `limit`. With `limit` they return one page of at most `limit` records
 from `start`; without it, every record from `start` on, fetched 100 at a time (upstream's
-documented page size). `meta.total` is upstream's count of every record the request
-matches, so a page is the last one when `start + limit >= meta.total`. Every other list
-returns its whole answer in one request and reports upstream's `total` too. The journal
-and order lists answer for the API user's current fiscal period unless
-`fiscal_period_id` is given (`list_fiscal_periods` marks it `is_current`); without
-`type` (`SALES`, `PURCHASE`), `list_orders` returns both. Collected over MCP, a long
-journal still meets the result cap (200 rows or 64 KB); page with `limit` and `start`
-instead.
+documented page size, about 1 s per 100 at the self-imposed pace). `meta.total` is
+upstream's count of every record the request matches. The next page starts at `start`
+plus the number of records received: over MCP the result cap (200 rows or 64 KB) may
+return fewer than `limit`, so never advance by `limit`. MCP agents should always pass a
+`limit` of about 20. Offset pages over a list that changes meanwhile can repeat or skip
+records. Every other list returns its whole answer in one request and reports
+upstream's `total` too.
+
+The journal and order lists answer for the API user's current fiscal period unless
+`fiscal_period_id` is given; that period is server-side state that
+`fiscalperiod/switch.json` changes, and `meta.request` does not show which period
+answered, so pass `fiscal_period_id` (an id from `list_fiscal_periods`) for a
+reproducible answer. Without `type` (`SALES`, `PURCHASE`), `list_orders` returns both.
 
 ## Upstream terms and attribution
 

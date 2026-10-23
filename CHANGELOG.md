@@ -151,7 +151,10 @@ All notable changes to this project are documented here. The format follows
 - `xippios-core` is pinned to sdk-core commit `dbe2eba` (`core_git_ref` in
   `.copier-answers.yml`, `[tool.uv.sources]` in `pyproject.toml`), an unreleased commit,
   for `ResultMeta.total` (ADR-0012). This package releases only after core 0.2.0 is on
-  PyPI and the pin is removed.
+  PyPI. Removing the pin alone would let core 0.1.0 back in, which names the tenant host
+  in status error messages and ignores `total`, so the same change raises `xippios-core`
+  and its three extras to `>=0.2.0` and deletes the pin's `# pragma: allowlist secret`
+  line by hand. The bound cannot be raised yet: core main still reports 0.1.0.
 - Adopted from that core: status error messages name the method and the path, never the
   host (`404 from GET /api/v1/account/nope.json: ...`, sdk-core#14), so `classify` no
   longer rewrites the request URL; it still hands core a copy of the response whose body
@@ -160,7 +163,6 @@ All notable changes to this project are documented here. The format follows
   loggers to WARNING (sdk-core#12), so the local `quiet_request_logging` is gone.
 - `api/_params.py` encodes booleans and drops unset parameters once, for every list
   wrapper.
-
 - chore: update to sdk-template v0.1.5.
   - Hygiene files: `.gitattributes` keeps `docs/upstream/` byte-exact, `.gitignore`
     covers `.env.*` and `.envrc.*`, the secrets baseline skips `.copier-answers.yml`.

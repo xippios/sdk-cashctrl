@@ -116,6 +116,10 @@ async def _offset_pages[T](
         limit: ``None`` collects every page through ``paginate_offset``, ``PAGE_SIZE``
             records a request; a number fetches that one page.
 
+    Pages are cut by offset at request time: if the list changes while every page is
+    collected, a record added or removed before the next offset shifts it by one, and a
+    record is repeated or skipped. Upstream offers no cursor.
+
     Returns:
         The records and the ``total`` upstream reported, on the last page fetched.
     """
@@ -387,19 +391,28 @@ async def list_journal_entries_async(
     ``credit_name``), the partner (``associate_id``, ``associate_name``), the tax code
     (``tax_code``, ``tax_rate``) and its ``type`` (``MANUAL``, ``COLLECTIVE``). A
     collective entry has ``items_count`` lines, which ``get_journal_entry`` returns.
-    Without ``fiscal_period_id`` upstream lists the API user's current fiscal period
-    only. Without ``limit`` every matching entry from ``start`` on is returned; with
-    ``limit``, one page of at most ``limit`` entries from ``start``. ``meta.total`` is
-    upstream's count of all matching entries, so there is more while
-    ``start + limit < meta.total``. A long journal exceeds the MCP result cap (200 rows
-    or 64 KB) and is truncated with a note: page with ``limit`` and ``start``, or narrow
-    the list. Upstream ignores values it does not understand, so ``dir`` and the
-    filters' ``comparison`` are checked first and a wrong one is refused.
+    Pass ``fiscal_period_id`` (an id from ``list_fiscal_periods``) for a reproducible
+    answer; without it upstream uses the API user's current period, server-side state
+    that ``fiscalperiod/switch.json`` changes, and ``meta.request`` does not show which
+    period answered.
+
+    Paging: with ``limit``, one page of at most ``limit`` entries from ``start``; without
+    it, every matching entry from ``start`` on. ``meta.total`` is upstream's count of all
+    matching entries. The next page starts at ``start`` plus the number of records
+    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
+    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
+    (about 20): collecting a large journal costs about 1 s per 100 entries and still
+    ends at the cap. Offset pages over a list that changes meanwhile can repeat or skip
+    entries: an entry added or removed shifts every later page by one.
+
+    Upstream ignores values it does not understand, so ``dir`` and the filters'
+    ``comparison`` are checked first and a wrong one is refused.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         fiscal_period_id: The fiscal period, an ``id`` from ``list_fiscal_periods``,
-            e.g. ``2``; the current fiscal period when left out.
+            e.g. ``2``. When left out, upstream uses the API user's current period,
+            which ``meta.request`` does not show.
         account_id: Only the entries that book to one account, an ``id`` from
             ``list_accounts`` (not the account number), e.g. ``3``.
         associate_id: Only the entries that name one person, an ``id`` from
@@ -421,8 +434,9 @@ async def list_journal_entries_async(
         only_untaxed: ``true`` for untaxed entries only.
         sort: The column to sort by, e.g. ``dateAdded`` (upstream's default).
         dir: ``DESC`` (upstream's default) or ``ASC``.
-        start: The offset of the first entry, e.g. ``0`` (the default) or ``50``.
-        limit: One page of at most this many entries, e.g. ``50``; every entry when
+        start: The offset of the first entry, ``0`` (the default) for the first page;
+            for the next, ``start`` plus the number of entries received, e.g. ``20``.
+        limit: One page of at most this many entries, e.g. ``20``; every entry when
             left out.
     """
     filters = _check_list_arguments(
@@ -504,11 +518,19 @@ async def list_persons_async(
     ``category_name``, ``is_inactive``, the main address flattened (``address``,
     ``zip``, ``city``, ``country``) and ``email_work``. CashCtrl creates insurance
     records of its own (``is_insurance``). Addresses and contacts in full come from
-    ``get_person``. Without ``limit`` every matching person from ``start`` on is
-    returned; with ``limit``, one page of at most ``limit`` persons from ``start``.
-    ``meta.total`` is upstream's count of all matching persons, so there is more while
-    ``start + limit < meta.total``. Upstream ignores values it does not understand, so
-    ``dir`` and the filters' ``comparison`` are checked first and a wrong one is refused.
+    ``get_person``.
+
+    Paging: with ``limit``, one page of at most ``limit`` persons from ``start``; without
+    it, every matching person from ``start`` on. ``meta.total`` is upstream's count of
+    all matching persons. The next page starts at ``start`` plus the number of records
+    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
+    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
+    (about 20): collecting many persons costs about 1 s per 100 and still ends at the
+    cap. Offset pages over a list that changes meanwhile can repeat or skip persons: a
+    person added or removed shifts every later page by one.
+
+    Upstream ignores values it does not understand, so ``dir`` and the filters'
+    ``comparison`` are checked first and a wrong one is refused.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -530,8 +552,9 @@ async def list_persons_async(
         only_without_role: ``true`` for persons without a role only.
         sort: The column to sort by, e.g. ``name`` (upstream's default) or ``nr``.
         dir: ``ASC`` (upstream's default) or ``DESC``.
-        start: The offset of the first person, e.g. ``0`` (the default) or ``50``.
-        limit: One page of at most this many persons, e.g. ``50``; every person when
+        start: The offset of the first person, ``0`` (the default) for the first page;
+            for the next, ``start`` plus the number of persons received, e.g. ``20``.
+        limit: One page of at most this many persons, e.g. ``20``; every person when
             left out.
     """
     filters = _check_list_arguments(
@@ -573,7 +596,8 @@ async def get_person_async(org: str, id: int) -> Result[PersonDetail]:
     (each with ``type`` such as ``MAIN``, ``address``, ``zip``, ``city``, ``country``)
     and ``contacts`` (each with ``type`` such as ``EMAIL_WORK`` and ``address``, the
     e-mail address, phone number or URL itself). Fields without a value are left out by
-    upstream and come back empty. An id no person has raises ``NotFoundError``.
+    upstream and come back empty. An id no person has raises ``NotFoundError``; that
+    answer is assumed for persons, observed for accounts, currencies and the journal.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -611,20 +635,30 @@ async def list_orders_async(
     ``associate_name``), ``description``, the amounts ``sub_total`` (net), ``tax`` and
     ``total`` (gross), ``open`` (still to be paid), ``status_id`` and ``status_name``,
     and ``is_book`` (whether its status books it to the journal). The items come from
-    ``get_order``. Without ``type`` upstream lists both types. Without
-    ``fiscal_period_id`` upstream lists the API user's current fiscal period only.
-    Without ``limit`` every matching order from ``start`` on is returned; with
-    ``limit``, one page of at most ``limit`` orders from ``start``. ``meta.total`` is
-    upstream's count of all matching orders, so there is more while
-    ``start + limit < meta.total``. Upstream ignores values it does not understand, so
-    ``type``, ``dir`` and the filters' ``comparison`` are checked first and a wrong one
-    is refused.
+    ``get_order``. Without ``type`` upstream lists both types. Pass
+    ``fiscal_period_id`` (an id from ``list_fiscal_periods``) for a reproducible answer;
+    without it upstream uses the API user's current period, server-side state that
+    ``fiscalperiod/switch.json`` changes, and ``meta.request`` does not show which period
+    answered.
+
+    Paging: with ``limit``, one page of at most ``limit`` orders from ``start``; without
+    it, every matching order from ``start`` on. ``meta.total`` is upstream's count of all
+    matching orders. The next page starts at ``start`` plus the number of records
+    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
+    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
+    (about 20): collecting many orders costs about 1 s per 100 and still ends at the
+    cap. Offset pages over a list that changes meanwhile can repeat or skip orders: an
+    order added or removed shifts every later page by one.
+
+    Upstream ignores values it does not understand, so ``type``, ``dir`` and the
+    filters' ``comparison`` are checked first and a wrong one is refused.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         type: ``SALES`` or ``PURCHASE``; both when left out.
         fiscal_period_id: The fiscal period, an ``id`` from ``list_fiscal_periods``,
-            e.g. ``1``; the current fiscal period when left out.
+            e.g. ``1``. When left out, upstream uses the API user's current period,
+            which ``meta.request`` does not show.
         query: Full-text search, e.g. ``"Büromöbel"``.
         filter: Filters that must all match, each with ``comparison`` (``eq``, ``like``,
             ``gt`` or ``lt``; ``like`` when left out), ``field`` (a column of the list,
@@ -641,8 +675,9 @@ async def list_orders_async(
         only_notes: ``true`` for orders with notes only.
         sort: The column to sort by, e.g. ``date`` (upstream's default) or ``nr``.
         dir: ``DESC`` (upstream's default) or ``ASC``.
-        start: The offset of the first order, e.g. ``0`` (the default) or ``50``.
-        limit: One page of at most this many orders, e.g. ``50``; every order when
+        start: The offset of the first order, ``0`` (the default) for the first page;
+            for the next, ``start`` plus the number of orders received, e.g. ``20``.
+        limit: One page of at most this many orders, e.g. ``20``; every order when
             left out.
     """
     filters = _check_list_arguments(
@@ -687,7 +722,8 @@ async def get_order_async(org: str, id: int) -> Result[OrderDetail]:
     amounts ``sub_total``, ``tax``, ``total``, ``total_to_pay`` and ``paid``, and its
     ``items``, each with ``name``, ``description``, ``quantity``, ``unit_price``,
     ``account_id``, ``tax_code``, and the computed ``net_total``, ``tax_total`` and
-    ``gross_total``. An id no order has raises ``NotFoundError``.
+    ``gross_total``. An id no order has raises ``NotFoundError``; that answer is assumed
+    for orders, observed for accounts, currencies and the journal.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
