@@ -295,6 +295,22 @@ async def test_status_errors_do_not_name_the_subdomain(
     assert_no_tenant(error)
 
 
+async def test_a_429_is_a_rate_limit_error_with_retry_after(
+    respx_mock: respx.MockRouter,
+) -> None:
+    """ADR-0010 decision 3: core's mapping inside ``classify``, ``Retry-After`` as sent.
+
+    CashCtrl documents the 429 and nothing about its window (``error-handling.md``); 120
+    seconds is beyond the retry policy's backoff, so the client raises at once.
+    """
+    route = respx_mock.get(f"{BASE}/account/list.json")
+    route.respond(429, headers={"Retry-After": "120"}, text="Too Many Requests")
+    error = await raised("/account/list.json")
+    assert isinstance(error, RateLimitError)
+    assert error.retry_after == 120.0
+    assert route.call_count == 1
+
+
 async def test_wrong_key_replays_as_auth_error(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:

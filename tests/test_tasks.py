@@ -46,6 +46,18 @@ def basic_user(request: httpx.Request) -> str:
     return base64.b64decode(encoded).decode().partition(":")[0]
 
 
+def carries(request: httpx.Request, key: str) -> bool:
+    """Whether ``key``, plain or as a basic auth token, is anywhere in ``request``.
+
+    Only the answer leaves this function, so no test frame ever holds the key or its token
+    in a local that ``pytest -l`` could print.
+    """
+    token = base64.b64encode(f"{key}:".encode()).decode()
+    outgoing = [str(request.url), *request.headers.values(), basic_user(request)]
+    outgoing.append(request.content.decode())
+    return any(key in part or token in part for part in outgoing)
+
+
 @pytest.mark.anyio
 async def test_replay_tests_send_the_placeholder_key(
     demo_only: str | None, respx_mock: respx.MockRouter
@@ -67,9 +79,7 @@ async def test_replay_tests_send_the_placeholder_key(
     sends_placeholder = basic_user(sent) == demo_only
     assert sends_placeholder, "the basic auth user name does not carry the placeholder"
     if SHELL_KEY and demo_only != SHELL_KEY:
-        token = base64.b64encode(f"{SHELL_KEY}:".encode()).decode()
-        outgoing = [str(sent.url), *sent.headers.values(), basic_user(sent), sent.content.decode()]
-        leaked = any(SHELL_KEY in part or token in part for part in outgoing)
+        leaked = carries(sent, SHELL_KEY)
         assert not leaked, f"the key in {variable} went out with the request"
 
 
@@ -650,6 +660,26 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
 }
 
 
+def tool_arguments(
+    tool: str, case: tuple[str, dict[str, typing.Any]], fixtures_dir: Path
+) -> dict[str, typing.Any]:
+    """The arguments ``case`` was recorded with, as JSON: the read takes 1020's id."""
+    arguments = case[1]
+    if tool == "cashctrl_get_account":
+        arguments = {"id": account_1020_id(fixtures_dir)}
+    return {
+        key: [item.model_dump() for item in value] if key == "filter" else value
+        for key, value in arguments.items()
+    }
+
+
+def snake_case_violations(data: object) -> list[str]:
+    """The keys of ``data``, at any depth, that are not snake_case; none must be."""
+    found = sorted(set(keys(data)))
+    assert found, "a result without keys proves nothing"
+    return [key for key in found if not SNAKE_CASE.fullmatch(key)]
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(("tool", "case"), TOOL_CASES.items(), ids=TOOL_CASES.keys())
 async def test_tool_results_carry_snake_case_keys(
@@ -663,16 +693,36 @@ async def test_tool_results_carry_snake_case_keys(
     ``meta.request`` is not checked: it records the parameters as sent, under upstream's
     names (``onlyActive``).
     """
-    fixture, arguments = case
-    endpoint, name = fixture.split("/")
-    replay_fixture(endpoint, name)
-    if tool == "cashctrl_get_account":
-        arguments = {"id": account_1020_id(fixtures_dir)}
-    arguments = {
-        key: [item.model_dump() for item in value] if key == "filter" else value
-        for key, value in arguments.items()
-    }
+    replay_fixture(*case[0].split("/"))
+    arguments = tool_arguments(tool, case, fixtures_dir)
     payload = await mcp_call(server, tool, {"org": DEMO, **arguments})
-    found = sorted(set(keys(payload["data"])))
-    assert found
-    assert [key for key in found if not SNAKE_CASE.fullmatch(key)] == []
+    assert snake_case_violations(payload["data"]) == []
+
+
+@pytest.mark.parametrize(("tool", "case"), TOOL_CASES.items(), ids=TOOL_CASES.keys())
+def test_route_results_carry_snake_case_keys(
+    replay_fixture: Callable[[str, str], respx.Route],
+    fixtures_dir: Path,
+    tool: str,
+    case: tuple[str, dict[str, typing.Any]],
+) -> None:
+    """The HTTP twin: every key of every route's ``data`` is snake_case, GET and POST alike."""
+    from fastapi import FastAPI
+    from fastapi.routing import APIRoute
+    from fastapi.testclient import TestClient
+
+    from xippios.cashctrl.http import router
+
+    app = FastAPI()
+    app.include_router(router)
+    path = f"/cashctrl/{tool.removeprefix('cashctrl_')}"
+    (route,) = [r for r in router.routes if isinstance(r, APIRoute) and r.path == path]
+    replay_fixture(*case[0].split("/"))
+    arguments = {"org": DEMO, **tool_arguments(tool, case, fixtures_dir)}
+    client = TestClient(app)
+    if route.methods == {"POST"}:
+        response = client.post(path, json=arguments)
+    else:
+        response = client.get(path, params=arguments)
+    assert response.status_code == 200, response.text
+    assert snake_case_violations(response.json()["data"]) == []

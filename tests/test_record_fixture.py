@@ -19,7 +19,7 @@ from xippios.cashctrl._client import DEMO, ORGS_ENV, api_key_env, subdomain_env
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "record_fixture.py"
 REAL = "realsub"
-KEY = "real-key-for-the-test"  # pragma: allowlist secret
+KEY = "Qz7k-key-for-the-test"  # pragma: allowlist secret
 
 
 def load_recorder() -> ModuleType:
@@ -197,18 +197,20 @@ def test_e_mail_addresses_become_the_placeholder(
         "total": 1,
         "data": [
             {
-                "createdBy": "Jane.Doe+books@corp.example.ch",
+                "createdBy": "Jane.Doe+books@corp.example",
                 "lastUpdatedBy": "SYSTEM",
-                "notes": "<p>ask\nhans.muster@beispiel.ch or <a href='mailto:x@y.org'>x</a></p>",
+                "notes": (
+                    "<p>ask\nhans.muster@beispiel.example or <a href='mailto:x@y.example'>x</a></p>"
+                ),
             }
         ],
     }
     route.mock(
-        return_value=httpx.Response(200, json=body, headers={"X-Contact": "ops@corp.example.ch"})
+        return_value=httpx.Response(200, json=body, headers={"X-Contact": "ops@corp.example"})
     )
-    assert recorder.main(["account/list.json", "with_users", "query=jane@corp.example.ch"]) == 0
+    assert recorder.main(["account/list.json", "with_users", "query=jane@corp.example"]) == 0
     text = (tmp_path / "tests" / "fixtures" / "account_list" / "with_users.json").read_text()
-    for gone in ("Jane.Doe", "hans.muster", "beispiel", "corp.example", "x@y.org", "jane"):
+    for gone in ("Jane.Doe", "hans.muster", "beispiel", "corp.example", "x@y.example", "jane"):
         assert gone not in text
     fixture = json.loads(text)
     assert fixture["request"]["url"].endswith("?query=user%40example.com")
@@ -231,13 +233,13 @@ def test_an_address_the_scrub_cannot_reach_is_never_written(
     # An escape right before the address: the raw text is left alone, the decoded body
     # still shows the address, so the final check refuses the write.
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
-    route.mock(return_value=httpx.Response(200, content=b'{"notes": "\\u00e9mile@corp.ch"}'))
+    route.mock(return_value=httpx.Response(200, content=b'{"notes": "\\u00e9mile@corp.example"}'))
     assert recorder.main(["account/list.json", "escaped"]) == 1
     assert not (tmp_path / "tests" / "fixtures" / "account_list").exists()
     out = capsys.readouterr().out
     assert "not written" in out
     assert "an e-mail address other than user@example.com" in out
-    assert "corp.ch" not in out
+    assert "corp.example" not in out
 
 
 def test_the_check_names_an_address_but_never_shows_it(recorder: ModuleType) -> None:
@@ -251,10 +253,10 @@ def test_the_check_names_an_address_but_never_shows_it(recorder: ModuleType) -> 
     )
     assert recorder.check(clean, REAL, KEY) == ([], [])
     for leaky in (
-        fixture("https://demo.cashctrl.com/api/v1/x.json?q=a%40b.ch", [], "{}"),
-        fixture("https://demo.cashctrl.com/", [["x-user", "a@b.ch"]], "{}"),
-        fixture("https://demo.cashctrl.com/", [], '{"createdBy": "a@b.ch"}'),
-        fixture("https://demo.cashctrl.com/", [], "plain text from a@b.ch"),
+        fixture("https://demo.cashctrl.com/api/v1/x.json?q=a%40b.example", [], "{}"),
+        fixture("https://demo.cashctrl.com/", [["x-user", "a@b.example"]], "{}"),
+        fixture("https://demo.cashctrl.com/", [], '{"createdBy": "a@b.example"}'),
+        fixture("https://demo.cashctrl.com/", [], "plain text from a@b.example"),
     ):
         leaks, _ = recorder.check(leaky, REAL, KEY)
         assert leaks == ["an e-mail address other than user@example.com"]
@@ -356,11 +358,11 @@ def test_amounts_are_recorded(
 @pytest.mark.parametrize(
     "written",
     [
-        "jane&#64;corp.ch",
-        "jane&#064;corp.ch",
-        "jane&#x40;corp.ch",
-        "jane&#X40;corp.ch",
-        "jane&commat;corp.ch",
+        "jane&#64;corp.example",
+        "jane&#064;corp.example",
+        "jane&#x40;corp.example",
+        "jane&#X40;corp.example",
+        "jane&commat;corp.example",
     ],
 )
 def test_html_entities_count_as_at(
@@ -372,7 +374,7 @@ def test_html_entities_count_as_at(
     assert recorder.main(["account/read.json", "html", "id=1"]) == 0
     text = (tmp_path / "tests" / "fixtures" / "account_read" / "html.json").read_text()
     assert "jane" not in text
-    assert "corp.ch" not in text
+    assert "corp.example" not in text
     data = json.loads(json.loads(text)["response"]["body"])["data"]
     assert data["notes"] == (
         "<p>Questions to <a href='mailto:user@example.com'>user@example.com</a></p>"
@@ -385,40 +387,149 @@ def test_html_entities_count_as_at(
     assert leaks == ["an e-mail address other than user@example.com"], "and in the final check"
 
 
+OWN = f"API:{KEY[:4]}"
+"""The tag CashCtrl gives the recorder's own API user: ``API:`` and the key's first four."""
+
+
+def fixture_text(url: str = "", headers: list[list[str]] | None = None, body: str = "{}") -> str:
+    """A serialised fixture as ``check`` reads it."""
+    response = {"headers": headers or [], "body": body}
+    return json.dumps({"request": {"url": url}, "response": response})
+
+
 def test_api_user_tags_become_redacted(
     recorder: ModuleType,
     tmp_path: Path,
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """CashCtrl names an API user ``API:`` plus the first four characters of its key."""
-    own = f"API:{KEY[:4]}"
+    """In ``createdBy`` and ``lastUpdatedBy``, in any case, also right after a JSON escape."""
     record = {
         "id": 2,
-        "createdBy": own,
-        "lastUpdatedBy": "API:Zq7x",  # another API user's key, also never written
-        "notes": "SYSTEM",
+        "createdBy": OWN,
+        "lastUpdatedBy": "api:zq7x",  # another API user's key, in lower case
+        "notes": "first line\nAPI:Ab12 wrote this",  # raw JSON: \n, then the tag
+        "custom": "SYSTEM",
     }
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/fiscalperiod/list.json")
     route.mock(return_value=httpx.Response(200, json={"total": 1, "data": [record]}))
     assert recorder.main(["fiscalperiod/list.json", "api_users"]) == 0
     text = (tmp_path / "tests" / "fixtures" / "fiscalperiod_list" / "api_users.json").read_text()
-    assert own not in text
-    assert "Zq7x" not in text
+    for gone in (KEY[:4], "zq7x", "Ab12"):
+        assert gone not in text
     (written,) = json.loads(json.loads(text)["response"]["body"])["data"]
     assert (written["createdBy"], written["lastUpdatedBy"]) == ("API:REDACTED", "API:REDACTED")
-    assert written["notes"] == "SYSTEM"
-    assert own not in capsys.readouterr().out
+    assert written["notes"] == "first line\nAPI:REDACTED wrote this", "still the JSON sent"
+    assert written["custom"] == "SYSTEM"
+    assert KEY[:4] not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("tag", [f"API:{KEY[:4]}", "API:Zq7x"])
-def test_the_check_refuses_an_api_user_tag_but_never_shows_it(
-    recorder: ModuleType, tag: str
+@pytest.mark.parametrize(
+    "content",
+    [
+        b'{"notes": "xAPI:Ab12"}',  # glued to a word: the scrub leaves it
+        ('{"notes": "x' + OWN + '"}').encode(),
+        b'{"createdBy": "\\u0041PI:Ab12"}',  # only the decoded string shows the marker
+        ('{"createdBy": "\\u0041PI:' + KEY[:4] + '"}').encode(),
+    ],
+    ids=["glued", "own-glued", "escaped-marker", "own-escaped-marker"],
+)
+def test_a_tag_the_scrub_cannot_reach_is_never_written(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    content: bytes,
 ) -> None:
-    body = json.dumps({"total": 1, "data": [{"createdBy": tag}]})
-    text = json.dumps({"request": {"url": ""}, "response": {"headers": [], "body": body}})
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/fiscalperiod/list.json")
+    route.mock(return_value=httpx.Response(200, content=content))
+    assert recorder.main(["fiscalperiod/list.json", "unreachable"]) == 1
+    assert not (tmp_path / "tests" / "fixtures" / "fiscalperiod_list").exists()
+    out = capsys.readouterr().out
+    assert "an API user tag other than API:REDACTED" in out
+    for hidden in ("Ab12", KEY[:4]):
+        assert hidden not in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        fixture_text(body=json.dumps({"createdBy": "API:Zq7x"})),
+        fixture_text(body=json.dumps({"createdBy": "api:zq7x"})),
+        fixture_text(body=json.dumps({"lastUpdatedBy": "Api:Zq7x"})),
+        fixture_text(body=json.dumps({"notes": "xAPI:Ab12"})),
+        fixture_text(body=json.dumps({"notes": "line\nAPI:Ab12"})),
+        fixture_text(body=json.dumps({"createdBy": OWN})),
+        fixture_text(body=json.dumps({"createdBy": OWN.lower()})),
+        fixture_text(headers=[["x-user", "API:Zq7x"]]),
+        fixture_text(url="https://demo.cashctrl.com/api/v1/x.json?q=API:Zq7x"),
+    ],
+    ids=[
+        "body",
+        "lower-case",
+        "mixed-case",
+        "glued",
+        "after-escape",
+        "own",
+        "own-lower-case",
+        "header",
+        "url",
+    ],
+)
+def test_the_check_refuses_any_tag_in_any_case_and_position(
+    recorder: ModuleType, text: str
+) -> None:
     leaks, _ = recorder.check(text, REAL, KEY)
-    assert leaks == ["an API user tag other than API:REDACTED"]
-    assert all(tag not in leak for leak in leaks)
-    clean = text.replace(tag, "API:REDACTED")
-    assert recorder.check(clean, REAL, KEY) == ([], [])
+    assert "an API user tag other than API:REDACTED" in leaks
+    for hidden in ("Zq7x", "zq7x", "Ab12", KEY[:4], KEY[:4].lower()):
+        assert all(hidden not in leak for leak in leaks)
+
+
+@pytest.mark.parametrize(
+    "written",
+    [f"API%3A{KEY[:4]}", f"API: {KEY[:4]}", f"API&#58;{KEY[:4]}", f"api&colon;{KEY[:4]}"],
+    ids=["url-encoded", "space", "decimal-entity", "named-entity"],
+)
+def test_the_own_tag_is_found_where_the_general_pattern_is_not(
+    recorder: ModuleType, written: str
+) -> None:
+    """The deciding branch here is the key's own tag: the general pattern needs ``API:``."""
+    text = fixture_text(body=json.dumps({"createdBy": written}))
+    assert recorder.API_USER_ANYWHERE.search(text) is None
+    leaks, _ = recorder.check(text, REAL, KEY)
+    assert "an API user tag other than API:REDACTED" in leaks
+    other, _ = recorder.check(text, REAL, "Wv3m-another-key")  # pragma: allowlist secret
+    assert other == [], "without the key's own prefix nothing decides"
+
+
+def test_a_bare_key_prefix_is_refused_as_a_possible_prefix(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Four characters alone may be a coincidence; nothing is written all the same."""
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/fiscalperiod/list.json")
+    route.mock(return_value=httpx.Response(200, json={"notes": f"ref {KEY[:4]} only"}))
+    assert recorder.main(["fiscalperiod/list.json", "bare_prefix"]) == 1
+    assert not (tmp_path / "tests" / "fixtures" / "fiscalperiod_list").exists()
+    out = capsys.readouterr().out
+    assert "possible key prefix" in out
+    assert "an API user tag" not in out
+    assert KEY[:4] not in out
+    leaks, _ = recorder.check(fixture_text(body=json.dumps({"n": KEY[:4]})), REAL, KEY)
+    assert len(leaks) == 1
+    assert leaks[0].startswith("a possible key prefix: ")
+
+
+def test_the_scrubbed_tag_and_other_api_words_pass(recorder: ModuleType) -> None:
+    body = json.dumps({"createdBy": "API:REDACTED", "notes": "the API: see the docs; api:"})
+    assert recorder.check(fixture_text(body=body), REAL, KEY) == ([], [])
+
+
+def test_every_committed_fixture_passes_the_final_check(recorder: ModuleType) -> None:
+    """The recorded fixtures hold no tag, address or credential the check would refuse."""
+    fixtures = sorted((Path(__file__).parent / "fixtures").glob("*/*.json"))
+    assert len(fixtures) == 9
+    for path in fixtures:
+        assert recorder.check(path.read_text(encoding="utf-8"), "demo", "") == ([], []), path.name
