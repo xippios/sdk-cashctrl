@@ -31,6 +31,14 @@ those answers showed:
 - A field that may be absent or ``null`` is ``X | None`` and defaults to ``None``. A
   field only ever seen as ``null`` or ``[]`` whose shape no table describes is kept as
   the JSON upstream sends (``JsonValue``) rather than guessed.
+- A ``read.json`` record differs from its ``list.json`` entry (``Account`` and
+  ``AccountDetail``, ``JournalEntry`` and ``JournalEntryDetail``, ``Person`` and
+  ``PersonDetail``, ``Order`` and ``OrderDetail``); ``person/read.json`` leaves out
+  every field whose value is ``null``.
+- An id the create tables document as TEXT (``associateId`` of a journal entry or one of
+  its lines, ``responsiblePersonId``, ``unitId``) is kept as the number it is; the lines
+  of a collective journal entry send ``associateId`` as a string (``"3"``), parsed to
+  ``3``.
 """
 
 from datetime import date, datetime
@@ -48,7 +56,19 @@ __all__ = [
     "Direction",
     "Filter",
     "FiscalPeriod",
+    "JournalEntry",
+    "JournalEntryDetail",
+    "JournalItem",
+    "JournalRow",
     "ListResponse",
+    "Order",
+    "OrderDetail",
+    "OrderItem",
+    "OrderType",
+    "Person",
+    "PersonAddress",
+    "PersonContact",
+    "PersonDetail",
     "ReadResponse",
     "TaxCode",
     "TaxComponent",
@@ -362,3 +382,630 @@ class AccountDetail(_AccountFields):
     allocations: list[JsonValue]
     is_default_currency: bool = Field(validation_alias="isDefaultCurrency")
     is_foreign_currency: bool = Field(validation_alias="isForeignCurrency")
+
+
+OrderType = Literal["SALES", "PURCHASE"]
+"""The values of ``type`` on ``order/list.json``: "Possible values: SALES, PURCHASE"."""
+
+
+class JournalItem(UpstreamModel):
+    """One line of a collective journal entry, an item of ``JournalEntryDetail.items``.
+
+    Typed from the ``items`` table of ``journal/create.json`` (``docs/upstream/journal.md``):
+    ``account_id``, ``debit`` and ``credit`` (one of the two is set), ``description``,
+    ``tax_id``, and ``associate_id``, documented as TEXT (an id, or a name that creates a
+    person) and sent as a string (``"3"``) in the read, parsed as the person's id.
+    ``allocations`` were only seen empty and are kept as sent. Typed from observation:
+    ``id``, ``journal_id``, ``pos``, ``amount``, ``tax_rate``, ``tax_code``,
+    ``associate_name`` and ``account_name`` (the account's localised name, without its
+    number).
+    """
+
+    id: int
+    journal_id: int | None = Field(default=None, validation_alias="journalId")
+    account_id: int = Field(validation_alias="accountId")
+    account_name: str | None = Field(default=None, validation_alias="accountName")
+    associate_id: int | None = Field(default=None, validation_alias="associateId")
+    associate_name: str | None = Field(default=None, validation_alias="associateName")
+    description: str | None = None
+    debit: Decimal | None = None
+    credit: Decimal | None = None
+    amount: Decimal | None = None
+    tax_id: int | None = Field(default=None, validation_alias="taxId")
+    tax_code: str | None = Field(default=None, validation_alias="taxCode")
+    tax_rate: Decimal | None = Field(default=None, validation_alias="taxRate")
+    pos: int | None = None
+    allocations: list[JsonValue] = Field(default_factory=list)
+
+
+class JournalRow(UpstreamModel):
+    """One booking row of a journal entry, an item of ``JournalEntryDetail.rows``.
+
+    Not documented; typed from observation. A row per account the entry books to, with
+    its debit, credit and tax amounts in three variants, ``fc_*``, ``ac_*`` and ``dc_*``,
+    which upstream does not explain (equal in every observed row, all in CHF). An entry
+    with a tax code shows the taxed account's row net of tax, ``is_taxed``, and a separate
+    row on the tax account, ``is_tax``: for an invoice of 3'600.00 with 8.1 %, 3'330.25 on
+    3200 and 269.75 on 2200. ``tax_percentage`` is the rate of the taxed and the tax row.
+    """
+
+    account_id: int = Field(validation_alias="accountId")
+    account_name: str | None = Field(default=None, validation_alias="accountName")
+    fc_debit: Decimal = Field(validation_alias="fcDebit")
+    fc_credit: Decimal = Field(validation_alias="fcCredit")
+    ac_debit: Decimal = Field(validation_alias="acDebit")
+    ac_credit: Decimal = Field(validation_alias="acCredit")
+    dc_debit: Decimal = Field(validation_alias="dcDebit")
+    dc_credit: Decimal = Field(validation_alias="dcCredit")
+    fc_tax: Decimal = Field(validation_alias="fcTax")
+    ac_tax: Decimal = Field(validation_alias="acTax")
+    dc_tax: Decimal = Field(validation_alias="dcTax")
+    tax_percentage: Decimal | None = Field(default=None, validation_alias="taxPercentage")
+    is_taxed: bool = Field(validation_alias="isTaxed")
+    is_tax: bool = Field(validation_alias="isTax")
+
+
+class _JournalEntryFields(UpstreamModel):
+    """The fields ``journal/list.json`` and ``journal/read.json`` both send."""
+
+    id: int
+    type: str
+    date_added: UpstreamDate = Field(validation_alias="dateAdded")
+    title: str | None = None
+    reference: str | None = None
+    amount: Decimal
+    debit_id: int | None = Field(default=None, validation_alias="debitId")
+    credit_id: int | None = Field(default=None, validation_alias="creditId")
+    associate_id: int | None = Field(default=None, validation_alias="associateId")
+    associate_name: str | None = Field(default=None, validation_alias="associateName")
+    tax_id: int | None = Field(default=None, validation_alias="taxId")
+    tax_code: str | None = Field(default=None, validation_alias="taxCode")
+    tax_rate: Decimal | None = Field(default=None, validation_alias="taxRate")
+    currency_id: int | None = Field(default=None, validation_alias="currencyId")
+    currency_code: str | None = Field(default=None, validation_alias="currencyCode")
+    currency_rate: Decimal | None = Field(default=None, validation_alias="currencyRate")
+    custom: str | None = None
+    notes: str | None = None
+    items_count: int = Field(validation_alias="itemsCount")
+    attachment_count: int = Field(validation_alias="attachmentCount")
+    allocation_count: int | None = Field(default=None, validation_alias="allocationCount")
+    cost_center_ids: JsonValue = Field(default=None, validation_alias="costCenterIds")
+    cost_center_numbers: JsonValue = Field(default=None, validation_alias="costCenterNumbers")
+    order_id: JsonValue = Field(default=None, validation_alias="orderId")
+    order_book_entry_id: JsonValue = Field(default=None, validation_alias="orderBookEntryId")
+    salary_book_entry_id: JsonValue = Field(default=None, validation_alias="salaryBookEntryId")
+    statement_id: JsonValue = Field(default=None, validation_alias="statementId")
+    inventory_id: JsonValue = Field(default=None, validation_alias="inventoryId")
+    import_entry_id: JsonValue = Field(default=None, validation_alias="importEntryId")
+    imported: JsonValue = None
+    imported_by: JsonValue = Field(default=None, validation_alias="importedBy")
+    recurrence: str | None = None
+    start_date: UpstreamDate | None = Field(default=None, validation_alias="startDate")
+    end_date: UpstreamDate | None = Field(default=None, validation_alias="endDate")
+    days_before: int | None = Field(default=None, validation_alias="daysBefore")
+    notify_type: str | None = Field(default=None, validation_alias="notifyType")
+    notify_person_id: int | None = Field(default=None, validation_alias="notifyPersonId")
+    notify_user_id: int | None = Field(default=None, validation_alias="notifyUserId")
+    notify_email: str | None = Field(default=None, validation_alias="notifyEmail")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class JournalEntry(_JournalEntryFields):
+    """One journal entry, an entry of ``journal/list.json`` (``docs/upstream/journal.md``).
+
+    A book entry, manual or made by another module (orders, salary, imports). Typed from
+    the tables of ``journal/create.json`` and ``update.json``: ``date_added`` (the date of
+    the entry, ``YYYY-MM-DD``), ``title``, ``reference``, ``amount``, ``debit_id``,
+    ``credit_id``, ``associate_id`` (documented as TEXT, an id or a name; seen as a
+    number), ``tax_id``, ``currency_id``, ``currency_rate``, ``custom`` (XML), ``notes``
+    (HTML), ``recurrence``, ``start_date``, ``end_date``, ``days_before`` and the
+    ``notify_*`` fields.
+
+    Typed from observation: ``type`` (seen: ``MANUAL``, ``COLLECTIVE``), ``debit_name``
+    and ``credit_name`` (the account's number and localised name), ``associate_name``,
+    ``tax_code``, ``tax_rate``, ``currency_code``, ``items_count`` (the lines of a
+    collective entry, ``0`` otherwise), ``attachment_count``, ``allocation_count``,
+    ``recurring`` with its ``is_*`` twin, and the ``created*``/``last_updated*``
+    bookkeeping fields. A collective entry has no ``debit_id`` and one ``credit_id`` in
+    the list; its lines are in ``get_journal_entry``'s ``items``. Only seen as ``null``
+    and kept as sent: ``order_id``, ``order_book_entry_id``, ``salary_book_entry_id``,
+    ``statement_id``, ``inventory_id``, ``import_entry_id``, ``imported``,
+    ``imported_by``, ``cost_center_ids``, ``cost_center_numbers``, and the list's
+    ``account_id``, ``account_currency_id``, ``account_class``, ``balance``,
+    ``name_singular`` and ``order_type``.
+    """
+
+    debit_name: str | None = Field(default=None, validation_alias="debitName")
+    credit_name: str | None = Field(default=None, validation_alias="creditName")
+    account_id: JsonValue = Field(default=None, validation_alias="accountId")
+    account_currency_id: JsonValue = Field(default=None, validation_alias="accountCurrencyId")
+    account_class: JsonValue = Field(default=None, validation_alias="accountClass")
+    balance: JsonValue = None
+    name_singular: JsonValue = Field(default=None, validation_alias="nameSingular")
+    order_type: JsonValue = Field(default=None, validation_alias="orderType")
+    recurring: bool
+    is_recurring: bool = Field(validation_alias="isRecurring")
+
+
+class PersonAddress(UpstreamModel):
+    """One address of a person, an item of ``PersonDetail.addresses``.
+
+    Typed from the ``addresses`` table of ``person/create.json``
+    (``docs/upstream/person.md``): ``type`` (``MAIN``, ``INVOICE``, ``DELIVERY``,
+    ``SALARY``, ``HISTORICAL``, ``OTHER``), ``address`` (street and number, may span
+    lines), ``zip``, ``city``, ``canton`` (Swiss cantons only), ``country`` (ISO 3166
+    alpha-3, ``CHE``), ``company``, ``first_name``, ``last_name``, ``is_hide_company`` and
+    ``is_hide_name``. Typed from observation: ``id``, ``person_id``, ``pos``, the twins
+    ``hide_company`` and ``hide_name``, ``company_for_address``,
+    ``first_name_for_address``, ``last_name_for_address``, ``street_name`` and
+    ``street_number`` (``address`` split), ``title_name``, ``canton_code``,
+    ``country_code2`` and ``country_code3``. ``title_id`` was only seen as ``null``.
+    """
+
+    id: int
+    person_id: int | None = Field(default=None, validation_alias="personId")
+    type: str
+    address: str | None = None
+    zip: str | None = None
+    city: str | None = None
+    canton: str | None = None
+    country: str | None = None
+    company: str | None = None
+    first_name: str | None = Field(default=None, validation_alias="firstName")
+    last_name: str | None = Field(default=None, validation_alias="lastName")
+    title_id: JsonValue = Field(default=None, validation_alias="titleId")
+    title_name: str | None = Field(default=None, validation_alias="titleName")
+    company_for_address: str | None = Field(default=None, validation_alias="companyForAddress")
+    first_name_for_address: str | None = Field(default=None, validation_alias="firstNameForAddress")
+    last_name_for_address: str | None = Field(default=None, validation_alias="lastNameForAddress")
+    street_name: str | None = Field(default=None, validation_alias="streetName")
+    street_number: str | None = Field(default=None, validation_alias="streetNumber")
+    canton_code: str | None = Field(default=None, validation_alias="cantonCode")
+    country_code2: str | None = Field(default=None, validation_alias="countryCode2")
+    country_code3: str | None = Field(default=None, validation_alias="countryCode3")
+    pos: int | None = None
+    hide_company: bool | None = Field(default=None, validation_alias="hideCompany")
+    is_hide_company: bool | None = Field(default=None, validation_alias="isHideCompany")
+    hide_name: bool | None = Field(default=None, validation_alias="hideName")
+    is_hide_name: bool | None = Field(default=None, validation_alias="isHideName")
+
+
+class PersonContact(UpstreamModel):
+    """One piece of contact information of a person, an item of ``PersonDetail.contacts``.
+
+    Typed from the ``contacts`` table of ``person/create.json``: ``type`` (``EMAIL_WORK``,
+    ``EMAIL_INVOICE``, ``PHONE_WORK``, ``WEBSITE`` and the rest), ``address`` (the e-mail
+    address, phone number or URL itself) and ``notes``. Typed from observation: ``id``,
+    ``person_id`` and ``pos``; ``purpose`` was only seen as ``null``.
+    """
+
+    id: int
+    person_id: int | None = Field(default=None, validation_alias="personId")
+    type: str
+    address: str
+    notes: str | None = None
+    purpose: JsonValue = None
+    pos: int | None = None
+
+
+class _PersonFields(UpstreamModel):
+    """The fields ``person/list.json`` and ``person/read.json`` share.
+
+    ``read.json`` leaves out every field whose value is ``null`` (observed on 2026-10-23;
+    the list sends them as ``null``), so everything that may be empty defaults to ``None``.
+    """
+
+    id: int
+    nr: str | None = None
+    name: str | None = None
+    company: str | None = None
+    first_name: str | None = Field(default=None, validation_alias="firstName")
+    last_name: str | None = Field(default=None, validation_alias="lastName")
+    alt_name: str | None = Field(default=None, validation_alias="altName")
+    category_id: int | None = Field(default=None, validation_alias="categoryId")
+    category_name: str | None = Field(default=None, validation_alias="categoryName")
+    title_id: int | None = Field(default=None, validation_alias="titleId")
+    position: str | None = None
+    department: str | None = None
+    industry: str | None = None
+    language: str | None = None
+    language_name: str | None = Field(default=None, validation_alias="languageName")
+    address: str | None = None
+    zip: str | None = None
+    city: str | None = None
+    canton: str | None = None
+    country: str | None = None
+    email_work: str | None = Field(default=None, validation_alias="emailWork")
+    vat_uid: str | None = Field(default=None, validation_alias="vatUid")
+    bank_data: str | None = Field(default=None, validation_alias="bankData")
+    discount_percentage: Decimal | None = Field(default=None, validation_alias="discountPercentage")
+    date_birth: UpstreamDate | None = Field(default=None, validation_alias="dateBirth")
+    color: str | None = None
+    superior_id: int | None = Field(default=None, validation_alias="superiorId")
+    user_id: int | None = Field(default=None, validation_alias="userId")
+    location_id: int | None = Field(default=None, validation_alias="locationId")
+    certificate_template_id: int | None = Field(
+        default=None, validation_alias="certificateTemplateId"
+    )
+    ssn: str | None = None
+    insurance_nr: str | None = Field(default=None, validation_alias="insuranceNr")
+    insurance_member_nr: str | None = Field(default=None, validation_alias="insuranceMemberNr")
+    custom: str | None = None
+    notes: str | None = None
+    attachment_count: int = Field(validation_alias="attachmentCount")
+    customer: bool
+    is_customer: bool = Field(validation_alias="isCustomer")
+    vendor: bool
+    is_vendor: bool = Field(validation_alias="isVendor")
+    employee: bool
+    is_employee: bool = Field(validation_alias="isEmployee")
+    insurance: bool
+    is_insurance: bool = Field(validation_alias="isInsurance")
+    family: bool
+    is_family: bool = Field(validation_alias="isFamily")
+    inactive: bool
+    is_inactive: bool = Field(validation_alias="isInactive")
+    is_auto_fill_responsible_person: bool = Field(validation_alias="isAutoFillResponsiblePerson")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class Person(_PersonFields):
+    """One person, an entry of ``person/list.json`` (``docs/upstream/person.md``).
+
+    A customer, vendor, employee, insurance or family, company or natural person. Typed
+    from the tables of ``person/create.json`` and ``update.json``: ``nr``, ``company``,
+    ``first_name``, ``last_name``, ``alt_name``, ``category_id``, ``title_id``,
+    ``position``, ``department``, ``industry``, ``language`` (``DE``, ``EN``, ``FR``,
+    ``IT``), ``vat_uid``, ``bank_data``, ``discount_percentage``, ``date_birth``,
+    ``color``, ``superior_id``, ``user_id``, ``location_id``,
+    ``certificate_template_id``, ``ssn``, ``insurance_nr``, ``insurance_member_nr``,
+    ``custom`` (XML), ``notes`` (HTML), the role flags ``is_customer``, ``is_vendor``,
+    ``is_employee``, ``is_insurance``, ``is_family`` and ``is_inactive``, and
+    ``is_auto_fill_responsible_person``.
+
+    Typed from observation: ``name`` (the company, or the person's name),
+    ``category_name`` and ``category_display`` (localised), ``language_name``, the main
+    address flattened into ``address``, ``zip``, ``city``, ``canton``, ``country`` and
+    ``country_name``, ``email_work``, ``attachment_count``, ``children_count``, the twins
+    without ``is_`` and ``auto_fill_responsible_person``, and the
+    ``created*``/``last_updated*`` bookkeeping fields. CashCtrl creates two insurance
+    persons itself (``created_by`` ``SYSTEM``). Only seen as ``null`` and kept as sent:
+    ``title``, ``title_sentence``, ``gender``, ``gender_name``, ``thumbnail_file_id``,
+    ``certificate_values``, ``discount_inherited``, ``discount_effective``, ``iban``,
+    ``bic``, ``email_private``, ``email_invoice``, ``phone_work``, ``phone_private``,
+    ``mobile_work``, ``mobile_private``, ``url``, ``superior_name`` and
+    ``location_name``.
+    """
+
+    category_display: str | None = Field(default=None, validation_alias="categoryDisplay")
+    country_name: str | None = Field(default=None, validation_alias="countryName")
+    children_count: int | None = Field(default=None, validation_alias="childrenCount")
+    auto_fill_responsible_person: bool = Field(validation_alias="autoFillResponsiblePerson")
+    title: JsonValue = None
+    title_sentence: JsonValue = Field(default=None, validation_alias="titleSentence")
+    gender: JsonValue = None
+    gender_name: JsonValue = Field(default=None, validation_alias="genderName")
+    thumbnail_file_id: JsonValue = Field(default=None, validation_alias="thumbnailFileId")
+    certificate_values: JsonValue = Field(default=None, validation_alias="certificateValues")
+    discount_inherited: JsonValue = Field(default=None, validation_alias="discountInherited")
+    discount_effective: JsonValue = Field(default=None, validation_alias="discountEffective")
+    iban: JsonValue = None
+    bic: JsonValue = None
+    email_private: JsonValue = Field(default=None, validation_alias="emailPrivate")
+    email_invoice: JsonValue = Field(default=None, validation_alias="emailInvoice")
+    phone_work: JsonValue = Field(default=None, validation_alias="phoneWork")
+    phone_private: JsonValue = Field(default=None, validation_alias="phonePrivate")
+    mobile_work: JsonValue = Field(default=None, validation_alias="mobileWork")
+    mobile_private: JsonValue = Field(default=None, validation_alias="mobilePrivate")
+    url: JsonValue = None
+    superior_name: JsonValue = Field(default=None, validation_alias="superiorName")
+    location_name: JsonValue = Field(default=None, validation_alias="locationName")
+
+
+class PersonDetail(_PersonFields):
+    """One person as ``person/read.json`` returns it (``docs/upstream/person.md``).
+
+    Observed on 2026-10-23 against the demo organisation: the read leaves out every field
+    whose value is ``null``, and sends a different set than the list. It adds the
+    structured lists below and some derived names, and has no ``category_display``,
+    ``country_name``, ``children_count`` nor the list's ``null``-only fields. The fields
+    both send are typed as on ``Person``. ``journal/read.json`` embeds the same record for
+    each person an entry names (``JournalEntryDetail.associates``).
+
+    ``addresses`` and ``contacts`` are typed from the create tables (``PersonAddress``,
+    ``PersonContact``). ``bank_accounts``, ``children``, ``service_periods``,
+    ``insurance_contracts`` and ``attachments`` are documented as inputs but were only
+    seen empty, so their items are kept as sent; so is ``certificate_values_map``, only
+    seen as ``{}``. Typed from observation: ``full_name`` (empty for a company),
+    ``company_or_full_name``, ``abbreviated_name``, ``title_name``, ``language_code``
+    (``de``), ``canton_code``, ``country_code2`` (``CH``), ``country_code3`` (``CHE``),
+    ``number_of_children`` and ``icon_cls``.
+    """
+
+    addresses: list[PersonAddress] = Field(default_factory=list)
+    contacts: list[PersonContact] = Field(default_factory=list)
+    bank_accounts: list[JsonValue] = Field(default_factory=list, validation_alias="bankAccounts")
+    children: list[JsonValue] = Field(default_factory=list)
+    service_periods: list[JsonValue] = Field(
+        default_factory=list, validation_alias="servicePeriods"
+    )
+    insurance_contracts: list[JsonValue] = Field(
+        default_factory=list, validation_alias="insuranceContracts"
+    )
+    attachments: list[JsonValue] = Field(default_factory=list)
+    certificate_values_map: JsonValue = Field(default=None, validation_alias="certificateValuesMap")
+    full_name: str | None = Field(default=None, validation_alias="fullName")
+    company_or_full_name: str | None = Field(default=None, validation_alias="companyOrFullName")
+    abbreviated_name: str | None = Field(default=None, validation_alias="abbreviatedName")
+    title_name: str | None = Field(default=None, validation_alias="titleName")
+    language_code: str | None = Field(default=None, validation_alias="languageCode")
+    canton_code: str | None = Field(default=None, validation_alias="cantonCode")
+    country_code2: str | None = Field(default=None, validation_alias="countryCode2")
+    country_code3: str | None = Field(default=None, validation_alias="countryCode3")
+    number_of_children: int | None = Field(default=None, validation_alias="numberOfChildren")
+    icon_cls: str | None = Field(default=None, validation_alias="iconCls")
+
+
+class JournalEntryDetail(_JournalEntryFields):
+    """One journal entry as ``journal/read.json`` returns it (``docs/upstream/journal.md``).
+
+    Observed on 2026-10-23 against the demo organisation: the read sends a different set
+    of fields than the list. It has no ``debit_name``, ``credit_name``, ``recurring`` nor
+    the list's ``null``-only account fields, and adds the fields below. The fields both
+    send are typed as on ``JournalEntry``; ``currency_code`` was ``null`` in the read of
+    an entry whose list entry says ``CHF``.
+
+    ``items`` are the lines of a collective entry (``JournalItem``), empty for a simple
+    one. ``rows`` are the bookings per account (``JournalRow``), tax rows included.
+    ``associates`` are the full records of the persons the entry or its lines name, as
+    ``person/read.json`` returns them. ``attachments`` and ``allocations`` are documented
+    as inputs but were only seen empty, so their items are kept as sent, as are
+    ``taxed_items`` (only seen empty) and ``recurrence_id`` (only seen ``null``). Typed
+    from observation: ``nr`` (seen equal to ``reference``), ``taxed``,
+    ``default_currency_amount``, ``account_ids`` (a JSON array of account ids as text,
+    ``["33","4","42"]``, kept as sent) and ``items_index`` (the lines' texts as one
+    search string).
+    """
+
+    nr: str | None = None
+    items: list[JournalItem] = Field(default_factory=list)
+    rows: list[JournalRow] = Field(default_factory=list)
+    associates: list[PersonDetail] = Field(default_factory=list)
+    attachments: list[JsonValue] = Field(default_factory=list)
+    allocations: list[JsonValue] = Field(default_factory=list)
+    taxed_items: list[JsonValue] = Field(default_factory=list, validation_alias="taxedItems")
+    taxed: bool
+    default_currency_amount: Decimal | None = Field(
+        default=None, validation_alias="defaultCurrencyAmount"
+    )
+    account_ids: str | None = Field(default=None, validation_alias="accountIds")
+    items_index: str | None = Field(default=None, validation_alias="itemsIndex")
+    recurrence_id: JsonValue = Field(default=None, validation_alias="recurrenceId")
+
+
+class OrderItem(UpstreamModel):
+    """One item of an order, an entry of ``OrderDetail.items``.
+
+    Typed from the ``items`` table of ``order/create.json`` (``docs/upstream/order.md``):
+    ``account_id`` (revenue account for sales, expense account for purchase), ``name``,
+    ``unit_price``, ``article_nr``, ``description``, ``discount_percentage``,
+    ``inventory_id``, ``quantity``, ``tax_id``, ``type`` (``ARTICLE``, ``TEXT``,
+    ``PAGEBREAK``, ``SUBTOTAL``, ``TITLE``, ``OPTIONTOTAL``) and ``unit_id`` (documented
+    as TEXT, the id of a unit; only seen ``null``). ``allocations`` and ``attachments``
+    were only seen empty and are kept as sent.
+
+    Typed from observation: ``id``, ``order_id``, ``pos``, ``tax_code``, ``tax_rate``,
+    ``tax_calc_type`` (``NET``), ``base_value`` (``GROSS``), the amounts
+    ``net_unit_price``, ``tax_amount`` (per unit), ``gross_total``, ``net_total``,
+    ``tax_total`` and their ``default_currency_*`` twins, ``optional`` with its ``is_*``
+    twin, ``is_inventory_article`` and ``is_included_in_stats``. ``unit_name``,
+    ``discount_inherited`` and ``discount_effective`` were only seen as ``null``.
+    """
+
+    id: int
+    order_id: int | None = Field(default=None, validation_alias="orderId")
+    pos: int | None = None
+    type: str | None = None
+    account_id: int | None = Field(default=None, validation_alias="accountId")
+    inventory_id: int | None = Field(default=None, validation_alias="inventoryId")
+    article_nr: str | None = Field(default=None, validation_alias="articleNr")
+    name: str | None = None
+    description: str | None = None
+    quantity: Decimal | None = None
+    unit_id: int | None = Field(default=None, validation_alias="unitId")
+    unit_name: JsonValue = Field(default=None, validation_alias="unitName")
+    unit_price: Decimal | None = Field(default=None, validation_alias="unitPrice")
+    net_unit_price: Decimal | None = Field(default=None, validation_alias="netUnitPrice")
+    default_currency_unit_price: Decimal | None = Field(
+        default=None, validation_alias="defaultCurrencyUnitPrice"
+    )
+    default_currency_net_unit_price: Decimal | None = Field(
+        default=None, validation_alias="defaultCurrencyNetUnitPrice"
+    )
+    discount_percentage: Decimal | None = Field(default=None, validation_alias="discountPercentage")
+    discount_inherited: JsonValue = Field(default=None, validation_alias="discountInherited")
+    discount_effective: JsonValue = Field(default=None, validation_alias="discountEffective")
+    tax_id: int | None = Field(default=None, validation_alias="taxId")
+    tax_code: str | None = Field(default=None, validation_alias="taxCode")
+    tax_rate: Decimal | None = Field(default=None, validation_alias="taxRate")
+    tax_calc_type: str | None = Field(default=None, validation_alias="taxCalcType")
+    base_value: str | None = Field(default=None, validation_alias="baseValue")
+    tax_amount: Decimal | None = Field(default=None, validation_alias="taxAmount")
+    gross_total: Decimal | None = Field(default=None, validation_alias="grossTotal")
+    net_total: Decimal | None = Field(default=None, validation_alias="netTotal")
+    tax_total: Decimal | None = Field(default=None, validation_alias="taxTotal")
+    default_currency_gross_total: Decimal | None = Field(
+        default=None, validation_alias="defaultCurrencyGrossTotal"
+    )
+    default_currency_net_total: Decimal | None = Field(
+        default=None, validation_alias="defaultCurrencyNetTotal"
+    )
+    optional: bool | None = None
+    is_optional: bool | None = Field(default=None, validation_alias="isOptional")
+    is_inventory_article: bool | None = Field(default=None, validation_alias="isInventoryArticle")
+    is_included_in_stats: bool | None = Field(default=None, validation_alias="isIncludedInStats")
+    allocations: list[JsonValue] = Field(default_factory=list)
+    attachments: list[JsonValue] = Field(default_factory=list)
+
+
+class _OrderFields(UpstreamModel):
+    """The fields ``order/list.json`` and ``order/read.json`` both send."""
+
+    id: int
+    type: str
+    nr: str | None = None
+    date: UpstreamDate
+    description: str | None = None
+    associate_id: int | None = Field(default=None, validation_alias="associateId")
+    associate_name: str | None = Field(default=None, validation_alias="associateName")
+    category_id: int = Field(validation_alias="categoryId")
+    account_id: int | None = Field(default=None, validation_alias="accountId")
+    status_id: int | None = Field(default=None, validation_alias="statusId")
+    status_name: str | None = Field(default=None, validation_alias="statusName")
+    sent_status_id: int | None = Field(default=None, validation_alias="sentStatusId")
+    book_type: str | None = Field(default=None, validation_alias="bookType")
+    group_id: int | None = Field(default=None, validation_alias="groupId")
+    previous_id: int | None = Field(default=None, validation_alias="previousId")
+    responsible_person_id: int | None = Field(default=None, validation_alias="responsiblePersonId")
+    responsible_person_name: JsonValue = Field(
+        default=None, validation_alias="responsiblePersonName"
+    )
+    rounding_id: int | None = Field(default=None, validation_alias="roundingId")
+    action_id: str | None = Field(default=None, validation_alias="actionId")
+    icon: str | None = None
+    name_singular: str | None = Field(default=None, validation_alias="nameSingular")
+    name_plural: str | None = Field(default=None, validation_alias="namePlural")
+    language: str | None = None
+    due_days: int | None = Field(default=None, validation_alias="dueDays")
+    has_due_days: bool = Field(validation_alias="hasDueDays")
+    currency_id: int | None = Field(default=None, validation_alias="currencyId")
+    currency_code: str | None = Field(default=None, validation_alias="currencyCode")
+    currency_rate: Decimal | None = Field(default=None, validation_alias="currencyRate")
+    discount_percentage: Decimal | None = Field(default=None, validation_alias="discountPercentage")
+    sub_total: Decimal = Field(validation_alias="subTotal")
+    tax: Decimal
+    total: Decimal
+    open: Decimal | None = None
+    group_open: Decimal | None = Field(default=None, validation_alias="groupOpen")
+    date_last_booked: datetime | None = Field(default=None, validation_alias="dateLastBooked")
+    qr_reference: str | None = Field(default=None, validation_alias="qrReference")
+    iso11649_reference: str | None = Field(default=None, validation_alias="iso11649Reference")
+    custom_reference: JsonValue = Field(default=None, validation_alias="customReference")
+    custom: str | None = None
+    notes: str | None = None
+    attachment_count: int = Field(validation_alias="attachmentCount")
+    allocation_count: int | None = Field(default=None, validation_alias="allocationCount")
+    cost_center_ids: JsonValue = Field(default=None, validation_alias="costCenterIds")
+    cost_center_numbers: JsonValue = Field(default=None, validation_alias="costCenterNumbers")
+    sent: JsonValue = None
+    sent_by: JsonValue = Field(default=None, validation_alias="sentBy")
+    downloaded: JsonValue = None
+    downloaded_by: JsonValue = Field(default=None, validation_alias="downloadedBy")
+    recurrence: str | None = None
+    start_date: UpstreamDate | None = Field(default=None, validation_alias="startDate")
+    end_date: UpstreamDate | None = Field(default=None, validation_alias="endDate")
+    days_before: int | None = Field(default=None, validation_alias="daysBefore")
+    notify_type: str | None = Field(default=None, validation_alias="notifyType")
+    notify_person_id: int | None = Field(default=None, validation_alias="notifyPersonId")
+    notify_user_id: int | None = Field(default=None, validation_alias="notifyUserId")
+    notify_email: str | None = Field(default=None, validation_alias="notifyEmail")
+    book: bool
+    is_book: bool = Field(validation_alias="isBook")
+    closed: bool
+    is_closed: bool = Field(validation_alias="isClosed")
+    display_item_gross: bool = Field(validation_alias="displayItemGross")
+    is_display_item_gross: bool = Field(validation_alias="isDisplayItemGross")
+    add_stock: bool = Field(validation_alias="addStock")
+    is_add_stock: bool = Field(validation_alias="isAddStock")
+    remove_stock: bool = Field(validation_alias="removeStock")
+    is_remove_stock: bool = Field(validation_alias="isRemoveStock")
+    is_credit_note: bool = Field(validation_alias="isCreditNote")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class Order(_OrderFields):
+    """One order, an entry of ``order/list.json`` (``docs/upstream/order.md``).
+
+    An offer, invoice, delivery note or other order document, sales or purchase. Typed
+    from the tables of ``order/create.json`` and ``update.json``: ``associate_id``
+    (documented as the comma-separated ids of the business partners; one id per order
+    here), ``category_id``, ``date`` (``YYYY-MM-DD``), ``account_id``, ``nr``,
+    ``description``, ``status_id``, ``group_id``, ``previous_id``,
+    ``responsible_person_id`` (documented as TEXT, an id; only seen ``null``),
+    ``rounding_id``, ``language`` (``DE``, ``EN``, ``FR``, ``IT``), ``due_days``,
+    ``currency_id``, ``currency_rate``, ``discount_percentage``, ``custom`` (XML),
+    ``notes`` (HTML), ``is_display_item_gross``, ``recurrence``, ``start_date``,
+    ``end_date``, ``days_before`` and the ``notify_*`` fields.
+
+    Typed from observation: ``type`` (``SALES``, ``PURCHASE``), ``book_type`` (``DEBIT``
+    for the sales, ``CREDIT`` for the purchase orders seen), ``associate_name``,
+    ``account`` (the account's localised name), ``status_name``, ``name_singular`` and
+    ``name_plural`` (localised, from the category), ``sent_status_id``, ``action_id``
+    (seen empty), ``icon``, the amounts ``sub_total`` (net), ``tax`` and ``total``
+    (gross), ``open`` and ``group_open`` (the amount still open, ``null`` for a draft),
+    ``date_last_booked`` (a timestamp), ``qr_reference``, ``iso11649_reference``,
+    ``currency_code``, ``attachment_count``, ``allocation_count``, the flags ``book``,
+    ``closed``, ``received``, ``recurring``, ``add_stock``, ``remove_stock`` and
+    ``display_item_gross`` with their ``is_*`` twins, ``has_due_days``,
+    ``is_credit_note``, and the ``created*``/``last_updated*`` bookkeeping fields. Only
+    seen as ``null`` and kept as sent: ``responsible_person_name``, ``custom_reference``,
+    ``sent``, ``sent_by``, ``downloaded``, ``downloaded_by``, ``cost_center_ids``,
+    ``cost_center_numbers``, ``date_due`` and ``date_received``.
+    """
+
+    account: str | None = None
+    date_due: JsonValue = Field(default=None, validation_alias="dateDue")
+    date_received: JsonValue = Field(default=None, validation_alias="dateReceived")
+    received: bool
+    is_received: bool = Field(validation_alias="isReceived")
+    recurring: bool
+    is_recurring: bool = Field(validation_alias="isRecurring")
+
+
+class OrderDetail(_OrderFields):
+    """One order as ``order/read.json`` returns it (``docs/upstream/order.md``).
+
+    Observed on 2026-10-23 against the demo organisation: the read sends a different set
+    of fields than the list. It has no ``account``, ``date_due``, ``date_received``,
+    ``received`` nor ``recurring``, and adds the fields below. The fields both send are
+    typed as on ``Order``; ``currency_code`` was ``null`` in the read of an order whose
+    list entry says ``CHF``.
+
+    ``items`` are typed from the create table (``OrderItem``). ``attachments`` are
+    documented as an input but were only seen empty, so their items are kept as sent, as
+    are ``file_id`` and ``recurrence_id`` (only seen ``null``). Typed from observation:
+    ``category_name`` (localised), ``tax_type`` (``AGREED``), ``total_to_pay``,
+    ``paid``, ``default_currency_total`` and ``rounding_difference`` (amounts), the
+    flags ``due``, ``foreign_currency``, ``has_recurrence`` and ``file_replacement`` with
+    its ``is_*`` twin, and ``hash``, an undocumented 32-character text that may be the
+    token of a public link to the order document (not verified); the fixture recorder
+    writes it as ``REDACTED``.
+    """
+
+    items: list[OrderItem] = Field(default_factory=list)
+    attachments: list[JsonValue] = Field(default_factory=list)
+    category_name: str | None = Field(default=None, validation_alias="categoryName")
+    tax_type: str | None = Field(default=None, validation_alias="taxType")
+    total_to_pay: Decimal | None = Field(default=None, validation_alias="totalToPay")
+    paid: Decimal | None = None
+    default_currency_total: Decimal | None = Field(
+        default=None, validation_alias="defaultCurrencyTotal"
+    )
+    rounding_difference: Decimal | None = Field(default=None, validation_alias="roundingDifference")
+    due: bool
+    foreign_currency: bool = Field(validation_alias="foreignCurrency")
+    has_recurrence: bool = Field(validation_alias="hasRecurrence")
+    file_replacement: bool = Field(validation_alias="fileReplacement")
+    is_file_replacement: bool = Field(validation_alias="isFileReplacement")
+    hash: str | None = None
+    file_id: JsonValue = Field(default=None, validation_alias="fileId")
+    recurrence_id: JsonValue = Field(default=None, validation_alias="recurrenceId")

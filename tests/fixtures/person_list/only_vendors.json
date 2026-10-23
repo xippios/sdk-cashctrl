@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-23T11:47:13.529793Z",
+  "request": {
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/person/list.json?onlyVendors=true&start=0&limit=100"
+  },
+  "response": {
+    "body": "{\"total\":4,\"data\":[{\"id\":4,\"created\":\"2026-10-23 10:29:14.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:14.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"categoryId\":2,\"categoryName\":\"<values><de>Lieferanten</de><en>Vendors</en><fr>Fournisseurs</fr><it>Fornitori</it></values>\",\"categoryDisplay\":\"<values><de>Lieferanten</de><en>Vendors</en><fr>Fournisseurs</fr><it>Fornitori</it></values>\",\"thumbnailFileId\":null,\"certificateTemplateId\":null,\"certificateValues\":null,\"title\":null,\"titleId\":null,\"titleSentence\":null,\"gender\":null,\"nr\":\"P-00002\",\"name\":\"Beispiel Telecom AG\",\"firstName\":null,\"lastName\":null,\"company\":\"Beispiel Telecom AG\",\"position\":null,\"industry\":null,\"department\":null,\"language\":\"DE\",\"languageName\":\"Deutsch\",\"iban\":null,\"bic\":null,\"bankData\":null,\"vatUid\":null,\"dateBirth\":null,\"discountPercentage\":null,\"discountInherited\":null,\"discountEffective\":null,\"notes\":null,\"emailWork\":\"user@example.com\",\"emailPrivate\":null,\"emailInvoice\":null,\"phoneWork\":null,\"phonePrivate\":null,\"mobileWork\":null,\"mobilePrivate\":null,\"url\":null,\"address\":\"Musterweg 15\",\"zip\":\"6300\",\"city\":\"Zug\",\"canton\":\"ZG\",\"country\":\"CHE\",\"countryName\":\"Switzerland\",\"superiorId\":null,\"superiorName\":null,\"color\":null,\"altName\":null,\"userId\":null,\"locationId\":null,\"locationName\":null,\"ssn\":null,\"insuranceNr\":null,\"insuranceMemberNr\":null,\"custom\":null,\"attachmentCount\":0,\"childrenCount\":0,\"genderName\":null,\"autoFillResponsiblePerson\":false,\"inactive\":false,\"customer\":false,\"vendor\":true,\"employee\":false,\"insurance\":false,\"family\":false,\"isCustomer\":false,\"isVendor\":true,\"isEmployee\":false,\"isInsurance\":false,\"isFamily\":false,\"isAutoFillResponsiblePerson\":false,\"isInactive\":false},{\"id\":5,\"created\":\"2026-10-23 10:29:15.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:15.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"categoryId\":2,\"categoryName\":\"<values><de>Lieferanten</de><en>Vendors</en><fr>Fournisseurs</fr><it>Fornitori</it></values>\",\"categoryDisplay\":\"<values><de>Lieferanten</de><en>Vendors</en><fr>Fournisseurs</fr><it>Fornitori</it></values>\",\"thumbnailFileId\":null,\"certificateTemplateId\":null,\"certificateValues\":null,\"title\":null,\"titleId\":null,\"titleSentence\":null,\"gender\":null,\"nr\":\"P-00003\",\"name\":\"Fiktiv Immobilien AG\",\"firstName\":null,\"lastName\":null,\"company\":\"Fiktiv Immobilien AG\",\"position\":null,\"industry\":null,\"department\":null,\"language\":\"DE\",\"languageName\":\"Deutsch\",\"iban\":null,\"bic\":null,\"bankData\":null,\"vatUid\":null,\"dateBirth\":null,\"discountPercentage\":null,\"discountInherited\":null,\"discountEffective\":null,\"notes\":null,\"emailWork\":\"user@example.com\",\"emailPrivate\":null,\"emailInvoice\":null,\"phoneWork\":null,\"phonePrivate\":null,\"mobileWork\":null,\"mobilePrivate\":null,\"url\":null,\"address\":\"Beispielstrasse 2\",\"zip\":\"8004\",\"city\":\"Z\u00fcrich\",\"canton\":\"ZH\",\"country\":\"CHE\",\"countryName\":\"Switzerland\",\"superiorId\":null,\"superiorName\":null,\"color\":null,\"altName\":null,\"userId\":null,\"locationId\":null,\"locationName\":null,\"ssn\":null,\"insuranceNr\":null,\"insuranceMemberNr\":null,\"custom\":null,\"attachmentCount\":0,\"childrenCount\":0,\"genderName\":null,\"autoFillResponsiblePerson\":false,\"inactive\":false,\"customer\":false,\"vendor\":true,\"employee\":false,\"insurance\":false,\"family\":false,\"isCustomer\":false,\"isVendor\":true,\"isEmployee\":false,\"isInsurance\":false,\"isFamily\":false,\"isAutoFillResponsiblePerson\":false,\"isInactive\":false},{\"id\":3,\"created\":\"2026-10-23 10:29:12.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:12.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"categoryId\":2,\"categoryName\":\"<values><de>Lieferanten</de><en>Vendors</en><fr>Fournisseurs</fr><it>Fornitori</it></values>\",\"categoryDisplay\":\"<values><de>Lieferanten</de><en>Vendors</en><fr>Fournisseurs</fr><it>Fornitori</it></values>\",\"thumbnailFileId\":null,\"certificateTemplateId\":null,\"certificateValues\":null,\"title\":null,\"titleId\":null,\"titleSentence\":null,\"gender\":null,\"nr\":\"P-00001\",\"name\":\"Muster B\u00fcro AG\",\"firstName\":null,\"lastName\":null,\"company\":\"Muster B\u00fcro AG\",\"position\":null,\"industry\":null,\"department\":null,\"language\":\"DE\",\"languageName\":\"Deutsch\",\"iban\":null,\"bic\":null,\"bankData\":null,\"vatUid\":null,\"dateBirth\":null,\"discountPercentage\":null,\"discountInherited\":null,\"discountEffective\":null,\"notes\":null,\"emailWork\":\"user@example.com\",\"emailPrivate\":null,\"emailInvoice\":null,\"phoneWork\":null,\"phonePrivate\":null,\"mobileWork\":null,\"mobilePrivate\":null,\"url\":null,\"address\":\"Beispielring 9\",\"zip\":\"9000\",\"city\":\"St. Gallen\",\"canton\":\"SG\",\"country\":\"CHE\",\"countryName\":\"Switzerland\",\"superiorId\":null,\"superiorName\":null,\"color\":null,\"altName\":null,\"userId\":null,\"locationId\":null,\"locationName\":null,\"ssn\":null,\"insuranceNr\":null,\"insuranceMemberNr\":null,\"custom\":null,\"attachmentCount\":0,\"childrenCount\":0,\"genderName\":null,\"autoFillResponsiblePerson\":false,\"inactive\":false,\"customer\":false,\"vendor\":true,\"employee\":false,\"insurance\":false,\"family\":false,\"isCustomer\":false,\"isVendor\":true,\"isEmployee\":false,\"isInsurance\":false,\"isFamily\":false,\"isAutoFillResponsiblePerson\":false,\"isInactive\":false},{\"id\":6,\"created\":\"2026-10-23 10:29:16.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:16.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"categoryId\":2,\"categoryName\":\"<values><de>Lieferanten</de><en>Vendors</en><fr>Fournisseurs</fr><it>Fornitori</it></values>\",\"categoryDisplay\":\"<values><de>Lieferanten</de><en>Vendors</en><fr>Fournisseurs</fr><it>Fornitori</it></values>\",\"thumbnailFileId\":null,\"certificateTemplateId\":null,\"certificateValues\":null,\"title\":null,\"titleId\":null,\"titleSentence\":null,\"gender\":null,\"nr\":\"P-00004\",\"name\":\"Probe Versicherung AG\",\"firstName\":null,\"lastName\":null,\"company\":\"Probe Versicherung AG\",\"position\":null,\"industry\":null,\"department\":null,\"language\":\"DE\",\"languageName\":\"Deutsch\",\"iban\":null,\"bic\":null,\"bankData\":null,\"vatUid\":null,\"dateBirth\":null,\"discountPercentage\":null,\"discountInherited\":null,\"discountEffective\":null,\"notes\":null,\"emailWork\":\"user@example.com\",\"emailPrivate\":null,\"emailInvoice\":null,\"phoneWork\":null,\"phonePrivate\":null,\"mobileWork\":null,\"mobilePrivate\":null,\"url\":null,\"address\":\"Mustergasse 8\",\"zip\":\"5000\",\"city\":\"Aarau\",\"canton\":\"AG\",\"country\":\"CHE\",\"countryName\":\"Switzerland\",\"superiorId\":null,\"superiorName\":null,\"color\":null,\"altName\":null,\"userId\":null,\"locationId\":null,\"locationName\":null,\"ssn\":null,\"insuranceNr\":null,\"insuranceMemberNr\":null,\"custom\":null,\"attachmentCount\":0,\"childrenCount\":0,\"genderName\":null,\"autoFillResponsiblePerson\":false,\"inactive\":false,\"customer\":false,\"vendor\":true,\"employee\":false,\"insurance\":false,\"family\":false,\"isCustomer\":false,\"isVendor\":true,\"isEmployee\":false,\"isInsurance\":false,\"isFamily\":false,\"isAutoFillResponsiblePerson\":false,\"isInactive\":false}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Fri, 23 Oct 2026 11:47:12 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

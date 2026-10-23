@@ -1,0 +1,38 @@
+{
+  "recorded_at": "2026-10-23T11:47:53.462008Z",
+  "request": {
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/journal/list.json?fiscalPeriodId=2&start=15&limit=5"
+  },
+  "response": {
+    "body": "{\"total\":12,\"data\":[]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Fri, 23 Oct 2026 11:47:51 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

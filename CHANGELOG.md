@@ -52,17 +52,23 @@ All notable changes to this project are documented here. The format follows
   (`errorMessage`, else `message`). An unknown id on a `read.json` read by id (a
   non-empty `id`, at most `lang` besides) raises `NotFoundError`, as observed against the
   demo organisation; a 404, which upstream documents as an unknown endpoint, raises
-  `UpstreamError`. Status error messages and `UpstreamError.body` name `cashctrl.com`,
-  never the organisation's subdomain, also where an error page echoes the host.
+  `UpstreamError`. Neither status error messages nor `UpstreamError.body` name the
+  organisation's subdomain, also where an error page echoes the host: the body names
+  `cashctrl.com` instead.
 - `scripts/record_fixture.py`: records fixtures from the demo organisation only. It
   scrubs credentials, rewrites the demo host to `demo.cashctrl.com`, every e-mail
   address to `user@example.com` (also written `%40` or as the HTML entities `&#64;`,
   `&#x40;`, `&commat;`) and CashCtrl's API user tag in `createdBy` and `lastUpdatedBy`
   (`API:` and the first four characters of the API user's key, observed on 2026-10-23)
-  to `API:REDACTED`, all in memory; checks the serialised fixture and the decoded strings
-  of its body for the subdomain, the key, any other e-mail address, any other API user
-  tag in any case and position, and the key's first four characters on their own (a
-  possible key prefix) before the one write; and refuses bodies that are not UTF-8 text
+  to `API:REDACTED`, and the text value of every token-like body field (`hash`, `token`,
+  `secret`, `apiKey`, by name in any case; `order/read.json` sends `hash`, an
+  undocumented 32-character text that may be the token of a public document link) to
+  `REDACTED`, all in memory; checks the serialised fixture and the decoded strings of its
+  body for the subdomain, the key, any other e-mail address, any other API user tag in
+  any case and position, the key's first four characters on their own (a possible key
+  prefix) and any value but `null` or `REDACTED` under a token-like name (a compound
+  name such as `publicHash` goes to review, `hash` being key-like) before the one
+  write; and refuses bodies that are not UTF-8 text
   (exports), any method but GET and any endpoint but `.json`. The demo organisation is
   synthetic (`scripts/seed_demo.py`, `docs/demo-org.md`), so any module and any amount
   may be recorded.
@@ -101,9 +107,68 @@ All notable changes to this project are documented here. The format follows
   `Finanz`), since the 139 accounts are too many for one fixture; account 1020 read by
   the id the filtered list gave; an unknown id, a missing id and a wrong key. Every
   recorded list holds its whole `total`.
+- Journal, persons and orders, six read-only tasks, each an MCP tool `cashctrl_<task>`
+  and an HTTP route `/cashctrl/<task>`, all taking `org` first:
+  - `list_journal_entries` (`journal/list.json`) with its eighteen documented
+    parameters (`account_id`, `associate_id`, `dir`, `filter`, `fiscal_period_id`,
+    `limit`, the nine `only_*` flags, `query`, `sort`, `start`), and
+    `get_journal_entry` (`journal/read.json`) with the lines of a collective entry, the
+    bookings per account, tax rows apart, and the persons the entry names;
+  - `list_persons` (`person/list.json`) with its seventeen documented parameters
+    (`category_id`, `dir`, `filter`, `limit`, the ten `only_*` flags, `query`, `sort`,
+    `start`), and `get_person` (`person/read.json`) with addresses and contacts;
+  - `list_orders` (`order/list.json`) with its sixteen documented parameters
+    (`category_id`, `dir`, `filter`, `fiscal_period_id`, `group_id`, `limit`,
+    `only_cost_centers`, `only_notes`, `only_open`, `only_overdue`, `person_id`,
+    `query`, `sort`, `start`, `status_id`, `type`), `type` typed as `SALES` or
+    `PURCHASE` and optional (both types without it, observed), and `get_order`
+    (`order/read.json`) with its items.
+  The three lists are `POST` routes (they take `filter`); an unknown id on a read raises
+  `NotFoundError` (observed for the journal: "This book entry does not exist.").
+- Offset pagination for the three lists (conventions 1.7 §4, ADR-0012), in one helper:
+  with `limit`, one request for the page at `start` (default 0); without it, every page
+  from `start` on through core's `paginate_offset`, 100 records a request (upstream's
+  documented default, sent explicitly), ending after a short page or, without a further
+  request, once the next offset reaches upstream's `total`. `meta.total` is upstream's
+  `total`, the page's or the last page's, never computed from `len(data)`. `meta.request`
+  holds the parameters as sent, `limit` left out when every page is collected. A
+  `start` below 0, a `limit` below 1, either not a whole number, and an unknown `type`
+  are refused with `InvalidRequestError` before any request.
+- `meta.total` on the four other list tasks as well: upstream's `total`, which equals
+  the records of their one answer.
+- Models: `JournalEntry` and `JournalEntryDetail` with `JournalItem` (the lines of a
+  collective entry) and `JournalRow` (the bookings per account), `Person` and
+  `PersonDetail` with `PersonAddress` and `PersonContact`, `Order` and `OrderDetail`
+  with `OrderItem`, and `OrderType`. Every observed field, typed from the create and
+  update tables where they describe it and from the recorded answers otherwise
+  (each model's docstring names which); amounts `Decimal`, documented dates `date`,
+  undocumented timestamps `datetime`, fields only ever seen empty kept as sent. A read
+  differs from its list entry, and `person/read.json` leaves out null fields.
+- Fourteen fixtures recorded on 2026-10-23 from the synthetic demo organisation: the
+  2025 journal in pages of five (`total` 12: 5, 5 and 2 records) and the page past the
+  end (empty, `total` 12), the first five 2026 entries (`total` 38), a taxed and a
+  collective entry read and an unknown id; all twelve persons (the ten seeded and
+  CashCtrl's two insurance records) and the four vendors; the four 2026 sales and two
+  purchase orders and one order read, re-recorded after the token field scrub so its
+  `hash` is `REDACTED`.
 
 ### Changed
 
+- `xippios-core` is pinned to sdk-core commit `dbe2eba` (`core_git_ref` in
+  `.copier-answers.yml`, `[tool.uv.sources]` in `pyproject.toml`), an unreleased commit,
+  for `ResultMeta.total` (ADR-0012). This package releases only after core 0.2.0 is on
+  PyPI. Removing the pin alone would let core 0.1.0 back in, which names the tenant host
+  in status error messages and ignores `total`, so the same change raises `xippios-core`
+  and its three extras to `>=0.2.0` and deletes the pin's `# pragma: allowlist secret`
+  line by hand. The bound cannot be raised yet: core main still reports 0.1.0.
+- Adopted from that core: status error messages name the method and the path, never the
+  host (`404 from GET /api/v1/account/nope.json: ...`, sdk-core#14), so `classify` no
+  longer rewrites the request URL; it still hands core a copy of the response whose body
+  names `cashctrl.com`, because core quotes the body in the message and keeps it as
+  `UpstreamError.body`. Core's `build_server` and `main` set the `httpx` and `httpcore`
+  loggers to WARNING (sdk-core#12), so the local `quiet_request_logging` is gone.
+- `api/_params.py` encodes booleans and drops unset parameters once, for every list
+  wrapper.
 - chore: update to sdk-template v0.1.5.
   - Hygiene files: `.gitattributes` keeps `docs/upstream/` byte-exact, `.gitignore`
     covers `.env.*` and `.envrc.*`, the secrets baseline skips `.copier-answers.yml`.

@@ -443,7 +443,16 @@ printed the following; the balances and totals are quoted as printed.
   for 2026, two more than the 36 manual entries. The balance of 1100 holds no sales order
   amount, so the four sales invoices did not book to the debtors. Which records the two
   extra entries are was not read; the two purchase orders are the likeliest source, not
-  verified.
+  verified. The order lists recorded the same day (`tests/fixtures/order_list/`) fit
+  that: both purchase orders are in their category's first status, Open, with `isBook`
+  true and `open` equal to their total; the four sales invoices are in Draft with
+  `isBook` false.
+- Order item prices: CashCtrl read the seeded `unitPrice` values as gross, VAT included:
+  every item of the order read recorded the same day (`tests/fixtures/order_read/`) has
+  `baseValue` `GROSS` and `taxCalcType` `NET`, and the order `displayItemGross` false.
+  So the "net totals before VAT" of the plan (Orders, above) are the orders' gross
+  `total`s, and `subTotal` is net: RE-2026-104 900.00 with VAT, 832.56 without, 67.44
+  VAT; RE-2026-103 7'750.00 and 7'169.29.
 - Balance of 1100 (`account/balance`): `0.00` at 2025-12-31 and `4850.00` at 2026-09-30,
   exactly the gross reading in the table above. The `amount` of a manual journal entry
   with a `taxId` is the gross amount, VAT included, although the tax codes' `calcType` is

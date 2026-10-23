@@ -157,7 +157,7 @@ def _subdomain(org: str) -> str:
 
 
 NEUTRAL_HOST = "cashctrl.com"
-"""The host error messages and bodies name instead of an organisation's own.
+"""The host a quoted error body names instead of an organisation's own.
 
 See ``_without_tenant_host``.
 """
@@ -204,15 +204,17 @@ def _full_text(response: httpx.Response) -> str:
 
 
 def _without_tenant_host(response: httpx.Response) -> httpx.Response:
-    """A copy of ``response`` that names ``cashctrl.com`` wherever it named the tenant's host.
+    """A copy of ``response`` whose body names ``cashctrl.com`` wherever it named the tenant's host.
 
-    The request URL's host becomes ``cashctrl.com``, and so does every occurrence of that
-    host in the body text, in any letter case: an error page that echoes the host cannot
-    leak it through the message snippet or ``UpstreamError.body``. Status, reason phrase
-    and the other headers are kept, so core's mapping (status, ``Retry-After``, body
-    truncation) is unchanged. The copy's body is that text encoded as UTF-8, so the
-    headers that describe the original bytes (``Content-Type``, ``Content-Encoding``,
-    ``Content-Length``, ``Transfer-Encoding``) are left out.
+    Every occurrence of the request's host in the body text, in any letter case, becomes
+    ``cashctrl.com``: an error page that echoes the host cannot leak it through the
+    message snippet or ``UpstreamError.body``, both of which core quotes from the body.
+    The request is kept as it is: core's messages name the method and the path, never
+    the host (conventions §5, sdk-core#14). Status, reason phrase and the other headers
+    are kept, so core's mapping (status, ``Retry-After``, body truncation) is unchanged.
+    The copy's body is that text encoded as UTF-8, so the headers that describe the
+    original bytes (``Content-Type``, ``Content-Encoding``, ``Content-Length``,
+    ``Transfer-Encoding``) are left out.
     """
     request = response.request
     host = request.url.host
@@ -229,7 +231,7 @@ def _without_tenant_host(response: httpx.Response) -> httpx.Response:
         response.status_code,
         headers=headers,
         content=text.encode("utf-8"),
-        request=httpx.Request(request.method, request.url.copy_with(host=NEUTRAL_HOST)),
+        request=request,
         extensions={"reason_phrase": reason} if reason is not None else None,
     )
 
@@ -239,11 +241,10 @@ def _body_text(response: httpx.Response) -> str:
 
 
 def _status_error(response: httpx.Response) -> XippiosError | None:
-    # Core's error_from_response names the request host in every message and quotes the
-    # body, and here the host is the organisation's subdomain, which is treated like a
-    # key. Core maps a copy that names cashctrl.com instead, in the URL and in the body.
-    # The URL part goes away once core stops putting the host into messages (queued core
-    # item); the body part stays as long as error bodies are quoted.
+    # Core's error_from_response names the method and the path, never the host, but it
+    # quotes the body in the message and keeps it as UpstreamError.body, and an error
+    # page may echo the organisation's host, its subdomain, which is treated like a key.
+    # Core maps a copy whose body names cashctrl.com instead.
     neutral = _without_tenant_host(response)
     error = error_from_response(neutral, source=SOURCE)
     if isinstance(error, NotFoundError):
@@ -263,9 +264,10 @@ def classify(response: httpx.Response) -> XippiosError | None:
 
     HTTP status codes (``docs/upstream/error-handling.md``): every 4xx and 5xx is mapped
     by core's ``error_from_response`` (401/403 ``AuthError``, 429 ``RateLimitError``,
-    anything else ``UpstreamError``), applied to a copy of the response whose request
-    and body name ``cashctrl.com`` instead of the organisation's host, so neither the
-    message nor ``UpstreamError.body`` carries an organisation's subdomain. A 404
+    anything else ``UpstreamError``), whose message names the method and the path but
+    never the host. It is applied to a copy of the response whose body names
+    ``cashctrl.com`` instead of the organisation's host, so neither the quoted snippet
+    nor ``UpstreamError.body`` carries an organisation's subdomain. A 404
     means "The requested endpoint doesn't exist" and raises ``UpstreamError`` with
     ``status=404``: ``NotFoundError`` only ever means an absent record (ADR-0003).
 
@@ -295,8 +297,9 @@ def classify(response: httpx.Response) -> XippiosError | None:
       ``setting/read.json``, which takes no ``id``. Known gaps:
       ``order/category/read_status.json``, ``account/balance`` and
       ``account/costcenter/balance`` also read by ``id`` under other paths, so an unknown
-      id there stays a ``RequestRejected``. Only ``account`` and ``currency`` were
-      observed; the other operations are assumed to refuse alike.
+      id there stays a ``RequestRejected``. ``account``, ``currency`` and ``journal``
+      (``"This book entry does not exist."``) were observed; the other operations are
+      assumed to refuse alike.
 
     Everything else falls through (``None``): a 200 that is not a JSON object with
     ``"success": false`` (data, the CSV, Excel and PDF exports, malformed JSON) and every

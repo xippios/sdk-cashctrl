@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-23T12:27:56.979624Z",
+  "request": {
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/order/read.json?id=3"
+  },
+  "response": {
+    "body": "{\"success\":true,\"data\":{\"id\":3,\"created\":\"2026-10-23 10:30:21.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:21.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"categoryId\":4,\"associateId\":10,\"accountId\":4,\"recurrenceId\":null,\"currencyId\":null,\"items\":[{\"id\":6,\"orderId\":3,\"inventoryId\":null,\"accountId\":42,\"taxId\":9,\"unitId\":null,\"unitName\":null,\"attachments\":[],\"allocations\":[],\"type\":\"ARTICLE\",\"articleNr\":null,\"quantity\":10,\"name\":\"B\u00fcrostuhl Ergo\",\"description\":\"Ergonomischer Drehstuhl\",\"unitPrice\":420,\"discountPercentage\":null,\"pos\":0,\"taxCode\":\"UN1\",\"defaultCurrencyUnitPrice\":420,\"defaultCurrencyNetUnitPrice\":388.52913969,\"netUnitPrice\":388.52913969,\"grossTotal\":4200,\"taxTotal\":314.71,\"netTotal\":3885.29,\"defaultCurrencyNetTotal\":3885.29,\"defaultCurrencyGrossTotal\":4200,\"taxCalcType\":\"NET\",\"discountInherited\":null,\"discountEffective\":null,\"optional\":false,\"baseValue\":\"GROSS\",\"taxAmount\":31.47086031,\"taxRate\":8.1,\"isOptional\":false,\"isInventoryArticle\":false,\"isIncludedInStats\":false},{\"id\":5,\"orderId\":3,\"inventoryId\":null,\"accountId\":42,\"taxId\":9,\"unitId\":null,\"unitName\":null,\"attachments\":[],\"allocations\":[],\"type\":\"ARTICLE\",\"articleNr\":null,\"quantity\":5,\"name\":\"Schreibtisch Basic\",\"description\":\"160 x 80 cm\",\"unitPrice\":680,\"discountPercentage\":null,\"pos\":1,\"taxCode\":\"UN1\",\"defaultCurrencyUnitPrice\":680,\"defaultCurrencyNetUnitPrice\":629.04717854,\"netUnitPrice\":629.04717854,\"grossTotal\":3400,\"taxTotal\":254.76,\"netTotal\":3145.24,\"defaultCurrencyNetTotal\":3145.24,\"defaultCurrencyGrossTotal\":3400,\"taxCalcType\":\"NET\",\"discountInherited\":null,\"discountEffective\":null,\"optional\":false,\"baseValue\":\"GROSS\",\"taxAmount\":50.95282146,\"taxRate\":8.1,\"isOptional\":false,\"isInventoryArticle\":false,\"isIncludedInStats\":false},{\"id\":7,\"orderId\":3,\"inventoryId\":null,\"accountId\":42,\"taxId\":9,\"unitId\":null,\"unitName\":null,\"attachments\":[],\"allocations\":[],\"type\":\"ARTICLE\",\"articleNr\":null,\"quantity\":1,\"name\":\"Lieferung\",\"description\":\"Pauschal\",\"unitPrice\":150,\"discountPercentage\":null,\"pos\":2,\"taxCode\":\"UN1\",\"defaultCurrencyUnitPrice\":150,\"defaultCurrencyNetUnitPrice\":138.76040703,\"netUnitPrice\":138.76040703,\"grossTotal\":150,\"taxTotal\":11.24,\"netTotal\":138.76,\"defaultCurrencyNetTotal\":138.76,\"defaultCurrencyGrossTotal\":150,\"taxCalcType\":\"NET\",\"discountInherited\":null,\"discountEffective\":null,\"optional\":false,\"baseValue\":\"GROSS\",\"taxAmount\":11.23959297,\"taxRate\":8.1,\"isOptional\":false,\"isInventoryArticle\":false,\"isIncludedInStats\":false}],\"responsiblePersonId\":null,\"statusId\":12,\"roundingId\":null,\"fileId\":null,\"groupId\":3,\"previousId\":null,\"attachments\":[],\"type\":\"SALES\",\"bookType\":\"DEBIT\",\"taxType\":\"AGREED\",\"date\":\"2026-06-08 00:00:00.0\",\"nr\":\"RE-2026-103\",\"description\":\"Einrichtung Baub\u00fcro\",\"dueDays\":null,\"dateLastBooked\":\"2026-06-08 00:00:00.0\",\"subTotal\":7169.29,\"tax\":580.71,\"total\":7750,\"open\":null,\"groupOpen\":null,\"currencyRate\":1,\"discountPercentage\":null,\"qrReference\":\"000000000000000004320261031\",\"iso11649Reference\":\"RF560000000432026103\",\"customReference\":null,\"language\":\"DE\",\"custom\":null,\"notes\":null,\"attachmentCount\":0,\"allocationCount\":null,\"costCenterIds\":null,\"hash\":\"REDACTED\",\"sent\":null,\"sentBy\":null,\"downloaded\":null,\"downloadedBy\":null,\"costCenterNumbers\":null,\"currencyCode\":null,\"sentStatusId\":16,\"nameSingular\":\"<values><de>Rechnung</de><en>Invoice</en><fr>Facture</fr><it>Fattura</it></values>\",\"namePlural\":\"<values><de>Rechnungen</de><en>Invoices</en><fr>Factures</fr><it>Fatture</it></values>\",\"displayItemGross\":false,\"associateName\":\"Demo Bau AG\",\"book\":false,\"foreignCurrency\":false,\"removeStock\":false,\"addStock\":false,\"fileReplacement\":false,\"responsiblePersonName\":null,\"roundingDifference\":0,\"totalToPay\":7750,\"defaultCurrencyTotal\":7750,\"actionId\":\"\",\"due\":false,\"icon\":\"GRAY\",\"closed\":false,\"startDate\":null,\"recurrence\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"statusName\":\"<values><de>Entwurf</de><en>Draft</en><fr>Projet</fr><it>Progetto</it></values>\",\"categoryName\":\"<values><de>Rechnung</de><en>Invoice</en><fr>Facture</fr><it>Fattura</it></values>\",\"paid\":7750,\"isBook\":false,\"isRemoveStock\":false,\"isAddStock\":false,\"isClosed\":false,\"isDisplayItemGross\":false,\"isFileReplacement\":false,\"hasDueDays\":true,\"hasRecurrence\":false,\"isCreditNote\":false}}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Fri, 23 Oct 2026 12:27:54 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

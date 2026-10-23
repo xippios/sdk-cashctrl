@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-23T11:46:34.134847Z",
+  "request": {
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/journal/read.json?id=11"
+  },
+  "response": {
+    "body": "{\"success\":true,\"data\":{\"id\":11,\"created\":\"2026-10-23 10:29:37.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:37.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"creditId\":42,\"debitId\":4,\"associateId\":8,\"taxId\":9,\"orderId\":null,\"orderBookEntryId\":null,\"statementId\":null,\"salaryBookEntryId\":null,\"inventoryId\":null,\"currencyId\":null,\"importEntryId\":null,\"recurrenceId\":null,\"items\":[],\"attachments\":[],\"allocations\":[],\"type\":\"MANUAL\",\"dateAdded\":\"2025-10-20 00:00:00.0\",\"title\":\"Rechnung RE-2025-003 Beispiel Logistik AG\",\"custom\":null,\"notes\":null,\"reference\":\"RE-2025-003\",\"amount\":3600,\"currencyRate\":1,\"accountIds\":\"[\\\"33\\\",\\\"4\\\",\\\"42\\\"]\",\"itemsIndex\":\"\",\"itemsCount\":0,\"taxed\":true,\"taxRate\":8.1,\"attachmentCount\":0,\"allocationCount\":0,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"currencyCode\":null,\"associateName\":\"Beispiel Logistik AG\",\"associates\":[{\"id\":8,\"created\":\"2026-10-23 10:29:18.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:18.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"categoryId\":1,\"contacts\":[{\"id\":6,\"personId\":8,\"type\":\"EMAIL_WORK\",\"purpose\":null,\"address\":\"user@example.com\",\"notes\":null,\"pos\":0}],\"addresses\":[{\"id\":6,\"personId\":8,\"titleId\":null,\"type\":\"MAIN\",\"company\":null,\"firstName\":null,\"lastName\":null,\"address\":\"Beispielweg 12\",\"zip\":\"4051\",\"city\":\"Basel\",\"canton\":\"BS\",\"country\":\"CHE\",\"pos\":0,\"hideCompany\":false,\"hideName\":false,\"companyForAddress\":\"Beispiel Logistik AG\",\"firstNameForAddress\":null,\"lastNameForAddress\":null,\"streetName\":\"Beispielweg\",\"streetNumber\":\"12\",\"titleName\":\"\",\"cantonCode\":\"BS\",\"countryCode2\":\"CH\",\"countryCode3\":\"CHE\",\"isHideCompany\":false,\"isHideName\":false}],\"bankAccounts\":[],\"servicePeriods\":[],\"children\":[],\"insuranceContracts\":[],\"attachments\":[],\"nr\":\"P-00006\",\"name\":\"Beispiel Logistik AG\",\"company\":\"Beispiel Logistik AG\",\"language\":\"DE\",\"emailWork\":\"user@example.com\",\"address\":\"Beispielweg 12\",\"zip\":\"4051\",\"city\":\"Basel\",\"canton\":\"BS\",\"country\":\"CHE\",\"attachmentCount\":0,\"fullName\":\"\",\"inactive\":false,\"companyOrFullName\":\"Beispiel Logistik AG\",\"customer\":true,\"vendor\":false,\"employee\":false,\"insurance\":false,\"family\":false,\"titleName\":\"\",\"numberOfChildren\":0,\"abbreviatedName\":\"Beispiel Logistik AG\",\"languageName\":\"Deutsch\",\"categoryName\":\"<values><de>Kunden</de><en>Customers</en><fr>Clients</fr><it>Clienti</it></values>\",\"languageCode\":\"de\",\"cantonCode\":\"BS\",\"countryCode2\":\"CH\",\"countryCode3\":\"CHE\",\"iconCls\":\"person\",\"certificateValuesMap\":{},\"isCustomer\":true,\"isVendor\":false,\"isEmployee\":false,\"isInsurance\":false,\"isFamily\":false,\"isInactive\":false,\"isAutoFillResponsiblePerson\":false}],\"taxCode\":\"UN1\",\"taxedItems\":[],\"defaultCurrencyAmount\":3600,\"rows\":[{\"fcDebit\":3600,\"fcCredit\":0,\"acDebit\":3600,\"acCredit\":0,\"dcDebit\":3600,\"dcCredit\":0,\"fcTax\":0,\"acTax\":0,\"dcTax\":0,\"taxPercentage\":null,\"accountName\":\"1100 <values><de>Debitoren</de><en>Accounts receivable</en><fr>Cr\u00e9ances</fr><it>Crediti</it></values>\",\"accountId\":4,\"isTaxed\":false,\"isTax\":false},{\"fcDebit\":0,\"fcCredit\":3330.25,\"acDebit\":0,\"acCredit\":3330.25,\"dcDebit\":0,\"dcCredit\":3330.25,\"fcTax\":269.75,\"acTax\":269.75,\"dcTax\":269.75,\"taxPercentage\":8.1,\"accountName\":\"3200 <values><de>Handelsertrag</de><en>Trading revenue</en><fr>Produits de marchandises</fr><it>Ricavi merci di rivendita</it></values>\",\"accountId\":42,\"isTaxed\":true,\"isTax\":false},{\"fcDebit\":0,\"fcCredit\":269.75,\"acDebit\":0,\"acCredit\":269.75,\"dcDebit\":0,\"dcCredit\":269.75,\"fcTax\":0,\"acTax\":0,\"dcTax\":0,\"taxPercentage\":8.1,\"accountName\":\"2200 <values><de>Umsatzsteuer</de><en>Sales tax payable</en><fr>TVA due</fr><it>IVA dovuta</it></values>\",\"accountId\":33,\"isTaxed\":false,\"isTax\":true}],\"startDate\":null,\"recurrence\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"nr\":\"RE-2025-003\",\"notifyEmail\":null}}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Fri, 23 Oct 2026 11:46:33 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

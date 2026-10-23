@@ -10,12 +10,13 @@ sentence naming the organisation. Without ``--org`` a server serves every organi
 its environment declares, chosen per call. The HTTP router has no lock: a deployment that
 needs one declares only that organisation.
 
-Either way, ``main`` keeps httpx's request lines out of the server's log: they carry the
-organisation's host, which is treated like a key.
+Either way, httpx's request lines stay out of the server's log: they carry the
+organisation's host, which is treated like a key. Core's ``build_server`` and ``main``,
+which this ``main`` hands over to, set the ``httpx`` and ``httpcore`` loggers to WARNING
+(``xippios.core.mcp.quiet_request_logging``, sdk-core#12).
 """
 
 import argparse
-import logging
 import sys
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -29,11 +30,10 @@ from xippios.core.mcp import main as serve
 
 from xippios.cashctrl._client import SOURCE, client_for
 
-__all__ = ["announce_lock", "main", "org_lock", "parse_org", "quiet_request_logging"]
+__all__ = ["announce_lock", "main", "org_lock", "parse_org"]
 
 ORG_HELP = "serve only this organisation, e.g. demo; tool calls naming another are refused"
 LOCKED = "This server is locked to organisation {org}; every tool call must pass org={org}."
-REQUEST_LOGGERS = ("httpx", "httpcore")
 
 
 def org_lock(org: str) -> ServerMiddleware[Any]:
@@ -70,17 +70,6 @@ def announce_lock(server: MCPServer, org: str) -> None:
     lowlevel.instructions = " ".join(filter(None, [lowlevel.instructions, LOCKED.format(org=org)]))
 
 
-def quiet_request_logging() -> None:
-    """Keep httpx's request lines, and with them the organisation's host, out of the log.
-
-    Building an ``MCPServer`` configures root logging at INFO on stderr, and httpx logs
-    every request there with its full URL (``HTTP Request: GET https://<subdomain>...``).
-    httpx and httpcore are raised to WARNING; their warnings and errors still show.
-    """
-    for name in REQUEST_LOGGERS:
-        logging.getLogger(name).setLevel(logging.WARNING)
-
-
 def parse_org(prog: str, argv: Sequence[str]) -> tuple[str | None, list[str]]:
     """Split ``--org`` off a command line and return it with the arguments for core's ``main``.
 
@@ -107,11 +96,13 @@ def parse_org(prog: str, argv: Sequence[str]) -> tuple[str | None, list[str]]:
 def main(server: MCPServer, argv: Sequence[str] | None = None) -> None:
     """Core's ``main`` plus ``--org <name>``: lock ``server`` to one organisation, then run it.
 
+    Core's ``main`` quiets the httpx and httpcore loggers before it serves, so request
+    URLs, which carry the organisation's host, are never logged.
+
     Args:
         server: A server from ``build_server``.
         argv: Arguments without the program name; defaults to ``sys.argv[1:]``.
     """
-    quiet_request_logging()
     org, rest = parse_org(server.name, sys.argv[1:] if argv is None else argv)
     if org is not None:
         server.middleware.append(org_lock(org))

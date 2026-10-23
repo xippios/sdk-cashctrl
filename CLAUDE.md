@@ -14,6 +14,7 @@ that works here; the family rules it points to apply as well.
 | Credentials | `CASHCTRL_ORGS` names the organisations; per name `CASHCTRL_<NAME>_SUBDOMAIN` and `CASHCTRL_<NAME>_API_KEY`, the key sent as the HTTP basic user name. The reserved `demo` is declared by its own pair and never listed |
 | Rate limit | 60 requests per minute per organisation, a self-imposed pace in `_client.py` (upstream documents no limit, only a 429); ADR-0010 decisions 1, 2, 3 and 5 adopted, see Rate limit below |
 | Write tools | yes, in `tasks_write.py`, served by `xippios-cashctrl-mcp-write` |
+| Core pin | `xippios-core` from git at sdk-core `dbe2eba` (`core_git_ref` in `.copier-answers.yml`, `[tool.uv.sources]` in `pyproject.toml`), an unreleased commit, for `ResultMeta.total` (ADR-0012), host-free error messages and the quiet request log. This package releases only after core 0.2.0 is on PyPI. Removing the pin (`uvx copier update -d core_git_ref=`) is not enough: it would let core 0.1.0 back in, which names the tenant host in status error messages (the local URL rewrite is gone) and ignores `total`. The same change raises `xippios-core` and its three extras (`mcp`, `http`, `testing`) to `>=0.2.0` in `pyproject.toml` and deletes the `# pragma: allowlist secret` line by hand. The bound cannot be raised yet: core main still reports version 0.1.0 |
 
 The snapshot in `docs/upstream/` is the reference for names, parameters and semantics.
 If it is empty or stale, run `/refresh-upstream` first and review the diff. Never write a
@@ -35,8 +36,11 @@ organisation. `_client.py` is therefore a registry, not one client:
   startup (exit status 2), its instructions name the organisation, and a tool call naming
   another is refused before the tool runs. The HTTP router has no lock: consumers pass
   `org` explicitly.
-- The subdomain stays out of messages and logs: status errors name `cashctrl.com`
-  (`classify`), and both servers raise the `httpx` and `httpcore` loggers to WARNING so
+- The subdomain stays out of messages and logs: core's status errors name the method and
+  the path, never the host, and `classify` hands core a copy of an error response whose
+  body names `cashctrl.com` instead of the organisation's host, so neither the quoted
+  snippet nor `UpstreamError.body` carries it. Both servers are built and run by core's
+  `build_server` and `main`, which raise the `httpx` and `httpcore` loggers to WARNING so
   request URLs are never logged. The HTTP router does not: a consumer that logs at INFO
   logs httpx's request URLs with the tenant host and should set the `httpx` logger to
   WARNING, as the README says.
@@ -51,8 +55,9 @@ and nothing else, ever. The recorder takes no organisation; every live test take
 imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every test. The demo
 organisation is synthetic: invented books seeded by `scripts/seed_demo.py` and described
 in `docs/demo-org.md`, never a copy of real books. So the recorder records any module and
-any amount; it still scrubs e-mail addresses to `user@example.com` and API user tags to
-`API:REDACTED`, and refuses any method but GET and any endpoint but `.json`. The demo
+any amount; it still scrubs e-mail addresses to `user@example.com`, API user tags to
+`API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) to
+`REDACTED`, and refuses any method but GET and any endpoint but `.json`. The demo
 subdomain is treated like a key: never in a file, a commit, a log line or a report. The
 repository is public.
 
@@ -117,7 +122,7 @@ src/xippios/cashctrl/
 scripts/
   refresh_reference.py   stub until a documented value set is needed (refresh-reference-data)
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
-  record_fixture.py      records one exchange with the demo organisation; host, e-mails, API user tags scrubbed
+  record_fixture.py      records one exchange with the demo organisation; host, e-mails, API tags, tokens scrubbed
   seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md)
 tests/
   conftest.py      core's plugin; demo-only environment, placeholder demo pair, clients reset per test, demo_org
@@ -165,6 +170,12 @@ Run `/add-endpoint <upstream operation>`. In short:
    `demo_org` fixture.
 7. `CHANGELOG.md` under Unreleased, README status table, then the full check suite.
 
+A list that documents `start` and `limit` (journal, persons, orders) pages through
+`_offset_pages` in `tasks.py` (conventions §4, ADR-0012): `limit` given is one request
+for the page at `start` (default 0); `limit` omitted collects every page from `start`
+through core's `paginate_offset`, `PAGE_SIZE` (100, upstream's documented default) a
+request. `meta.total` is upstream's `total` on every list task, never `len(data)`.
+
 Lookups (accounts, currencies, tax codes, fiscal periods) are tasks too, named
 `list_<thing>`, so agents can form valid calls; they serve the organisation's own data
 live and are never packaged (`/refresh-reference-data`). A task-shaped function that
@@ -182,15 +193,18 @@ Run `/record-fixture <endpoint> <case> <parameters>`. It runs
 `direnv exec ~/github/sdk uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]`,
 which performs one live request against the demo organisation, always and only, builds
 the fixture in memory with credentials scrubbed, the demo host rewritten to
-`demo.cashctrl.com`, e-mail addresses to `user@example.com` and CashCtrl's API user tags
+`demo.cashctrl.com`, e-mail addresses to `user@example.com`, CashCtrl's API user tags
 (`API:` and the first four characters of a key, in `createdBy` and `lastUpdatedBy`) to
-`API:REDACTED`, and only then writes `tests/fixtures/<endpoint>/<case>.json`. It writes
-nothing when the fixture, in its text or in a decoded string of its body, still holds
-the subdomain, the key, an e-mail address, an API user tag in any case and position, or
-the key's first four characters on their own (a possible key prefix), when the body is
-not UTF-8 text (exports are out of scope), or when a policy of the demo-only rule above
-refuses it. Grep the file for key patterns, e-mail addresses and API user tags before
-committing. Fixtures are never typed in by hand.
+`API:REDACTED` and the value of every token-like body field (`hash`, `token`, `secret`,
+`apiKey`, by name; `order/read.json` sends `hash`) to `REDACTED`, and only then writes
+`tests/fixtures/<endpoint>/<case>.json`. It writes nothing when the fixture, in its text
+or in a decoded string of its body, still holds the subdomain, the key, an e-mail
+address, an API user tag in any case and position, the key's first four characters on
+their own (a possible key prefix) or any value but `null` or `REDACTED` under a
+token-like name, when the body is not UTF-8 text (exports are out of scope), or when a
+policy of the demo-only rule above refuses it. A compound name such as `publicHash` is
+not scrubbed and goes to review. Grep the file for key patterns, e-mail addresses, API
+user tags and token-like fields before committing. Fixtures are never typed in by hand.
 
 ## Commands
 

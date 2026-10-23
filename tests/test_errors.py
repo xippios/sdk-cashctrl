@@ -13,6 +13,7 @@ from xippios.core import (
     InvalidRequestError,
     NotFoundError,
     RateLimitError,
+    TransportError,
     UpstreamError,
     XippiosError,
 )
@@ -90,6 +91,12 @@ def test_the_observed_unknown_id_is_not_found(fixtures_dir: Path) -> None:
     error = classify(recorded(fixtures_dir, "account_read", "unknown_id"))
     assert isinstance(error, NotFoundError)
     assert str(error) == "CashCtrl: This account does not exist. (/account/read.json)"
+
+
+def test_the_observed_unknown_journal_entry_is_not_found(fixtures_dir: Path) -> None:
+    error = classify(recorded(fixtures_dir, "journal_read", "unknown_id"))
+    assert isinstance(error, NotFoundError)
+    assert str(error) == "CashCtrl: This book entry does not exist. (/journal/read.json)"
 
 
 def test_the_observed_missing_id_is_a_rejection_with_a_message(fixtures_dir: Path) -> None:
@@ -184,8 +191,7 @@ def test_a_404_means_the_endpoint_does_not_exist() -> None:
     assert error.status == 404
     assert error.body == "Not here"
     assert str(error) == (
-        "404 from GET cashctrl.com/api/v1/account/nope.json: Not here "
-        "(the endpoint does not exist upstream)"
+        "404 from GET /api/v1/account/nope.json: Not here (the endpoint does not exist upstream)"
     )
 
 
@@ -220,7 +226,8 @@ def assert_no_tenant(error: XippiosError) -> None:
     body = getattr(error, "body", "")
     for text in (str(error), repr(error), *map(str, error.args), body):
         assert TENANT not in text.lower()
-    assert "cashctrl.com/api/v1/" in str(error)
+    # Core names the method and the path, never the host (conventions §5, sdk-core#14).
+    assert " from GET /api/v1/" in str(error)
 
 
 def echoing(status: int, headers: dict[str, str], content: bytes) -> httpx.Response:
@@ -241,7 +248,7 @@ def test_a_503_body_naming_the_host_names_cashctrl_com() -> None:
     assert isinstance(error, UpstreamError)
     assert error.status == 503
     assert error.body == ("Service unavailable: https://cashctrl.com/api/v1 (see cashctrl.com)")
-    assert "503 from GET cashctrl.com/api/v1/account/list.json: Service unavailable" in str(error)
+    assert "503 from GET /api/v1/account/list.json: Service unavailable" in str(error)
     assert_no_tenant(error)
 
 
@@ -293,6 +300,36 @@ async def test_status_errors_do_not_name_the_subdomain(
     assert type(error) is kind
     assert route.call_count == 1
     assert_no_tenant(error)
+
+
+async def test_a_transport_error_does_not_name_the_subdomain(
+    tenant: str, respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure before any answer, quoting the host as a TLS mismatch does, hides it.
+
+    Core replaces the request's host with ``<host>`` in a ``TransportError`` (sdk-core#14);
+    nothing here masks it locally, so this guards every later core pin. The retries of a
+    GET are run without their waits.
+    """
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(
+            f"hostname '{TENANT.upper()}.cashctrl.com' doesn't match '*.example.org' "
+            f"(https://{TENANT}.cashctrl.com/api/v1/account/list.json)",
+            request=request,
+        )
+
+    async def no_wait(seconds: float) -> None:
+        return None
+
+    route = respx_mock.get(f"{tenant}/account/list.json").mock(side_effect=fail)
+    monkeypatch.setattr(client_for(DEMO), "_sleep", no_wait)
+    error = await raised("/account/list.json")
+    assert isinstance(error, TransportError)
+    assert route.call_count >= 1
+    for text in (str(error), repr(error), *map(str, error.args)):
+        assert TENANT not in text.lower()
+    assert "<host>" in str(error)
 
 
 async def test_a_429_is_a_rate_limit_error_with_retry_after(

@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-23T11:48:03.336544Z",
+  "request": {
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/order/list.json?fiscalPeriodId=1&type=PURCHASE&start=0&limit=100"
+  },
+  "response": {
+    "body": "{\"total\":2,\"data\":[{\"id\":6,\"created\":\"2026-10-23 10:30:24.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:24.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"associateId\":4,\"associateName\":\"Beispiel Telecom AG\",\"responsiblePersonId\":null,\"responsiblePersonName\":null,\"accountId\":9,\"account\":\"<values><de>Kreditoren</de><en>Accounts payable</en><fr>Cr\u00e9anciers</fr><it>Creditori</it></values>\",\"categoryId\":15,\"actionId\":\"\",\"groupId\":6,\"previousId\":null,\"statusId\":78,\"type\":\"PURCHASE\",\"bookType\":\"CREDIT\",\"statusName\":\"<values><de>Offen</de><en>Open</en><fr>Ouvert</fr><it>Aperto</it></values>\",\"sentStatusId\":null,\"roundingId\":null,\"icon\":\"BLUE\",\"nameSingular\":\"<values><de>Rechnung</de><en>Invoice</en><fr>Facture</fr><it>Fattura</it></values>\",\"namePlural\":\"<values><de>Rechnungen</de><en>Invoices</en><fr>Factures</fr><it>Fatture</it></values>\",\"date\":\"2026-05-04 00:00:00.0\",\"dateDue\":null,\"nr\":\"EK-2026-002\",\"description\":\"Netzwerk B\u00fcro Z\u00fcrich\",\"notes\":null,\"dueDays\":null,\"currencyId\":null,\"currencyRate\":1,\"discountPercentage\":null,\"currencyCode\":\"CHF\",\"subTotal\":767.8,\"tax\":62.2,\"total\":830,\"open\":830,\"groupOpen\":830,\"dateLastBooked\":\"2026-05-04 00:00:00.0\",\"language\":\"DE\",\"recurrence\":null,\"startDate\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"attachmentCount\":0,\"allocationCount\":null,\"costCenterIds\":null,\"qrReference\":\"000000000000000015620260026\",\"iso11649Reference\":\"RF210000001562026002\",\"customReference\":null,\"custom\":null,\"sent\":null,\"sentBy\":null,\"downloaded\":null,\"downloadedBy\":null,\"costCenterNumbers\":null,\"dateReceived\":null,\"displayItemGross\":false,\"received\":false,\"book\":true,\"recurring\":false,\"removeStock\":false,\"addStock\":false,\"closed\":false,\"isBook\":true,\"isRemoveStock\":false,\"isAddStock\":false,\"isClosed\":false,\"hasDueDays\":true,\"isDisplayItemGross\":false,\"isRecurring\":false,\"isReceived\":false,\"isCreditNote\":false},{\"id\":5,\"created\":\"2026-10-23 10:30:23.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:23.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"associateId\":3,\"associateName\":\"Muster B\u00fcro AG\",\"responsiblePersonId\":null,\"responsiblePersonName\":null,\"accountId\":9,\"account\":\"<values><de>Kreditoren</de><en>Accounts payable</en><fr>Cr\u00e9anciers</fr><it>Creditori</it></values>\",\"categoryId\":15,\"actionId\":\"\",\"groupId\":5,\"previousId\":null,\"statusId\":78,\"type\":\"PURCHASE\",\"bookType\":\"CREDIT\",\"statusName\":\"<values><de>Offen</de><en>Open</en><fr>Ouvert</fr><it>Aperto</it></values>\",\"sentStatusId\":null,\"roundingId\":null,\"icon\":\"BLUE\",\"nameSingular\":\"<values><de>Rechnung</de><en>Invoice</en><fr>Facture</fr><it>Fattura</it></values>\",\"namePlural\":\"<values><de>Rechnungen</de><en>Invoices</en><fr>Factures</fr><it>Fatture</it></values>\",\"date\":\"2026-02-02 00:00:00.0\",\"dateDue\":null,\"nr\":\"EK-2026-001\",\"description\":\"Wareneinkauf B\u00fcrom\u00f6bel\",\"notes\":null,\"dueDays\":null,\"currencyId\":null,\"currencyRate\":1,\"discountPercentage\":null,\"currencyCode\":\"CHF\",\"subTotal\":4301.57,\"tax\":348.43,\"total\":4650,\"open\":4650,\"groupOpen\":4650,\"dateLastBooked\":\"2026-02-02 00:00:00.0\",\"language\":\"DE\",\"recurrence\":null,\"startDate\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"attachmentCount\":0,\"allocationCount\":null,\"costCenterIds\":null,\"qrReference\":\"000000000000000015520260018\",\"iso11649Reference\":\"RF630000001552026001\",\"customReference\":null,\"custom\":null,\"sent\":null,\"sentBy\":null,\"downloaded\":null,\"downloadedBy\":null,\"costCenterNumbers\":null,\"dateReceived\":null,\"displayItemGross\":false,\"received\":false,\"book\":true,\"recurring\":false,\"removeStock\":false,\"addStock\":false,\"closed\":false,\"isBook\":true,\"isRemoveStock\":false,\"isAddStock\":false,\"isClosed\":false,\"hasDueDays\":true,\"isDisplayItemGross\":false,\"isRecurring\":false,\"isReceived\":false,\"isCreditNote\":false}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Fri, 23 Oct 2026 11:48:02 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

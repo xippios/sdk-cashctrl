@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-23T11:46:15.286603Z",
+  "request": {
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/journal/list.json?fiscalPeriodId=2&start=10&limit=5"
+  },
+  "response": {
+    "body": "{\"total\":12,\"data\":[{\"id\":2,\"created\":\"2026-10-23 10:29:27.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:27.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"debitId\":4,\"debitName\":\"1100 <values><de>Debitoren</de><en>Accounts receivable</en><fr>Cr\u00e9ances</fr><it>Crediti</it></values>\",\"creditId\":42,\"creditName\":\"3200 <values><de>Handelsertrag</de><en>Trading revenue</en><fr>Produits de marchandises</fr><it>Ricavi merci di rivendita</it></values>\",\"associateId\":7,\"associateName\":\"Muster Consulting GmbH\",\"taxId\":9,\"taxCode\":\"UN1\",\"taxRate\":8.1,\"orderId\":null,\"orderBookEntryId\":null,\"salaryBookEntryId\":null,\"statementId\":null,\"inventoryId\":null,\"importEntryId\":null,\"type\":\"MANUAL\",\"dateAdded\":\"2025-02-03 00:00:00.0\",\"title\":\"Rechnung RE-2025-001 Muster Consulting GmbH\",\"custom\":null,\"notes\":null,\"reference\":\"RE-2025-001\",\"amount\":4800,\"currencyId\":null,\"currencyRate\":1,\"currencyCode\":\"CHF\",\"accountId\":null,\"accountCurrencyId\":null,\"accountClass\":null,\"balance\":null,\"nameSingular\":null,\"orderType\":null,\"itemsCount\":0,\"recurrence\":null,\"startDate\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"attachmentCount\":0,\"allocationCount\":0,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"recurring\":false,\"isRecurring\":false},{\"id\":1,\"created\":\"2026-10-23 10:29:26.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:26.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"debitId\":3,\"debitName\":\"1020 <values><de>Bank</de><en>Bank account</en><fr>Compte courant</fr><it>Conto corrente</it></values>\",\"creditId\":10,\"creditName\":\"2800 <values><de>Stammkapital, Aktienkapital</de><en>Nominal capital, Share capital</en><fr>Capital social, Capital-actions</fr><it>Capitale sociale, Capitale azionario</it></values>\",\"associateId\":null,\"associateName\":null,\"taxId\":null,\"taxCode\":null,\"taxRate\":null,\"orderId\":null,\"orderBookEntryId\":null,\"salaryBookEntryId\":null,\"statementId\":null,\"inventoryId\":null,\"importEntryId\":null,\"type\":\"MANUAL\",\"dateAdded\":\"2025-01-06 00:00:00.0\",\"title\":\"Einzahlung Aktienkapital\",\"custom\":null,\"notes\":null,\"reference\":null,\"amount\":100000,\"currencyId\":null,\"currencyRate\":1,\"currencyCode\":\"CHF\",\"accountId\":null,\"accountCurrencyId\":null,\"accountClass\":null,\"balance\":null,\"nameSingular\":null,\"orderType\":null,\"itemsCount\":0,\"recurrence\":null,\"startDate\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"attachmentCount\":0,\"allocationCount\":0,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"recurring\":false,\"isRecurring\":false}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Fri, 23 Oct 2026 11:46:13 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}
