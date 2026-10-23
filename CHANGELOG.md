@@ -59,11 +59,13 @@ All notable changes to this project are documented here. The format follows
   address to `user@example.com` (also written `%40` or as the HTML entities `&#64;`,
   `&#x40;`, `&commat;`) and CashCtrl's API user tag in `createdBy` and `lastUpdatedBy`
   (`API:` and the first four characters of the API user's key, observed on 2026-10-23)
-  to `API:REDACTED`, all in memory; checks for the subdomain, the key, any other e-mail
-  address and any other API user tag before the one write; and refuses bodies that are
-  not UTF-8 text (exports), any method but GET and any endpoint but `.json`. The demo
-  organisation is synthetic (`scripts/seed_demo.py`, `docs/demo-org.md`), so any module
-  and any amount may be recorded.
+  to `API:REDACTED`, all in memory; checks the serialised fixture and the decoded strings
+  of its body for the subdomain, the key, any other e-mail address, any other API user
+  tag in any case and position, and the key's first four characters on their own (a
+  possible key prefix) before the one write; and refuses bodies that are not UTF-8 text
+  (exports), any method but GET and any endpoint but `.json`. The demo organisation is
+  synthetic (`scripts/seed_demo.py`, `docs/demo-org.md`), so any module and any amount
+  may be recorded.
 - Ledger basics, five read-only tasks, each an MCP tool `cashctrl_<task>` and an HTTP
   route `/cashctrl/<task>`, all taking `org` first:
   - `list_fiscal_periods` (`fiscalperiod/list.json`), `list_currencies`
@@ -81,7 +83,8 @@ All notable changes to this project are documented here. The format follows
   and seen with a time of day, stays a timestamp). Upstream's camelCase spellings are
   read with `Field(validation_alias=...)`, so every result, in Python, over MCP and
   over HTTP, carries the snake_case names the tool arguments use (`is_current`,
-  `end_amount`); `meta.request` keeps the parameters as sent, under upstream's names.
+  `end_amount`), checked for every key of every tool and route result; `meta.request`
+  keeps the parameters as sent, under upstream's names.
 - `dir` and `Filter.comparison` are typed as their documented value sets, `Direction`
   (`ASC`, `DESC`) and `Comparison` (`eq`, `like`, `gt`, `lt`), so the tool schema lists
   them and the adapters refuse another value before the task runs.
@@ -109,7 +112,8 @@ All notable changes to this project are documented here. The format follows
     instructions and the `reference/README.md` wording follow the template.
   - Placeholder-key test: every test but a live one sends the placeholder key, pinned on
     `CASHCTRL_API_KEY` and on `auth.key` (now in `_client.__all__`), and
-    `test_replay_tests_send_the_placeholder_key` checks the basic auth user name.
+    `test_replay_tests_send_the_placeholder_key` checks the basic auth user name
+    (superseded by the registry, see Removed below).
   - `validation_alias` rule for the models to come: upstream spellings are accepted with
     `Field(validation_alias=...)`, never `alias=` (`models.py` docstring, `/add-endpoint`).
 - No reference data is packaged: CashCtrl's lists (accounts, currencies, tax codes,
@@ -123,6 +127,12 @@ All notable changes to this project are documented here. The format follows
   a module-level `auth.key`, `tests/conftest.py` drops every cached client before and
   after each test, and a `pytester` run of the conftest proves that a key a live test
   cached never reaches the next offline test (and that it would without the reset).
+- Rate limit, ADR-0010 decisions 1, 2, 3 and 5 adopted (CLAUDE.md, Rate limit): 60
+  requests per minute per organisation, a self-imposed pace since CashCtrl documents no
+  limit; no longer-window quota to ration; a 429 is `RateLimitError` with `retry_after`
+  from `Retry-After` through core's mapping in `classify`, now tested through the client;
+  pauses are stated by core's adapters. `x-cashctrl-requests-left` is not read (unknown
+  window and scope); decision 4 waits for core's quota helper.
 
 ### Removed
 

@@ -166,7 +166,7 @@ over with a fresh one; the script never deletes or repairs anything.
 | --- | --- |
 | Company | Muster Handel AG, Zürich (fictional), a small trading company for office furniture and supplies |
 | Currency | CHF; fiscal year = calendar year |
-| Fiscal periods | 2026 (the organisation's current one, as created) and 2025 (created by the seeder) |
+| Fiscal periods | 2026 (the one the organisation was created with) and 2025 (created by the seeder); after seeding, the API user's current period is 2025, so balances without `fiscalPeriodId` are 2025's (Observed write semantics, below) |
 | Chart of accounts, VAT codes | CashCtrl's defaults, unchanged |
 | Records | 10 persons (4 vendors, 6 customers), 48 manual journal entries (12 in 2025, 36 in 2026, 3 of them collective), 6 orders |
 | Writes | at most 67 (10 persons, 2 currencies, 1 fiscal period, 48 journal entries, 6 orders) |
@@ -182,10 +182,11 @@ The script does not name the organisation: its name is set by hand when it is cr
 | USD | US-Dollar | 0.88 |
 
 Created only if `currency/list.json` lacks the code. A new organisation has both from the
-start: the first run created neither (Observed write semantics, below). The rates are
-fixed and synthetic, and `common.md` says CashCtrl ignores `rate` for the currencies it
-supports (EUR and USD among them) and fetches its own. No journal entry or order uses a
-foreign currency.
+start: the first run created neither (Observed write semantics, below), so the
+organisation carries CashCtrl's automatic rates (`auto: true`, created by `SYSTEM`), not
+the 0.95 and 0.88 above, which were never sent. The rates above are fixed and synthetic,
+and `common.md` says CashCtrl ignores `rate` for the currencies it supports (EUR and USD
+among them) and fetches its own. No journal entry or order uses a foreign currency.
 
 ### Persons
 
@@ -429,10 +430,15 @@ printed the following; the balances and totals are quoted as printed.
   Every create answer carries a `message`; the seeder never prints its text.
 - Refusals: none.
 - Currencies: the new organisation already had EUR and USD, so the run sent no
-  `currency/create.json` request.
+  `currency/create.json` request. Their rates are CashCtrl's automatic ones (`auto: true`,
+  `createdBy` `SYSTEM`; EUR 0.920261 and USD 0.820845 in the fixture recorded the same
+  day), not the plan's 0.95 and 0.88.
 - Fiscal period 2025: the new organisation had 2026 only. `fiscalperiod/create.json` with
   `type=EARLIEST` created 2025, and `fiscalperiod/list.json` then listed a period
-  covering the 2025 dates.
+  covering the 2025 dates. After the run the API user's current period (`isCurrent`) is
+  2025, the period the run created, not 2026 (seen when the fixtures were recorded the
+  same day): balances without `fiscalPeriodId`, as `account/list.json` sends them, are
+  2025's, account 1020 ending at 101'230.00.
 - Whether order creation booked journal entries: `journal/list.json` reports 38 entries
   for 2026, two more than the 36 manual entries. The balance of 1100 holds no sales order
   amount, so the four sales invoices did not book to the debtors. Which records the two

@@ -12,7 +12,7 @@ that works here; the family rules it points to apply as well.
 | API base URL | `https://<subdomain>.cashctrl.com/api/v1`, one per organisation |
 | Documentation | https://app.cashctrl.com/static/help/en/api/index.html, snapshotted in `docs/upstream/` |
 | Credentials | `CASHCTRL_ORGS` names the organisations; per name `CASHCTRL_<NAME>_SUBDOMAIN` and `CASHCTRL_<NAME>_API_KEY`, the key sent as the HTTP basic user name. The reserved `demo` is declared by its own pair and never listed |
-| Rate limit | 60 requests per minute per organisation, self-imposed in `_client.py`; upstream documents only a 429. Upstream answers every response with an `x-cashctrl-requests-left` header (observed 299 on 2026-10-23 across calls, including a 401; window and scope unknown); the client-side limit stays self-imposed |
+| Rate limit | 60 requests per minute per organisation, a self-imposed pace in `_client.py` (upstream documents no limit, only a 429); ADR-0010 decisions 1, 2, 3 and 5 adopted, see Rate limit below |
 | Write tools | yes, in `tasks_write.py`, served by `xippios-cashctrl-mcp-write` |
 
 The snapshot in `docs/upstream/` is the reference for names, parameters and semantics.
@@ -55,6 +55,25 @@ any amount; it still scrubs e-mail addresses to `user@example.com` and API user 
 `API:REDACTED`, and refuses any method but GET and any endpoint but `.json`. The demo
 subdomain is treated like a key: never in a file, a commit, a log line or a report. The
 repository is public.
+
+## Rate limit (ADR-0010)
+
+Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 waits for core's quota helper.
+
+1. **Pace.** 60 requests per minute per organisation, one token bucket per client
+   (`RATE_LIMIT` in `_client.py`). The pace is self-imposed: CashCtrl documents no
+   per-second or per-minute limit, only a 429 ("We recommend adding delays between your
+   requests", `docs/upstream/error-handling.md`).
+2. **Quotas.** No longer-window quota is documented, so nothing is rationed.
+3. **A spent limit.** A 429 becomes `RateLimitError` through core's status mapping inside
+   `classify`, with `retry_after` from `Retry-After` when upstream sends it; retries
+   honour it up to `backoff_max`, beyond which the error reaches the caller
+   (`tests/test_errors.py`). CashCtrl documents no fallback, and every answer carries
+   `x-cashctrl-requests-left` (299 on every answer observed on 2026-10-23, a 401
+   included) with an unknown window and scope, so it is not read.
+4. **No firing into a spent quota** waits for the core helper ADR-0010 announces.
+5. **Pauses are stated** by core's adapters: `error: RateLimitError: ... (retry after N s)`
+   over MCP, a 429 problem with `retry_after` and `Retry-After` over HTTP.
 
 ## Read first, in this order
 
@@ -151,12 +170,11 @@ Lookups (accounts, currencies, tax codes, fiscal periods) are tasks too, named
 live and are never packaged (`/refresh-reference-data`). A task-shaped function that
 returns a subset of an upstream record builds its model with `UpstreamModel.project`;
 nothing is renamed or computed, parsing a value (`parse_decimal`) is the only override.
-Upstream's
-documented error shapes go into `classify` in `_client.py`, once; wrappers use
-`client_for(org).get_json` and never inspect status codes. CashCtrl refuses with HTTP 200
-and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError` for an
-unknown id on a `read.json` read by id; a 404 means an unknown endpoint and raises
-`UpstreamError`. Observed shapes say so, with the date, in its docstring.
+Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
+use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
+HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
+for an unknown id on a `read.json` read by id; a 404 means an unknown endpoint and
+raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
 
 ## How to record a fixture
 
@@ -165,12 +183,14 @@ Run `/record-fixture <endpoint> <case> <parameters>`. It runs
 which performs one live request against the demo organisation, always and only, builds
 the fixture in memory with credentials scrubbed, the demo host rewritten to
 `demo.cashctrl.com`, e-mail addresses to `user@example.com` and CashCtrl's API user tags
-(`API:` and the first four characters of a key, in `createdBy`) to `API:REDACTED`, and
-only then writes `tests/fixtures/<endpoint>/<case>.json`. It writes nothing when the
-fixture still holds the subdomain, the key, an e-mail address or an API user tag, when
-the body is not UTF-8 text (exports are out of scope), or when a policy of the demo-only
-rule above refuses it. Grep the file for key patterns, e-mail addresses and API user
-tags before committing. Fixtures are never typed in by hand.
+(`API:` and the first four characters of a key, in `createdBy` and `lastUpdatedBy`) to
+`API:REDACTED`, and only then writes `tests/fixtures/<endpoint>/<case>.json`. It writes
+nothing when the fixture, in its text or in a decoded string of its body, still holds
+the subdomain, the key, an e-mail address, an API user tag in any case and position, or
+the key's first four characters on their own (a possible key prefix), when the body is
+not UTF-8 text (exports are out of scope), or when a policy of the demo-only rule above
+refuses it. Grep the file for key patterns, e-mail addresses and API user tags before
+committing. Fixtures are never typed in by hand.
 
 ## Commands
 
