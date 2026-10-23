@@ -64,6 +64,8 @@ PACE_SECONDS = 1.0
 """The least time between the starts of two requests: at most one request per second."""
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded; charset=UTF-8"
 """The content type of every form-encoded write, the charset declared explicitly."""
+MULTIPART = "multipart/form-data"
+"""The writes' encoding with ``--multipart``, as the upstream curl examples send (``-F``)."""
 TIMEOUT_SECONDS = 30.0
 DEMO_MARK = "demo"
 """What the organisation's name must contain, in any case."""
@@ -669,12 +671,20 @@ class Session:
     """The paced, scrubbed requests of one run against the demo organisation."""
 
     def __init__(
-        self, client: httpx.Client, scrub: Scrubber, pacer: Pacer, observed: Observed
+        self,
+        client: httpx.Client,
+        scrub: Scrubber,
+        pacer: Pacer,
+        observed: Observed,
+        *,
+        multipart: bool = False,
     ) -> None:
         self.client = client
         self.scrub = scrub
         self.pacer = pacer
         self.observed = observed
+        self.multipart = multipart  # chosen by hand for a rerun, never as a fallback
+        observed.encoding = MULTIPART if multipart else FORM_CONTENT_TYPE
 
     def _send(
         self,
@@ -688,6 +698,9 @@ class Session:
         try:
             if form is None:
                 response = self.client.request(method, path, params=params)
+            elif self.multipart:
+                fields = {name: (None, value) for name, value in form.items()}
+                response = self.client.request(method, path, files=fields)
             else:
                 response = self.client.request(
                     method, path, data=form, headers={"Content-Type": FORM_CONTENT_TYPE}
@@ -1307,7 +1320,8 @@ def plan_lines() -> list[str]:
         f"{len(ENTRIES_2026)} in 2026, {collective} of them collective",
         f"  orders            {len(ORDERS):>3}  {sales} SALES invoices, "
         f"{len(ORDERS) - sales} PURCHASE orders",
-        f"  writes, at most   {max_writes():>3}  in this order, form-encoded, {FORM_CONTENT_TYPE}",
+        f"  writes, at most   {max_writes():>3}  in this order, as {FORM_CONTENT_TYPE} "
+        f"(--multipart: {MULTIPART})",
         "",
         f"Account numbers: {' '.join(account_numbers())}",
         f"Tax codes: {TAX_CODES['sales']} on sales, {TAX_CODES['purchase']} on purchases",
@@ -1347,7 +1361,7 @@ def plan_lines() -> list[str]:
 
 
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
-    """``--plan`` (the default) or ``--apply --yes``."""
+    """``--plan`` (the default) or ``--apply --yes``, optionally ``--multipart``."""
     parser = argparse.ArgumentParser(
         prog="seed_demo.py",
         description="Seed a fresh, empty CashCtrl demo organisation with synthetic books.",
@@ -1356,13 +1370,21 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     mode.add_argument("--plan", action="store_true", help="print the plan, no network (default)")
     mode.add_argument("--apply", action="store_true", help="seed the demo organisation")
     parser.add_argument("--yes", action="store_true", help="confirm --apply")
+    parser.add_argument(
+        "--multipart",
+        action="store_true",
+        help="with --apply: send the writes as multipart/form-data instead of form-encoded, "
+        "for a manual rerun only (docs/demo-org.md)",
+    )
     args = parser.parse_args(argv)
     if args.yes and not args.apply:
         parser.error("--yes only confirms --apply")
+    if args.multipart and not args.apply:
+        parser.error("--multipart only changes how --apply writes")
     return args
 
 
-def apply(environ: Mapping[str, str]) -> int:
+def apply(environ: Mapping[str, str], *, multipart: bool = False) -> int:
     """Run the guards, seed, summarise; return the exit status."""
     try:
         credentials = read_credentials(environ)
@@ -1380,13 +1402,16 @@ def apply(environ: Mapping[str, str]) -> int:
         timeout=TIMEOUT_SECONDS,
     )
     with client:
-        session = Session(client, scrub, Pacer(PACE_SECONDS), observed)
+        session = Session(client, scrub, Pacer(PACE_SECONDS), observed, multipart=multipart)
         try:
             context = run_guards(session)
         except (Refused, Failed) as refusal:
             say(f"refused: {refusal}; nothing was written", err=True)
             return 1
-        say(f"all guards passed; writing at most {max_writes()} records, one request per second")
+        say(
+            f"all guards passed; writing at most {max_writes()} records as "
+            f"{observed.encoding}, one request per second"
+        )
         status = 0
         try:
             period_2025 = seed(session, context, created)
@@ -1415,7 +1440,7 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
     if not args.yes:
         say("refused: --apply writes to the demo organisation; confirm with --yes", err=True)
         return 1
-    return apply(os.environ if environ is None else environ)
+    return apply(os.environ if environ is None else environ, multipart=args.multipart)
 
 
 if __name__ == "__main__":

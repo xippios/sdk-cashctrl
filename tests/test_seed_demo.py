@@ -14,6 +14,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
+from email import policy
+from email.parser import BytesParser
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -117,6 +119,8 @@ class FakeCashCtrl:
     def decode(request: httpx.Request) -> dict[str, str]:
         """The form as a servlet reads it: in the declared charset, else ISO-8859-1."""
         kind = request.headers.get("content-type", "")
+        if kind.startswith("multipart/form-data"):
+            return multipart_fields(request)
         charset = "utf-8" if "charset=utf-8" in kind.replace(" ", "").lower() else "iso-8859-1"
         pairs = parse_qs(request.content.decode("ascii"), encoding=charset)
         return {key: values[0] for key, values in pairs.items()}
@@ -215,6 +219,20 @@ def run(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
     status = seeder.main(list(argv), environ=ENV)
     captured = capsys.readouterr()
     return status, captured.out, captured.err
+
+
+def multipart_fields(request: httpx.Request) -> dict[str, str]:
+    """The fields of a ``multipart/form-data`` body, each part decoded as UTF-8."""
+    head = f"Content-Type: {request.headers['content-type']}\r\n\r\n".encode("ascii")
+    message = BytesParser(policy=policy.default).parsebytes(head + request.content)
+    fields = {}
+    for part in message.iter_parts():
+        assert part.get_filename() is None
+        assert part.get_content_type() == "text/plain"  # no Content-Type header on the part
+        payload = part.get_payload(decode=True)
+        assert isinstance(payload, bytes)
+        fields[str(part.get_param("name", header="content-disposition"))] = payload.decode()
+    return fields
 
 
 def form_of(request: httpx.Request) -> dict[str, str]:
@@ -596,6 +614,8 @@ def test_success_false_stops_the_run_at_that_record(
     assert status == 1
     assert fake.requests[-1] is fake.posts(path)[nth - 1]
     assert len(fake.posts(path)) == nth
+    # no second attempt in another encoding: a retry after an ambiguous answer could duplicate
+    assert all(r.headers["content-type"] == seeder.FORM_CONTENT_TYPE for r in fake.posts())
     assert f"stopped at {what}" in err
     assert "success: false" in err
     assert "field 'debitId': Unknown at <subdomain>.cashctrl.com, ask <e-mail>" in err
@@ -633,6 +653,35 @@ def test_a_refusal_after_the_first_write_still_prints_the_summary(
     assert "Created: persons 10, currencies 1, fiscal periods 1, journal entries 0" in out
     assert "Observed write semantics" in out
     assert "fiscalperiod/create.json success answer keys: insertId, message, success" in out
+
+
+def test_multipart_is_a_manual_switch_with_the_same_fields(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    forms: dict[str, list[dict[str, str]]] = {}
+    for argv in (["--apply", "--yes"], ["--apply", "--yes", "--multipart"]):
+        upstream = FakeCashCtrl()
+        with serving(upstream):
+            status, out, _ = run(capsys, *argv)
+        assert status == 0
+        kinds = {r.headers["content-type"].split(";")[0] for r in upstream.posts()}
+        forms[argv[-1]] = [upstream.decode(r) for r in upstream.posts()]
+        if argv[-1] == "--multipart":
+            assert kinds == {"multipart/form-data"}
+            assert "writes sent as: multipart/form-data" in out
+            assert "person 1/10 Muster Büro AG: read back byte for byte" in out
+        else:
+            assert kinds == {"application/x-www-form-urlencoded"}
+            assert "writes sent as: application/x-www-form-urlencoded; charset=UTF-8" in out
+    assert forms["--multipart"] == forms["--yes"]
+    assert forms["--multipart"][0]["company"] == "Muster Büro AG"
+
+
+def test_multipart_without_apply_is_a_usage_error(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as stop:
+        seeder.main(["--multipart"], environ=ENV)
+    assert stop.value.code == 2
+    assert "--multipart only changes how --apply writes" in capsys.readouterr().err
 
 
 def test_writes_are_form_encoded_with_json_items_and_iso_dates(
