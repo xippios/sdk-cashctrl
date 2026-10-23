@@ -42,27 +42,37 @@ never shows a value, and exits with status 1:
   whichever key it comes from, with the marker in any case, at the start of a word or
   right after a JSON escape. A tag the scrub cannot reach (glued to a word, or behind a
   Unicode escape) is refused by the final check.
+- No token-like fields. A body field named ``hash``, ``token``, ``secret`` or ``apiKey``
+  (``api_key``, ``api-key``), in any case, has its text value replaced by ``REDACTED``.
+  ``order/read.json`` sends ``hash``, an undocumented 32-character text that may be the
+  token of a public link to the order document (observed on 2026-10-23, not verified);
+  the others were never seen and are scrubbed should they appear. A 32-character
+  mixed-case alphanumeric value the scrub cannot reach under such a name (an escaped
+  key) is refused by the final check.
 
 Nothing unscrubbed touches disk. The request goes through the real client with
 ``raise_on_error=False``, and core's ``fixture_from_response`` turns the exchange into a
 fixture in memory, credentials scrubbed. Then every occurrence of the demo host
 (``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``) in the request URL, the response headers and
 the body becomes ``demo.cashctrl.com``, the host offline tests replay against, every
-e-mail address becomes ``user@example.com`` and every API user tag ``API:REDACTED``. The
-fixture is checked last, before the one write, in its serialised text and in every
-decoded string of a JSON body: the real subdomain, the real key (plain or as a
-basic-auth token), an e-mail address other than ``user@example.com``, an API user tag
-other than ``API:REDACTED`` in any case and position (the key's own tag also with ``:``
-URL-encoded, as an HTML entity or followed by a space), or the key's first four
-characters on their own, reported as a possible key prefix, means nothing is written and
-the exit status is 1; a key-like name whose value is not ``REDACTED`` is written for
-review, also with exit status 1. Only the status and the scrubbed URL are printed.
+e-mail address becomes ``user@example.com``, every API user tag ``API:REDACTED`` and
+every token-like field's value ``REDACTED``. The fixture is checked last, before the one
+write, in its serialised text and in every decoded string of a JSON body: the real
+subdomain, the real key (plain or as a basic-auth token), an e-mail address other than
+``user@example.com``, an API user tag other than ``API:REDACTED`` in any case and
+position (the key's own tag also with ``:`` URL-encoded, as an HTML entity or followed by
+a space), the key's first four characters on their own, reported as a possible key
+prefix, or a 32-character mixed-case alphanumeric value under a token-like field name
+means nothing is written and the exit status is 1; a key-like name whose value is not
+``REDACTED`` is written for review, also with exit status 1. Only the status and the
+scrubbed URL are printed.
 
 A body that is not UTF-8 text, which core would keep as base64, is refused before
 anything is written, should a ``.json`` endpoint ever send one: such a body can be
 neither scrubbed nor reviewed.
 
-Host, e-mail and API user tag scrubbing are local to this repository for now: they are
+Host, e-mail, API user tag and token field scrubbing are local to this repository for
+now: they are
 the pattern that moves into core's recorder (``xippios.core.testing.record``) later, for
 every multi-tenant source.
 """
@@ -106,6 +116,16 @@ EMAIL = re.compile(r"[\w.%+-]+(?P<at>@|%40|&#0*64;?|&#[xX]0*40;?|&commat;)[\w.-]
 # of a JSON body then keeps it JSON.
 _EMAIL_IN_TEXT = re.compile(r"(?:(?<=\\[nrtbf])|(?<![\w.%+\\-]))" + EMAIL.pattern)
 _SCRUBBED_EMAILS = frozenset({SCRUBBED_EMAIL, SCRUBBED_EMAIL.replace("@", "%40")})
+
+TOKEN_FIELD_NAME = re.compile(r"hash|token|secret|api[_-]?key", re.IGNORECASE)
+"""Body fields whose value may grant access, matched by their whole name in any case."""
+_TOKEN_FIELD = re.compile(
+    r'(?P<field>"(?:' + TOKEN_FIELD_NAME.pattern + r')"\s*:\s*)"(?:[^"\\]|\\.)*"',
+    re.IGNORECASE,
+)
+"""A token-like field with a text value in raw JSON: ``"hash": "..."``."""
+TOKEN_VALUE = re.compile(r"(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])[A-Za-z0-9]{32}")
+"""The shape of the observed ``hash``: 32 letters and digits, both cases."""
 
 SCRUBBED_API_USER = "API:REDACTED"
 _NOT_SCRUBBED = r"(?!REDACTED(?![A-Za-z0-9]))"
@@ -303,6 +323,33 @@ def _holds_the_bare_prefix(texts: Sequence[str], key: str) -> bool:
     return len(key) >= 4 and any(key[:4] in text for text in texts)
 
 
+def scrub_token_fields(fixture: Fixture) -> Fixture:
+    """``fixture`` with the text value of every token-like body field made ``REDACTED``.
+
+    Only the value changes, in the raw text, so the body stays the JSON upstream sent.
+    A ``null`` or a number under such a name is left as it is.
+    """
+    return rewrite(
+        fixture, lambda text: _TOKEN_FIELD.sub(lambda m: f'{m["field"]}"{REDACTED}"', text)
+    )
+
+
+def _token_like_fields(node: Any) -> Iterator[str]:
+    """Names of token-like fields whose value has the shape of a token, at any depth."""
+    if isinstance(node, dict):
+        for name, value in node.items():
+            if (
+                TOKEN_FIELD_NAME.fullmatch(str(name))
+                and isinstance(value, str)
+                and TOKEN_VALUE.fullmatch(value)
+            ):
+                yield str(name)
+            yield from _token_like_fields(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _token_like_fields(item)
+
+
 def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
     """``(leaks, suspicions)`` in a serialised fixture; neither ever contains a value."""
     leaks: list[str] = []
@@ -321,6 +368,10 @@ def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
             "without the API: marker (four characters alone may be a coincidence; "
             "find them in the response before recording again)"
         )
+    is_json, decoded = _decoded(fixture.get("response", {}).get("body", ""))
+    tokens = sorted(set(_token_like_fields(decoded))) if is_json else []
+    if tokens:
+        leaks.append(f"a token-like value under {', '.join(tokens)}")
     if _holds_an_address(fixture):
         leaks.append(f"an e-mail address other than {SCRUBBED_EMAIL}")
     suspicions = list(_key_like_values(fixture, "fixture"))
@@ -354,7 +405,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     subdomain = os.environ[subdomain_env(DEMO)].strip().lower()
     host = re.compile(re.escape(f"{subdomain}.cashctrl.com"), re.IGNORECASE)
-    fixture = scrub_api_users(scrub_emails(scrub_host(fixture, host)))
+    fixture = scrub_token_fields(scrub_api_users(scrub_emails(scrub_host(fixture, host))))
     text = to_json(fixture)
 
     leaks, suspicions = check(text, subdomain, os.environ.get(api_key_env(DEMO), ""))

@@ -986,7 +986,9 @@ class OrderDetail(_OrderFields):
     ``category_name`` (localised), ``tax_type`` (``AGREED``), ``total_to_pay``,
     ``paid``, ``default_currency_total`` and ``rounding_difference`` (amounts), the
     flags ``due``, ``foreign_currency``, ``has_recurrence`` and ``file_replacement`` with
-    its ``is_*`` twin, and ``hash``, an undocumented 32-character text.
+    its ``is_*`` twin, and ``hash``, an undocumented 32-character text that may be the
+    token of a public link to the order document (not verified); the fixture recorder
+    writes it as ``REDACTED``.
     """
 
     items: list[OrderItem] = Field(default_factory=list)

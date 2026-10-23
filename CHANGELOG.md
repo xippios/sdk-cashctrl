@@ -60,10 +60,14 @@ All notable changes to this project are documented here. The format follows
   address to `user@example.com` (also written `%40` or as the HTML entities `&#64;`,
   `&#x40;`, `&commat;`) and CashCtrl's API user tag in `createdBy` and `lastUpdatedBy`
   (`API:` and the first four characters of the API user's key, observed on 2026-10-23)
-  to `API:REDACTED`, all in memory; checks the serialised fixture and the decoded strings
-  of its body for the subdomain, the key, any other e-mail address, any other API user
-  tag in any case and position, and the key's first four characters on their own (a
-  possible key prefix) before the one write; and refuses bodies that are not UTF-8 text
+  to `API:REDACTED`, and the text value of every token-like body field (`hash`, `token`,
+  `secret`, `apiKey`, by name in any case; `order/read.json` sends `hash`, an
+  undocumented 32-character text that may be the token of a public document link) to
+  `REDACTED`, all in memory; checks the serialised fixture and the decoded strings of its
+  body for the subdomain, the key, any other e-mail address, any other API user tag in
+  any case and position, the key's first four characters on their own (a possible key
+  prefix) and a 32-character mixed-case alphanumeric value under a token-like name
+  before the one write; and refuses bodies that are not UTF-8 text
   (exports), any method but GET and any endpoint but `.json`. The demo organisation is
   synthetic (`scripts/seed_demo.py`, `docs/demo-org.md`), so any module and any amount
   may be recorded.
@@ -144,7 +148,8 @@ All notable changes to this project are documented here. The format follows
   end (empty, `total` 12), the first five 2026 entries (`total` 38), a taxed and a
   collective entry read and an unknown id; all twelve persons (the ten seeded and
   CashCtrl's two insurance records) and the four vendors; the four 2026 sales and two
-  purchase orders and one order read.
+  purchase orders and one order read, re-recorded after the token field scrub so its
+  `hash` is `REDACTED`.
 
 ### Changed
 
