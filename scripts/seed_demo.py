@@ -108,7 +108,7 @@ class Person:
 
     @property
     def email(self) -> str:
-        """``info@<company without legal form>.example``, e.g. ``info@omega-buero.example``.
+        """``info@<company without legal form>.example``, e.g. ``info@muster-buero.example``.
 
         The reserved ``.example`` domain is never delivered.
         """
@@ -196,14 +196,33 @@ CURRENCIES = (
     Currency("USD", "US-Dollar", Decimal("0.88")),
 )
 
+PLACEHOLDER_MARKERS = ("Muster", "Beispiel", "Testfirma", "Demo", "Platzhalter", "Probe", "Fiktiv")
+"""Every company name starts with one of these words, so none can pass for a real company."""
+
 PERSONS = (
-    Person("alpha", "Alpha Consulting GmbH", "customer", "Musterstrasse 1", "8001", "Zürich", "ZH"),
-    Person("beta", "Beta Logistik AG", "customer", "Beispielweg 12", "4051", "Basel", "BS"),
-    Person("gamma", "Gamma Design Studio", "customer", "Musterplatz 3", "3011", "Bern", "BE"),
-    Person("delta", "Delta Bau AG", "customer", "Beispielgasse 7", "6003", "Luzern", "LU"),
+    Person("buero", "Muster Büro AG", "vendor", "Beispielring 9", "9000", "St. Gallen", "SG"),
+    Person("telecom", "Beispiel Telecom AG", "vendor", "Musterweg 15", "6300", "Zug", "ZG"),
     Person(
-        "epsilon",
-        "Epsilon Software SA",
+        "immobilien", "Fiktiv Immobilien AG", "vendor", "Beispielstrasse 2", "8004", "Zürich", "ZH"
+    ),
+    Person(
+        "versicherung", "Probe Versicherung AG", "vendor", "Mustergasse 8", "5000", "Aarau", "AG"
+    ),
+    Person(
+        "consulting",
+        "Muster Consulting GmbH",
+        "customer",
+        "Musterstrasse 1",
+        "8001",
+        "Zürich",
+        "ZH",
+    ),
+    Person("logistik", "Beispiel Logistik AG", "customer", "Beispielweg 12", "4051", "Basel", "BS"),
+    Person("design", "Testfirma Design GmbH", "customer", "Musterplatz 3", "3011", "Bern", "BE"),
+    Person("bau", "Demo Bau AG", "customer", "Beispielgasse 7", "6003", "Luzern", "LU"),
+    Person(
+        "software",
+        "Platzhalter Software SA",
         "customer",
         "Rue de l'Exemple 21",
         "1003",
@@ -211,12 +230,9 @@ PERSONS = (
         "VD",
         language="FR",
     ),
-    Person("zeta", "Zeta Gastro GmbH", "customer", "Musterallee 4", "8400", "Winterthur", "ZH"),
-    Person("omega", "Omega Büro AG", "vendor", "Beispielring 9", "9000", "St. Gallen", "SG"),
-    Person("sigma", "Sigma Telecom AG", "vendor", "Musterweg 15", "6300", "Zug", "ZG"),
-    Person("kappa", "Kappa Immobilien AG", "vendor", "Beispielstrasse 2", "8004", "Zürich", "ZH"),
-    Person("theta", "Theta Versicherung AG", "vendor", "Mustergasse 8", "5000", "Aarau", "AG"),
+    Person("gastro", "Probe Gastro GmbH", "customer", "Musterallee 4", "8400", "Winterthur", "ZH"),
 )
+"""The business partners, vendors first; the first one carries an umlaut."""
 _COMPANIES = {person.key: person.company for person in PERSONS}
 
 BANK, DEBTORS, CREDITORS, SHARE_CAPITAL = "1020", "1100", "2000", "2800"
@@ -265,13 +281,13 @@ def _vendor_payment(day: str, nr: str, amount: str, who: str) -> Entry:
 
 
 def _rent(day: str, period: str, amount: str) -> Entry:
-    """Rent paid to the landlord, Kappa Immobilien AG."""
-    return _entry(day, RENT, BANK, amount, f"Miete {period}", None, "kappa")
+    """Rent paid to the landlord, Fiktiv Immobilien AG."""
+    return _entry(day, RENT, BANK, amount, f"Miete {period}", None, "immobilien")
 
 
 def _expense(day: str, title: str, amount: str) -> Entry:
-    """IT and telecom paid to Sigma Telecom AG."""
-    return _entry(day, ADMIN, BANK, amount, title, None, "sigma")
+    """IT and telecom paid to Beispiel Telecom AG."""
+    return _entry(day, ADMIN, BANK, amount, title, None, "telecom")
 
 
 def _fees(day: str, period: str, amount: str) -> Entry:
@@ -301,71 +317,71 @@ def _item(name: str, description: str, quantity: str, unit_price: str, account: 
 
 ENTRIES_2025 = (
     _entry("2025-01-06", BANK, SHARE_CAPITAL, "100000.00", "Einzahlung Aktienkapital"),
-    _invoice("2025-02-03", "RE-2025-001", "4800.00", "alpha"),
-    _payment("2025-03-05", "RE-2025-001", "4800.00", "alpha"),
+    _invoice("2025-02-03", "RE-2025-001", "4800.00", "consulting"),
+    _payment("2025-03-05", "RE-2025-001", "4800.00", "consulting"),
     _rent("2025-03-31", "1. Quartal 2025", "7200.00"),
-    _purchase("2025-04-14", "ER-2025-001", "6400.00", "omega"),
-    _invoice("2025-05-12", "RE-2025-002", "15000.00", "delta"),
-    _payment("2025-06-09", "RE-2025-002", "15000.00", "delta"),
+    _purchase("2025-04-14", "ER-2025-001", "6400.00", "buero"),
+    _invoice("2025-05-12", "RE-2025-002", "15000.00", "bau"),
+    _payment("2025-06-09", "RE-2025-002", "15000.00", "bau"),
     _rent("2025-06-30", "2. Quartal 2025", "7200.00"),
-    _vendor_payment("2025-07-15", "ER-2025-001", "6400.00", "omega"),
+    _vendor_payment("2025-07-15", "ER-2025-001", "6400.00", "buero"),
     _fees("2025-09-30", "Januar bis September 2025", "120.00"),
-    _invoice("2025-10-20", "RE-2025-003", "3600.00", "beta"),
+    _invoice("2025-10-20", "RE-2025-003", "3600.00", "logistik"),
     _collective(
         "2025-12-15",
         "Bankauszug Dezember 2025",
         _debit(BANK, "2350.00", None, "Saldo Bankauszug Dezember 2025"),
-        _debit(ADMIN, "1250.00", "sigma", "IT-Support 2025"),
-        _credit(DEBTORS, "3600.00", "beta", "Zahlung RE-2025-003"),
+        _debit(ADMIN, "1250.00", "telecom", "IT-Support 2025"),
+        _credit(DEBTORS, "3600.00", "logistik", "Zahlung RE-2025-003"),
     ),
 )
 
 ENTRIES_2026 = (
     _rent("2026-01-05", "Januar 2026", "2400.00"),
-    _invoice("2026-01-12", "RE-2026-001", "4800.00", "alpha"),
-    _purchase("2026-01-20", "ER-2026-001", "3200.00", "omega"),
+    _invoice("2026-01-12", "RE-2026-001", "4800.00", "consulting"),
+    _purchase("2026-01-20", "ER-2026-001", "3200.00", "buero"),
     _expense("2026-01-30", "Telefon und Internet Januar 2026", "180.00"),
     _rent("2026-02-05", "Februar 2026", "2400.00"),
-    _payment("2026-02-10", "RE-2026-001", "4800.00", "alpha"),
-    _invoice("2026-02-16", "RE-2026-002", "7500.00", "beta"),
+    _payment("2026-02-10", "RE-2026-001", "4800.00", "consulting"),
+    _invoice("2026-02-16", "RE-2026-002", "7500.00", "logistik"),
     _expense("2026-02-27", "Telefon und Internet Februar 2026", "180.00"),
     _rent("2026-03-05", "März 2026", "2400.00"),
-    _vendor_payment("2026-03-12", "ER-2026-001", "3200.00", "omega"),
-    _invoice("2026-03-18", "RE-2026-003", "2500.00", "gamma"),
+    _vendor_payment("2026-03-12", "ER-2026-001", "3200.00", "buero"),
+    _invoice("2026-03-18", "RE-2026-003", "2500.00", "design"),
     _fees("2026-03-31", "1. Quartal 2026", "45.00"),
     _rent("2026-04-03", "April 2026", "2400.00"),
     _collective(
         "2026-04-09",
         "Sammelzahlung Debitoren April 2026",
         _debit(BANK, "10000.00", None, "Zahlungseingang"),
-        _credit(DEBTORS, "7500.00", "beta", "Zahlung RE-2026-002"),
-        _credit(DEBTORS, "2500.00", "gamma", "Zahlung RE-2026-003"),
+        _credit(DEBTORS, "7500.00", "logistik", "Zahlung RE-2026-002"),
+        _credit(DEBTORS, "2500.00", "design", "Zahlung RE-2026-003"),
     ),
-    _purchase("2026-04-15", "ER-2026-002", "5600.00", "omega"),
+    _purchase("2026-04-15", "ER-2026-002", "5600.00", "buero"),
     _expense("2026-04-30", "IT-Support April 2026", "650.00"),
     _rent("2026-05-05", "Mai 2026", "2400.00"),
-    _invoice("2026-05-19", "RE-2026-004", "15000.00", "delta"),
-    _invoice("2026-05-26", "RE-2026-005", "6200.00", "epsilon"),
+    _invoice("2026-05-19", "RE-2026-004", "15000.00", "bau"),
+    _invoice("2026-05-26", "RE-2026-005", "6200.00", "software"),
     _expense("2026-05-29", "Telefon und Internet Mai 2026", "180.00"),
     _rent("2026-06-05", "Juni 2026", "2400.00"),
-    _vendor_payment("2026-06-10", "ER-2026-002", "5600.00", "omega"),
-    _payment("2026-06-22", "RE-2026-004", "15000.00", "delta"),
+    _vendor_payment("2026-06-10", "ER-2026-002", "5600.00", "buero"),
+    _payment("2026-06-22", "RE-2026-004", "15000.00", "bau"),
     _fees("2026-06-30", "2. Quartal 2026", "45.00"),
     _rent("2026-07-03", "Juli 2026", "2400.00"),
-    _payment("2026-07-14", "RE-2026-005", "6200.00", "epsilon"),
-    _invoice("2026-07-21", "RE-2026-006", "1250.00", "zeta"),
+    _payment("2026-07-14", "RE-2026-005", "6200.00", "software"),
+    _invoice("2026-07-21", "RE-2026-006", "1250.00", "gastro"),
     _expense("2026-07-31", "Telefon und Internet Juli 2026", "180.00"),
     _rent("2026-08-05", "August 2026", "2400.00"),
-    _purchase("2026-08-18", "ER-2026-003", "2400.00", "omega"),
+    _purchase("2026-08-18", "ER-2026-003", "2400.00", "buero"),
     _expense("2026-08-28", "IT-Support August 2026", "650.00"),
     _expense("2026-08-31", "Telefon und Internet August 2026", "180.00"),
     _rent("2026-09-04", "September 2026", "2400.00"),
-    _invoice("2026-09-15", "RE-2026-007", "3600.00", "alpha"),
+    _invoice("2026-09-15", "RE-2026-007", "3600.00", "consulting"),
     _collective(
         "2026-09-22",
         "Sammelzahlung Kreditoren September 2026",
-        _debit(CREDITORS, "2400.00", "omega", "Zahlung ER-2026-003"),
-        _debit(ADMIN, "180.00", "sigma", "Telefon und Internet September 2026"),
+        _debit(CREDITORS, "2400.00", "buero", "Zahlung ER-2026-003"),
+        _debit(ADMIN, "180.00", "telecom", "Telefon und Internet September 2026"),
         _credit(BANK, "2580.00", None, "Zahlungsausgang"),
     ),
     _fees("2026-09-30", "3. Quartal 2026", "45.00"),
@@ -376,7 +392,7 @@ ORDERS = (
         "SALES",
         "RE-2026-101",
         "2026-03-02",
-        "alpha",
+        "consulting",
         "Beratung Büroeinrichtung",
         _item("Beratung", "Planung Büroeinrichtung, Stundenansatz", "12", "150.00", REVENUE),
         _item("Spesenpauschale", "Anfahrt und Unterlagen", "1", "250.00", REVENUE),
@@ -385,7 +401,7 @@ ORDERS = (
         "SALES",
         "RE-2026-102",
         "2026-04-14",
-        "beta",
+        "logistik",
         "Büromöbel Standort Basel",
         _item("Büromöbel-Set Standard", "Schreibtisch, Stuhl und Korpus", "4", "850.00", REVENUE),
         _item("Lieferung und Montage", "Pauschal", "1", "300.00", REVENUE),
@@ -394,7 +410,7 @@ ORDERS = (
         "SALES",
         "RE-2026-103",
         "2026-06-08",
-        "delta",
+        "bau",
         "Einrichtung Baubüro",
         _item("Bürostuhl Ergo", "Ergonomischer Drehstuhl", "10", "420.00", REVENUE),
         _item("Schreibtisch Basic", "160 x 80 cm", "5", "680.00", REVENUE),
@@ -404,7 +420,7 @@ ORDERS = (
         "SALES",
         "RE-2026-104",
         "2026-09-07",
-        "zeta",
+        "gastro",
         "Büromaterial",
         _item("Druckerpapier A4", "Karton mit 2500 Blatt", "20", "45.00", REVENUE),
     ),
@@ -412,7 +428,7 @@ ORDERS = (
         "PURCHASE",
         "EK-2026-001",
         "2026-02-02",
-        "omega",
+        "buero",
         "Wareneinkauf Büromöbel",
         _item("Bürostuhl Ergo", "Ergonomischer Drehstuhl", "10", "260.00", PURCHASES),
         _item("Schreibtisch Basic", "160 x 80 cm", "5", "410.00", PURCHASES),
@@ -421,7 +437,7 @@ ORDERS = (
         "PURCHASE",
         "EK-2026-002",
         "2026-05-04",
-        "sigma",
+        "telecom",
         "Netzwerk Büro Zürich",
         _item("Router Business", "Router mit Firewall", "1", "480.00", ADMIN),
         _item("Einrichtung Netzwerk", "Pauschal", "1", "350.00", ADMIN),
@@ -1231,7 +1247,7 @@ def plan_lines() -> list[str]:
     ]
     for person in PERSONS:
         out.append(
-            f"  {person.role:<8}  {person.company:<22}  {person.address:<20}  "
+            f"  {person.role:<8}  {person.company:<23}  {person.address:<20}  "
             f"{person.postcode} {person.city:<10}  {person.email}"
         )
     out += ["", "Journal entries (debit / credit, amount, tax)"]
@@ -1249,7 +1265,7 @@ def plan_lines() -> list[str]:
     names = {person.key: person.company for person in PERSONS}
     for order in ORDERS:
         out.append(
-            f"  {order.type:<8}  {order.nr}  {order.day}  {names[order.associate]:<22}  "
+            f"  {order.type:<8}  {order.nr}  {order.day}  {names[order.associate]:<23}  "
             f"{_money(order.net):>9}  {TAX_CODES[ORDER_TAX[order.type]]}"
         )
         for item in order.items:

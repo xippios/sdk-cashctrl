@@ -217,8 +217,8 @@ def test_plan_is_the_default_and_sends_nothing(
             assert re.search(r"orders\s+6\s+4 SALES invoices, 2 PURCHASE orders", out)
             assert re.search(r"currencies\s+2\s+EUR 0.95, USD 0.88", out)
             assert re.search(r"writes, at most\s+67", out)
-            assert "Rechnung RE-2026-001 Alpha Consulting GmbH" in out
-            assert "info@omega-buero.example" in out
+            assert "Rechnung RE-2026-001 Muster Consulting GmbH" in out
+            assert "info@muster-buero.example" in out
         assert router.calls.call_count == 0
 
 
@@ -501,7 +501,7 @@ def test_persons_without_a_fitting_category_get_none(
         (
             "person/create.json",
             3,
-            "person 3/10 Gamma Design Studio",
+            "person 3/10 Fiktiv Immobilien AG",
             "persons 2, journal entries 0",
         ),
         ("journal/create.json", 5, "journal entry 5/48 2025-04-14", "journal entries 4, orders 0"),
@@ -556,7 +556,7 @@ def test_writes_are_form_encoded_with_json_items_and_iso_dates(
     invoice = journal[1]
     assert invoice == {
         "dateAdded": "2025-02-03",
-        "title": "Rechnung RE-2025-001 Alpha Consulting GmbH",
+        "title": "Rechnung RE-2025-001 Muster Consulting GmbH",
         "debitId": str(accounts["1100"]),
         "creditId": str(accounts["3200"]),
         "amount": "4800.00",
@@ -564,7 +564,7 @@ def test_writes_are_form_encoded_with_json_items_and_iso_dates(
         "associateId": invoice["associateId"],
         "reference": "RE-2025-001",
     }
-    assert invoice["associateId"] == person_ids[0]  # Alpha Consulting GmbH
+    assert invoice["associateId"] == person_ids[4]  # Muster Consulting GmbH
 
     collective = next(
         form for form in journal if form["title"].startswith("Sammelzahlung Debitoren")
@@ -579,7 +579,7 @@ def test_writes_are_form_encoded_with_json_items_and_iso_dates(
     }
     assert items[1]["accountId"] == accounts["1100"]
     assert items[1]["credit"] == 7500
-    assert items[1]["associateId"] == int(person_ids[1])  # Beta Logistik AG, a JSON number
+    assert items[1]["associateId"] == int(person_ids[5])  # Beispiel Logistik AG, a JSON number
 
     orders = [form_of(r) for r in fake.posts("order/create.json")]
     sales, purchase = orders[0], orders[4]
@@ -588,7 +588,7 @@ def test_writes_are_form_encoded_with_json_items_and_iso_dates(
     assert sales["date"] == "2026-03-02"
     assert all(DAY.fullmatch(form["date"]) for form in orders)
     assert sales["nr"] == "RE-2026-101"
-    assert sales["associateId"] == person_ids[0]
+    assert sales["associateId"] == person_ids[4]
     assert json.loads(sales["items"]) == [
         {
             "accountId": accounts["3200"],
@@ -610,31 +610,33 @@ def test_writes_are_form_encoded_with_json_items_and_iso_dates(
     assert {item["taxId"] for item in json.loads(purchase["items"])} == {6}
     assert {item["accountId"] for item in json.loads(purchase["items"])} == {accounts["4200"]}
 
-    person = form_of(fake.posts("person/create.json")[0])
-    assert person == {
-        "company": "Alpha Consulting GmbH",
-        "isCustomer": "true",
+    vendor = form_of(fake.posts("person/create.json")[0])
+    assert vendor == {
+        "company": "Muster Büro AG",
+        "isVendor": "true",
         "language": "DE",
-        "categoryId": "1",
-        "addresses": person["addresses"],
-        "contacts": person["contacts"],
+        "categoryId": "2",
+        "addresses": vendor["addresses"],
+        "contacts": vendor["contacts"],
     }
-    assert json.loads(person["addresses"]) == [
+    assert json.loads(vendor["addresses"]) == [
         {
             "type": "MAIN",
-            "address": "Musterstrasse 1",
-            "zip": "8001",
-            "city": "Zürich",
-            "canton": "ZH",
+            "address": "Beispielring 9",
+            "zip": "9000",
+            "city": "St. Gallen",
+            "canton": "SG",
             "country": "CHE",
         }
     ]
-    assert json.loads(person["contacts"]) == [
-        {"type": "EMAIL_WORK", "address": "info@alpha-consulting.example"}
+    assert json.loads(vendor["contacts"]) == [
+        {"type": "EMAIL_WORK", "address": "info@muster-buero.example"}
     ]
-    vendor = form_of(fake.posts("person/create.json")[6])
-    assert vendor["isVendor"] == "true"
-    assert vendor["categoryId"] == "2"
+    customer = form_of(fake.posts("person/create.json")[4])
+    assert customer["company"] == "Muster Consulting GmbH"
+    assert customer["isCustomer"] == "true"
+    assert customer["categoryId"] == "1"
+    assert json.loads(customer["addresses"])[0]["city"] == "Zürich"
 
 
 def test_every_request_sends_basic_auth_and_the_user_agent(
@@ -709,7 +711,10 @@ def test_the_books_are_small_balanced_and_fictional() -> None:
     assert seeder.max_writes() <= 120
     assert all(p.email.endswith(".example") for p in seeder.PERSONS)
     assert len({p.email for p in seeder.PERSONS}) == 10
-    assert all(p.company.endswith((" AG", " GmbH", " SA", " Studio")) for p in seeder.PERSONS)
+    assert all(p.company.endswith((" AG", " GmbH", " SA")) for p in seeder.PERSONS)
+    names = [seeder.COMPANY] + [p.company for p in seeder.PERSONS]
+    assert all(name.split()[0] in seeder.PLACEHOLDER_MARKERS for name in names)
+    assert {name.split()[0] for name in names} == set(seeder.PLACEHOLDER_MARKERS)
     keys = {p.key for p in seeder.PERSONS}
     for entry in entries:
         assert len(entry.title) <= 250
@@ -751,3 +756,9 @@ def test_the_document_describes_every_record() -> None:
         assert f"| {currency.code} | {currency.description} | {currency.rate} |" in doc
     assert f"at most {seeder.max_writes()}" in doc
     assert "## Observed write semantics (filled by the first run)" in doc
+    prose = " ".join(doc.split())
+    rule = re.search(
+        r"every company name carries a placeholder marker as its first word \(([^)]*)\)", prose
+    )
+    assert rule is not None
+    assert rule.group(1) == ", ".join(seeder.PLACEHOLDER_MARKERS)

@@ -19,7 +19,12 @@ and every non-zero amount, to keep real data out of the repository. A fresh orga
 with fictional books removes that reason. Everything in it is invented: the company
 Muster Handel AG, its ten business partners (companies only, no natural persons), their
 addresses on placeholder streets, their `.example` e-mail addresses (a reserved domain,
-never delivered) and every amount. Any resemblance to a real company is coincidental.
+never delivered) and every amount.
+
+The naming rule: every company name carries a placeholder marker as its first word
+(Muster, Beispiel, Testfirma, Demo, Platzhalter, Probe, Fiktiv), the Swiss and German
+convention for sample data, so that no name can pass for a company in the commercial
+register. `tests/test_seed_demo.py` checks the rule against the data and this document.
 
 ## Creating the organisation
 
@@ -133,16 +138,16 @@ foreign currency.
 
 | Role | Company | Address | Postcode, city | Canton | Language | E-mail |
 | --- | --- | --- | --- | --- | --- | --- |
-| customer | Alpha Consulting GmbH | Musterstrasse 1 | 8001 Zürich | ZH | DE | `info@alpha-consulting.example` |
-| customer | Beta Logistik AG | Beispielweg 12 | 4051 Basel | BS | DE | `info@beta-logistik.example` |
-| customer | Gamma Design Studio | Musterplatz 3 | 3011 Bern | BE | DE | `info@gamma-design-studio.example` |
-| customer | Delta Bau AG | Beispielgasse 7 | 6003 Luzern | LU | DE | `info@delta-bau.example` |
-| customer | Epsilon Software SA | Rue de l'Exemple 21 | 1003 Lausanne | VD | FR | `info@epsilon-software.example` |
-| customer | Zeta Gastro GmbH | Musterallee 4 | 8400 Winterthur | ZH | DE | `info@zeta-gastro.example` |
-| vendor | Omega Büro AG | Beispielring 9 | 9000 St. Gallen | SG | DE | `info@omega-buero.example` |
-| vendor | Sigma Telecom AG | Musterweg 15 | 6300 Zug | ZG | DE | `info@sigma-telecom.example` |
-| vendor | Kappa Immobilien AG | Beispielstrasse 2 | 8004 Zürich | ZH | DE | `info@kappa-immobilien.example` |
-| vendor | Theta Versicherung AG | Mustergasse 8 | 5000 Aarau | AG | DE | `info@theta-versicherung.example` |
+| vendor | Muster Büro AG | Beispielring 9 | 9000 St. Gallen | SG | DE | `info@muster-buero.example` |
+| vendor | Beispiel Telecom AG | Musterweg 15 | 6300 Zug | ZG | DE | `info@beispiel-telecom.example` |
+| vendor | Fiktiv Immobilien AG | Beispielstrasse 2 | 8004 Zürich | ZH | DE | `info@fiktiv-immobilien.example` |
+| vendor | Probe Versicherung AG | Mustergasse 8 | 5000 Aarau | AG | DE | `info@probe-versicherung.example` |
+| customer | Muster Consulting GmbH | Musterstrasse 1 | 8001 Zürich | ZH | DE | `info@muster-consulting.example` |
+| customer | Beispiel Logistik AG | Beispielweg 12 | 4051 Basel | BS | DE | `info@beispiel-logistik.example` |
+| customer | Testfirma Design GmbH | Musterplatz 3 | 3011 Bern | BE | DE | `info@testfirma-design.example` |
+| customer | Demo Bau AG | Beispielgasse 7 | 6003 Luzern | LU | DE | `info@demo-bau.example` |
+| customer | Platzhalter Software SA | Rue de l'Exemple 21 | 1003 Lausanne | VD | FR | `info@platzhalter-software.example` |
+| customer | Probe Gastro GmbH | Musterallee 4 | 8400 Winterthur | ZH | DE | `info@probe-gastro.example` |
 
 ### Journal entries by month
 
@@ -172,74 +177,74 @@ other entry is booked without tax. Invoices and payments name the partner
 | August 2026 | 4 | rent, purchase ER-2026-003, IT support, telecom |
 | September 2026 | 4 | rent, invoice RE-2026-007, collective: payment ER-2026-003 and telecom, bank fees |
 
-At the end of September 2026, the invoices RE-2026-006 (Zeta Gastro GmbH, 1'250.00) and
-RE-2026-007 (Alpha Consulting GmbH, 3'600.00) are open; every other invoice and purchase
-is paid. Theta Versicherung AG has no bookings.
+At the end of September 2026, the invoices RE-2026-006 (Probe Gastro GmbH, 1'250.00) and
+RE-2026-007 (Muster Consulting GmbH, 3'600.00) are open; every other invoice and purchase
+is paid. Probe Versicherung AG has no bookings.
 
 ### Journal entries 2025
 
 | Date | Debit | Credit | Amount (CHF) | Tax code | Partner | Reference | Title |
 | --- | --- | --- | ---: | --- | --- | --- | --- |
 | 2025-01-06 | 1020 | 2800 | 100'000.00 |  |  |  | Einzahlung Aktienkapital |
-| 2025-02-03 | 1100 | 3200 | 4'800.00 | UN1 | Alpha Consulting GmbH | RE-2025-001 | Rechnung RE-2025-001 Alpha Consulting GmbH |
-| 2025-03-05 | 1020 | 1100 | 4'800.00 |  | Alpha Consulting GmbH | RE-2025-001 | Zahlung RE-2025-001 |
-| 2025-03-31 | 6000 | 1020 | 7'200.00 |  | Kappa Immobilien AG |  | Miete 1. Quartal 2025 |
-| 2025-04-14 | 4200 | 2000 | 6'400.00 | VN1 | Omega Büro AG | ER-2025-001 | Wareneinkauf ER-2025-001 Omega Büro AG |
-| 2025-05-12 | 1100 | 3200 | 15'000.00 | UN1 | Delta Bau AG | RE-2025-002 | Rechnung RE-2025-002 Delta Bau AG |
-| 2025-06-09 | 1020 | 1100 | 15'000.00 |  | Delta Bau AG | RE-2025-002 | Zahlung RE-2025-002 |
-| 2025-06-30 | 6000 | 1020 | 7'200.00 |  | Kappa Immobilien AG |  | Miete 2. Quartal 2025 |
-| 2025-07-15 | 2000 | 1020 | 6'400.00 |  | Omega Büro AG | ER-2025-001 | Zahlung ER-2025-001 |
+| 2025-02-03 | 1100 | 3200 | 4'800.00 | UN1 | Muster Consulting GmbH | RE-2025-001 | Rechnung RE-2025-001 Muster Consulting GmbH |
+| 2025-03-05 | 1020 | 1100 | 4'800.00 |  | Muster Consulting GmbH | RE-2025-001 | Zahlung RE-2025-001 |
+| 2025-03-31 | 6000 | 1020 | 7'200.00 |  | Fiktiv Immobilien AG |  | Miete 1. Quartal 2025 |
+| 2025-04-14 | 4200 | 2000 | 6'400.00 | VN1 | Muster Büro AG | ER-2025-001 | Wareneinkauf ER-2025-001 Muster Büro AG |
+| 2025-05-12 | 1100 | 3200 | 15'000.00 | UN1 | Demo Bau AG | RE-2025-002 | Rechnung RE-2025-002 Demo Bau AG |
+| 2025-06-09 | 1020 | 1100 | 15'000.00 |  | Demo Bau AG | RE-2025-002 | Zahlung RE-2025-002 |
+| 2025-06-30 | 6000 | 1020 | 7'200.00 |  | Fiktiv Immobilien AG |  | Miete 2. Quartal 2025 |
+| 2025-07-15 | 2000 | 1020 | 6'400.00 |  | Muster Büro AG | ER-2025-001 | Zahlung ER-2025-001 |
 | 2025-09-30 | 6940 | 1020 | 120.00 |  |  |  | Bankspesen Januar bis September 2025 |
-| 2025-10-20 | 1100 | 3200 | 3'600.00 | UN1 | Beta Logistik AG | RE-2025-003 | Rechnung RE-2025-003 Beta Logistik AG |
+| 2025-10-20 | 1100 | 3200 | 3'600.00 | UN1 | Beispiel Logistik AG | RE-2025-003 | Rechnung RE-2025-003 Beispiel Logistik AG |
 | 2025-12-15 | collective | | 3'600.00 | | | | Bankauszug Dezember 2025 |
 | | 1020 |  | 2'350.00 | |  | | Saldo Bankauszug Dezember 2025 |
-| | 6500 |  | 1'250.00 | | Sigma Telecom AG | | IT-Support 2025 |
-| |  | 1100 | 3'600.00 | | Beta Logistik AG | | Zahlung RE-2025-003 |
+| | 6500 |  | 1'250.00 | | Beispiel Telecom AG | | IT-Support 2025 |
+| |  | 1100 | 3'600.00 | | Beispiel Logistik AG | | Zahlung RE-2025-003 |
 
 ### Journal entries 2026
 
 | Date | Debit | Credit | Amount (CHF) | Tax code | Partner | Reference | Title |
 | --- | --- | --- | ---: | --- | --- | --- | --- |
-| 2026-01-05 | 6000 | 1020 | 2'400.00 |  | Kappa Immobilien AG |  | Miete Januar 2026 |
-| 2026-01-12 | 1100 | 3200 | 4'800.00 | UN1 | Alpha Consulting GmbH | RE-2026-001 | Rechnung RE-2026-001 Alpha Consulting GmbH |
-| 2026-01-20 | 4200 | 2000 | 3'200.00 | VN1 | Omega Büro AG | ER-2026-001 | Wareneinkauf ER-2026-001 Omega Büro AG |
-| 2026-01-30 | 6500 | 1020 | 180.00 |  | Sigma Telecom AG |  | Telefon und Internet Januar 2026 |
-| 2026-02-05 | 6000 | 1020 | 2'400.00 |  | Kappa Immobilien AG |  | Miete Februar 2026 |
-| 2026-02-10 | 1020 | 1100 | 4'800.00 |  | Alpha Consulting GmbH | RE-2026-001 | Zahlung RE-2026-001 |
-| 2026-02-16 | 1100 | 3200 | 7'500.00 | UN1 | Beta Logistik AG | RE-2026-002 | Rechnung RE-2026-002 Beta Logistik AG |
-| 2026-02-27 | 6500 | 1020 | 180.00 |  | Sigma Telecom AG |  | Telefon und Internet Februar 2026 |
-| 2026-03-05 | 6000 | 1020 | 2'400.00 |  | Kappa Immobilien AG |  | Miete März 2026 |
-| 2026-03-12 | 2000 | 1020 | 3'200.00 |  | Omega Büro AG | ER-2026-001 | Zahlung ER-2026-001 |
-| 2026-03-18 | 1100 | 3200 | 2'500.00 | UN1 | Gamma Design Studio | RE-2026-003 | Rechnung RE-2026-003 Gamma Design Studio |
+| 2026-01-05 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete Januar 2026 |
+| 2026-01-12 | 1100 | 3200 | 4'800.00 | UN1 | Muster Consulting GmbH | RE-2026-001 | Rechnung RE-2026-001 Muster Consulting GmbH |
+| 2026-01-20 | 4200 | 2000 | 3'200.00 | VN1 | Muster Büro AG | ER-2026-001 | Wareneinkauf ER-2026-001 Muster Büro AG |
+| 2026-01-30 | 6500 | 1020 | 180.00 |  | Beispiel Telecom AG |  | Telefon und Internet Januar 2026 |
+| 2026-02-05 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete Februar 2026 |
+| 2026-02-10 | 1020 | 1100 | 4'800.00 |  | Muster Consulting GmbH | RE-2026-001 | Zahlung RE-2026-001 |
+| 2026-02-16 | 1100 | 3200 | 7'500.00 | UN1 | Beispiel Logistik AG | RE-2026-002 | Rechnung RE-2026-002 Beispiel Logistik AG |
+| 2026-02-27 | 6500 | 1020 | 180.00 |  | Beispiel Telecom AG |  | Telefon und Internet Februar 2026 |
+| 2026-03-05 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete März 2026 |
+| 2026-03-12 | 2000 | 1020 | 3'200.00 |  | Muster Büro AG | ER-2026-001 | Zahlung ER-2026-001 |
+| 2026-03-18 | 1100 | 3200 | 2'500.00 | UN1 | Testfirma Design GmbH | RE-2026-003 | Rechnung RE-2026-003 Testfirma Design GmbH |
 | 2026-03-31 | 6940 | 1020 | 45.00 |  |  |  | Bankspesen 1. Quartal 2026 |
-| 2026-04-03 | 6000 | 1020 | 2'400.00 |  | Kappa Immobilien AG |  | Miete April 2026 |
+| 2026-04-03 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete April 2026 |
 | 2026-04-09 | collective | | 10'000.00 | | | | Sammelzahlung Debitoren April 2026 |
 | | 1020 |  | 10'000.00 | |  | | Zahlungseingang |
-| |  | 1100 | 7'500.00 | | Beta Logistik AG | | Zahlung RE-2026-002 |
-| |  | 1100 | 2'500.00 | | Gamma Design Studio | | Zahlung RE-2026-003 |
-| 2026-04-15 | 4200 | 2000 | 5'600.00 | VN1 | Omega Büro AG | ER-2026-002 | Wareneinkauf ER-2026-002 Omega Büro AG |
-| 2026-04-30 | 6500 | 1020 | 650.00 |  | Sigma Telecom AG |  | IT-Support April 2026 |
-| 2026-05-05 | 6000 | 1020 | 2'400.00 |  | Kappa Immobilien AG |  | Miete Mai 2026 |
-| 2026-05-19 | 1100 | 3200 | 15'000.00 | UN1 | Delta Bau AG | RE-2026-004 | Rechnung RE-2026-004 Delta Bau AG |
-| 2026-05-26 | 1100 | 3200 | 6'200.00 | UN1 | Epsilon Software SA | RE-2026-005 | Rechnung RE-2026-005 Epsilon Software SA |
-| 2026-05-29 | 6500 | 1020 | 180.00 |  | Sigma Telecom AG |  | Telefon und Internet Mai 2026 |
-| 2026-06-05 | 6000 | 1020 | 2'400.00 |  | Kappa Immobilien AG |  | Miete Juni 2026 |
-| 2026-06-10 | 2000 | 1020 | 5'600.00 |  | Omega Büro AG | ER-2026-002 | Zahlung ER-2026-002 |
-| 2026-06-22 | 1020 | 1100 | 15'000.00 |  | Delta Bau AG | RE-2026-004 | Zahlung RE-2026-004 |
+| |  | 1100 | 7'500.00 | | Beispiel Logistik AG | | Zahlung RE-2026-002 |
+| |  | 1100 | 2'500.00 | | Testfirma Design GmbH | | Zahlung RE-2026-003 |
+| 2026-04-15 | 4200 | 2000 | 5'600.00 | VN1 | Muster Büro AG | ER-2026-002 | Wareneinkauf ER-2026-002 Muster Büro AG |
+| 2026-04-30 | 6500 | 1020 | 650.00 |  | Beispiel Telecom AG |  | IT-Support April 2026 |
+| 2026-05-05 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete Mai 2026 |
+| 2026-05-19 | 1100 | 3200 | 15'000.00 | UN1 | Demo Bau AG | RE-2026-004 | Rechnung RE-2026-004 Demo Bau AG |
+| 2026-05-26 | 1100 | 3200 | 6'200.00 | UN1 | Platzhalter Software SA | RE-2026-005 | Rechnung RE-2026-005 Platzhalter Software SA |
+| 2026-05-29 | 6500 | 1020 | 180.00 |  | Beispiel Telecom AG |  | Telefon und Internet Mai 2026 |
+| 2026-06-05 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete Juni 2026 |
+| 2026-06-10 | 2000 | 1020 | 5'600.00 |  | Muster Büro AG | ER-2026-002 | Zahlung ER-2026-002 |
+| 2026-06-22 | 1020 | 1100 | 15'000.00 |  | Demo Bau AG | RE-2026-004 | Zahlung RE-2026-004 |
 | 2026-06-30 | 6940 | 1020 | 45.00 |  |  |  | Bankspesen 2. Quartal 2026 |
-| 2026-07-03 | 6000 | 1020 | 2'400.00 |  | Kappa Immobilien AG |  | Miete Juli 2026 |
-| 2026-07-14 | 1020 | 1100 | 6'200.00 |  | Epsilon Software SA | RE-2026-005 | Zahlung RE-2026-005 |
-| 2026-07-21 | 1100 | 3200 | 1'250.00 | UN1 | Zeta Gastro GmbH | RE-2026-006 | Rechnung RE-2026-006 Zeta Gastro GmbH |
-| 2026-07-31 | 6500 | 1020 | 180.00 |  | Sigma Telecom AG |  | Telefon und Internet Juli 2026 |
-| 2026-08-05 | 6000 | 1020 | 2'400.00 |  | Kappa Immobilien AG |  | Miete August 2026 |
-| 2026-08-18 | 4200 | 2000 | 2'400.00 | VN1 | Omega Büro AG | ER-2026-003 | Wareneinkauf ER-2026-003 Omega Büro AG |
-| 2026-08-28 | 6500 | 1020 | 650.00 |  | Sigma Telecom AG |  | IT-Support August 2026 |
-| 2026-08-31 | 6500 | 1020 | 180.00 |  | Sigma Telecom AG |  | Telefon und Internet August 2026 |
-| 2026-09-04 | 6000 | 1020 | 2'400.00 |  | Kappa Immobilien AG |  | Miete September 2026 |
-| 2026-09-15 | 1100 | 3200 | 3'600.00 | UN1 | Alpha Consulting GmbH | RE-2026-007 | Rechnung RE-2026-007 Alpha Consulting GmbH |
+| 2026-07-03 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete Juli 2026 |
+| 2026-07-14 | 1020 | 1100 | 6'200.00 |  | Platzhalter Software SA | RE-2026-005 | Zahlung RE-2026-005 |
+| 2026-07-21 | 1100 | 3200 | 1'250.00 | UN1 | Probe Gastro GmbH | RE-2026-006 | Rechnung RE-2026-006 Probe Gastro GmbH |
+| 2026-07-31 | 6500 | 1020 | 180.00 |  | Beispiel Telecom AG |  | Telefon und Internet Juli 2026 |
+| 2026-08-05 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete August 2026 |
+| 2026-08-18 | 4200 | 2000 | 2'400.00 | VN1 | Muster Büro AG | ER-2026-003 | Wareneinkauf ER-2026-003 Muster Büro AG |
+| 2026-08-28 | 6500 | 1020 | 650.00 |  | Beispiel Telecom AG |  | IT-Support August 2026 |
+| 2026-08-31 | 6500 | 1020 | 180.00 |  | Beispiel Telecom AG |  | Telefon und Internet August 2026 |
+| 2026-09-04 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete September 2026 |
+| 2026-09-15 | 1100 | 3200 | 3'600.00 | UN1 | Muster Consulting GmbH | RE-2026-007 | Rechnung RE-2026-007 Muster Consulting GmbH |
 | 2026-09-22 | collective | | 2'580.00 | | | | Sammelzahlung Kreditoren September 2026 |
-| | 2000 |  | 2'400.00 | | Omega Büro AG | | Zahlung ER-2026-003 |
-| | 6500 |  | 180.00 | | Sigma Telecom AG | | Telefon und Internet September 2026 |
+| | 2000 |  | 2'400.00 | | Muster Büro AG | | Zahlung ER-2026-003 |
+| | 6500 |  | 180.00 | | Beispiel Telecom AG | | Telefon und Internet September 2026 |
 | |  | 1020 | 2'580.00 | |  | | Zahlungsausgang |
 | 2026-09-30 | 6940 | 1020 | 45.00 |  |  |  | Bankspesen 3. Quartal 2026 |
 
@@ -261,17 +266,17 @@ names are compared in every language a localized name carries, in any case.
 
 | Type | Number | Date | Partner | Description | Item | Quantity | Unit price (CHF) | Account | Tax code |
 | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
-| SALES | RE-2026-101 | 2026-03-02 | Alpha Consulting GmbH | Beratung Büroeinrichtung | Beratung (Planung Büroeinrichtung, Stundenansatz) | 12 | 150.00 | 3200 | UN1 |
+| SALES | RE-2026-101 | 2026-03-02 | Muster Consulting GmbH | Beratung Büroeinrichtung | Beratung (Planung Büroeinrichtung, Stundenansatz) | 12 | 150.00 | 3200 | UN1 |
 | | | | | | Spesenpauschale (Anfahrt und Unterlagen) | 1 | 250.00 | 3200 | UN1 |
-| SALES | RE-2026-102 | 2026-04-14 | Beta Logistik AG | Büromöbel Standort Basel | Büromöbel-Set Standard (Schreibtisch, Stuhl und Korpus) | 4 | 850.00 | 3200 | UN1 |
+| SALES | RE-2026-102 | 2026-04-14 | Beispiel Logistik AG | Büromöbel Standort Basel | Büromöbel-Set Standard (Schreibtisch, Stuhl und Korpus) | 4 | 850.00 | 3200 | UN1 |
 | | | | | | Lieferung und Montage (Pauschal) | 1 | 300.00 | 3200 | UN1 |
-| SALES | RE-2026-103 | 2026-06-08 | Delta Bau AG | Einrichtung Baubüro | Bürostuhl Ergo (Ergonomischer Drehstuhl) | 10 | 420.00 | 3200 | UN1 |
+| SALES | RE-2026-103 | 2026-06-08 | Demo Bau AG | Einrichtung Baubüro | Bürostuhl Ergo (Ergonomischer Drehstuhl) | 10 | 420.00 | 3200 | UN1 |
 | | | | | | Schreibtisch Basic (160 x 80 cm) | 5 | 680.00 | 3200 | UN1 |
 | | | | | | Lieferung (Pauschal) | 1 | 150.00 | 3200 | UN1 |
-| SALES | RE-2026-104 | 2026-09-07 | Zeta Gastro GmbH | Büromaterial | Druckerpapier A4 (Karton mit 2500 Blatt) | 20 | 45.00 | 3200 | UN1 |
-| PURCHASE | EK-2026-001 | 2026-02-02 | Omega Büro AG | Wareneinkauf Büromöbel | Bürostuhl Ergo (Ergonomischer Drehstuhl) | 10 | 260.00 | 4200 | VN1 |
+| SALES | RE-2026-104 | 2026-09-07 | Probe Gastro GmbH | Büromaterial | Druckerpapier A4 (Karton mit 2500 Blatt) | 20 | 45.00 | 3200 | UN1 |
+| PURCHASE | EK-2026-001 | 2026-02-02 | Muster Büro AG | Wareneinkauf Büromöbel | Bürostuhl Ergo (Ergonomischer Drehstuhl) | 10 | 260.00 | 4200 | VN1 |
 | | | | | | Schreibtisch Basic (160 x 80 cm) | 5 | 410.00 | 4200 | VN1 |
-| PURCHASE | EK-2026-002 | 2026-05-04 | Sigma Telecom AG | Netzwerk Büro Zürich | Router Business (Router mit Firewall) | 1 | 480.00 | 6500 | VN1 |
+| PURCHASE | EK-2026-002 | 2026-05-04 | Beispiel Telecom AG | Netzwerk Büro Zürich | Router Business (Router mit Firewall) | 1 | 480.00 | 6500 | VN1 |
 | | | | | | Einrichtung Netzwerk (Pauschal) | 1 | 350.00 | 6500 | VN1 |
 
 ## Account numbers and other assumptions
@@ -287,9 +292,9 @@ the first write:
 | 2000 | creditors | purchases and vendor payments |
 | 2800 | share capital | the payment of the share capital, January 2025 |
 | 3200 | revenue from goods | sales invoices and sales order items |
-| 4200 | purchases of goods | purchases and the purchase order to Omega Büro AG |
+| 4200 | purchases of goods | purchases and the purchase order to Muster Büro AG |
 | 6000 | premises | rent |
-| 6500 | administration | IT support, telecom and the purchase order to Sigma Telecom AG |
+| 6500 | administration | IT support, telecom and the purchase order to Beispiel Telecom AG |
 | 6940 | bank charges | bank fees |
 
 - The numbers follow the Swiss SME chart of accounts (KMU-Kontenrahmen), which CashCtrl's
