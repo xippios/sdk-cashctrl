@@ -52,8 +52,8 @@ imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every test. T
 organisation is synthetic: invented books seeded by `scripts/seed_demo.py` and described
 in `docs/demo-org.md` (both on the seed branch, merging separately), never a copy of real
 books. So the recorder records any module and any amount; it still scrubs e-mail
-addresses to `user@example.com` and refuses any method but GET and any endpoint but
-`.json`. The demo subdomain is treated like a key: never in a file, a commit, a log line
+addresses to `user@example.com` and API user tags to `API:REDACTED`, and refuses any
+method but GET and any endpoint but `.json`. The demo subdomain is treated like a key: never in a file, a commit, a log line
 or a report. The repository is public.
 
 ## Read first, in this order
@@ -98,7 +98,7 @@ src/xippios/cashctrl/
 scripts/
   refresh_reference.py   stub until a documented value set is needed (refresh-reference-data)
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
-  record_fixture.py      records one exchange with the demo organisation, host and e-mails scrubbed
+  record_fixture.py      records one exchange with the demo organisation; host, e-mails, API user tags scrubbed
 tests/
   conftest.py      core's plugin; demo-only environment, placeholder demo pair, clients reset per test, demo_org
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
