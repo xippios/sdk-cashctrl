@@ -57,11 +57,16 @@ from typing import Any, Literal
 
 import httpx
 
+from xippios.cashctrl import __version__
+
 SUBDOMAIN_ENV = "CASHCTRL_DEMO_SUBDOMAIN"
 API_KEY_ENV = "CASHCTRL_DEMO_API_KEY"  # pragma: allowlist secret (a variable name, not a key)
-USER_AGENT = "xippios-cashctrl-seed"
-PACE_SECONDS = 1.0
-"""The least time between the starts of two requests: at most one request per second."""
+USER_AGENT = f"xippios-cashctrl/{__version__} (+https://github.com/xippios)"
+"""The family's one User-Agent (sdk-core conventions, section 6). It has no slot for a
+marker, so the seeder sends it unchanged."""
+PACE_SECONDS = 1.2
+"""The least time between the starts of two requests: 50 a minute, a margin under the 60 a
+minute the package's client allows itself."""
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded; charset=UTF-8"
 """The content type of every form-encoded write, the charset declared explicitly."""
 MULTIPART = "multipart/form-data"
@@ -1501,7 +1506,7 @@ def apply(environ: Mapping[str, str], *, multipart: bool = False) -> int:
             return 1
         say(
             f"all guards passed; writing at most {max_writes()} records as "
-            f"{observed.encoding}, one request per second"
+            f"{observed.encoding}, one request every {PACE_SECONDS} seconds"
         )
         status = 0
         try:

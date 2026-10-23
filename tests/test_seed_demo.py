@@ -25,6 +25,8 @@ import httpx
 import pytest
 import respx
 
+from xippios.cashctrl import __version__
+
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "seed_demo.py"
 SUB = "fakesub7x"
 KEY = "fake-key-for-the-seed-test-0123456789"  # pragma: allowlist secret (a test value)
@@ -48,6 +50,7 @@ def load_seeder() -> ModuleType:
 
 seeder = load_seeder()
 ENV = {seeder.SUBDOMAIN_ENV: SUB, seeder.API_KEY_ENV: KEY}
+PACE = seeder.PACE_SECONDS  # before the autouse fixture sets it to zero
 
 
 def _list(records: list[dict[str, Any]]) -> httpx.Response:
@@ -862,7 +865,12 @@ def test_every_request_sends_basic_auth_and_the_user_agent(
     assert fake.requests
     for request in fake.requests:
         assert request.headers["authorization"] == f"Basic {TOKEN}"
-        assert request.headers["user-agent"] == "xippios-cashctrl-seed"
+        assert request.headers["user-agent"] == (
+            f"xippios-cashctrl/{__version__} (+https://github.com/xippios)"
+        )
+        assert re.fullmatch(
+            r"xippios-cashctrl/\S+ \(\+https://github\.com/xippios\)", request.headers["user-agent"]
+        )
         assert request.url.scheme == "https"
         assert request.url.host == f"{SUB}.cashctrl.com"
 
@@ -931,7 +939,12 @@ def test_the_scrubber_hides_values_in_any_case_and_keeps_example_addresses() -> 
     assert KEY not in repr(seeder.Credentials(subdomain=SUB, key=KEY))
 
 
-def test_the_pacer_keeps_one_second_between_requests() -> None:
+def test_the_pace_is_1_2_seconds_start_to_start() -> None:
+    assert PACE == 1.2
+    assert 60 / PACE < 60  # a margin under the client's 60 requests a minute
+
+
+def test_the_pacer_keeps_the_pace_between_request_starts() -> None:
     now = [100.0]
     slept: list[float] = []
 
@@ -939,13 +952,13 @@ def test_the_pacer_keeps_one_second_between_requests() -> None:
         slept.append(seconds)
         now[0] += seconds
 
-    pacer = seeder.Pacer(1.0, clock=lambda: now[0], sleep=sleep)
+    pacer = seeder.Pacer(PACE, clock=lambda: now[0], sleep=sleep)
     pacer.wait()
     now[0] += 0.25
     pacer.wait()
     now[0] += 3.0
     pacer.wait()
-    assert slept == [0.75]
+    assert slept == [pytest.approx(0.95)]
 
 
 # --- the synthetic books ------------------------------------------------------------------
