@@ -160,13 +160,14 @@ unknown id on a `read.json` read by id; a 404 means an unknown endpoint and rais
 Run `/record-fixture <endpoint> <case> <parameters>`. It runs
 `direnv exec ~/github/sdk uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]`,
 which performs one live request against the demo organisation, always and only, builds
-the fixture in memory with credentials scrubbed and the demo host rewritten to
-`demo.cashctrl.com` and e-mail addresses to `user@example.com`, and only then writes
-`tests/fixtures/<endpoint>/<case>.json`. It writes nothing when the fixture still holds
-the subdomain, the key or an e-mail address, when the body is not UTF-8 text (exports
-are out of scope), or when a policy of the demo-only rule above refuses it. Grep the
-file for key patterns and e-mail addresses before committing. Fixtures are never typed
-in by hand.
+the fixture in memory with credentials scrubbed, the demo host rewritten to
+`demo.cashctrl.com`, e-mail addresses to `user@example.com` and CashCtrl's API user tags
+(`API:` and the first four characters of a key, in `createdBy`) to `API:REDACTED`, and
+only then writes `tests/fixtures/<endpoint>/<case>.json`. It writes nothing when the
+fixture still holds the subdomain, the key, an e-mail address or an API user tag, when
+the body is not UTF-8 text (exports are out of scope), or when a policy of the demo-only
+rule above refuses it. Grep the file for key patterns, e-mail addresses and API user
+tags before committing. Fixtures are never typed in by hand.
 
 ## Commands
 

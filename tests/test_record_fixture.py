@@ -383,3 +383,42 @@ def test_html_entities_count_as_at(
         KEY,
     )
     assert leaks == ["an e-mail address other than user@example.com"], "and in the final check"
+
+
+def test_api_user_tags_become_redacted(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CashCtrl names an API user ``API:`` plus the first four characters of its key."""
+    own = f"API:{KEY[:4]}"
+    record = {
+        "id": 2,
+        "createdBy": own,
+        "lastUpdatedBy": "API:Zq7x",  # another API user's key, also never written
+        "notes": "SYSTEM",
+    }
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/fiscalperiod/list.json")
+    route.mock(return_value=httpx.Response(200, json={"total": 1, "data": [record]}))
+    assert recorder.main(["fiscalperiod/list.json", "api_users"]) == 0
+    text = (tmp_path / "tests" / "fixtures" / "fiscalperiod_list" / "api_users.json").read_text()
+    assert own not in text
+    assert "Zq7x" not in text
+    (written,) = json.loads(json.loads(text)["response"]["body"])["data"]
+    assert (written["createdBy"], written["lastUpdatedBy"]) == ("API:REDACTED", "API:REDACTED")
+    assert written["notes"] == "SYSTEM"
+    assert own not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("tag", [f"API:{KEY[:4]}", "API:Zq7x"])
+def test_the_check_refuses_an_api_user_tag_but_never_shows_it(
+    recorder: ModuleType, tag: str
+) -> None:
+    body = json.dumps({"total": 1, "data": [{"createdBy": tag}]})
+    text = json.dumps({"request": {"url": ""}, "response": {"headers": [], "body": body}})
+    leaks, _ = recorder.check(text, REAL, KEY)
+    assert leaks == ["an API user tag other than API:REDACTED"]
+    assert all(tag not in leak for leak in leaks)
+    clean = text.replace(tag, "API:REDACTED")
+    assert recorder.check(clean, REAL, KEY) == ([], [])

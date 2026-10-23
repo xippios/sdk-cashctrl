@@ -37,7 +37,9 @@ All notable changes to this project are documented here. The format follows
   address to `user@example.com` in memory, checks for the subdomain, the key and any
   other e-mail address before the one write, and refuses bodies that are not UTF-8 text
   (exports), any method but GET and any endpoint but `.json`; e-mail addresses written
-  as HTML entities (`&#64;`, `&#x40;`, `&commat;`) are scrubbed too. The demo
+  as HTML entities (`&#64;`, `&#x40;`, `&commat;`) are scrubbed too, and so is
+  CashCtrl's API user tag in `createdBy` and `lastUpdatedBy` (`API:` and the first four
+  characters of the API user's key, observed on 2026-10-23), to `API:REDACTED`. The demo
   organisation is synthetic (`scripts/seed_demo.py`, `docs/demo-org.md`), so any module
   and any amount may be recorded. Fixtures for an unknown id, a missing id and a wrong
   key.

@@ -30,6 +30,10 @@ These policies stand all the same, and each refusal writes nothing and exits non
   (`createdBy`, `lastUpdatedBy`, HTML fields such as `notes`) becomes
   `user@example.com`, also when `@` is written `%40`, `&#64;`, `&#x40;` or `&commat;`;
   `SYSTEM` stays. `createdBy` may carry the address of the real user who wrote a record.
+- **No API user tags.** CashCtrl names an API user in `createdBy` and `lastUpdatedBy` as
+  `API:` and the first four characters of its key (observed on the records
+  `scripts/seed_demo.py` wrote). Every such tag becomes `API:REDACTED`, and the final
+  check refuses any other.
 
 1. The demo pair comes from direnv in `~/github/sdk`. Confirm it without printing it:
    `direnv exec ~/github/sdk sh -c '[ -n "$CASHCTRL_DEMO_SUBDOMAIN" ] && [ -n "$CASHCTRL_DEMO_API_KEY" ] && echo ok'`.
@@ -46,15 +50,15 @@ These policies stand all the same, and each refusal writes nothing and exits non
 
    It builds the fixture in memory with core's `fixture_from_response` (credentials
    scrubbed), replaces the demo host with `demo.cashctrl.com` everywhere in it (the host
-   offline tests replay against) and every e-mail address with `user@example.com`,
-   checks it, and only then writes `tests/fixtures/<endpoint>/<case>.json`
+   offline tests replay against), every e-mail address with `user@example.com` and
+   every API user tag with `API:REDACTED`, checks it, and only then writes `tests/fixtures/<endpoint>/<case>.json`
    (`account/read.json` becomes `account_read/`). It prints only the status and that
    URL. `--wrong-key` sends an invalid key instead of the real one, to record a 401.
    Error cases (an unknown id, a refusal) are worth recording; the recorder keeps them
    instead of raising.
 4. The check runs on the scrubbed fixture before the write: if the real subdomain, the
-   real key or an e-mail address other than `user@example.com` is in it, nothing is
-   written and the script exits non-zero; if a key-like name carries a value other than
+   real key, an e-mail address other than `user@example.com` or an API user tag other
+   than `API:REDACTED` is in it, nothing is written and the script exits non-zero; if a key-like name carries a value other than
    `REDACTED`, it writes the file and exits non-zero for review. Either way, stop and
    report what it named; never print the file to find out.
 5. Check again before committing, never echoing a value:
@@ -67,6 +71,7 @@ These policies stand all the same, and each refusal writes nothing and exits non
 
    The first prints nothing but `REDACTED` values (and the README's own example line);
    the second prints `user@example.com` and nothing else; the third prints `clean`.
+   `grep -rhoE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u` prints `API:REDACTED` at most.
 6. Keep the fixture small enough to review, well under 40 KB (`limit=`, a filter, a
    query): prefer the narrowest query that shows the shape. The default chart of
    accounts (139 accounts) is too large for one fixture; narrow `account/list.json`.

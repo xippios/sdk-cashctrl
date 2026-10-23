@@ -36,17 +36,23 @@ refusal writes nothing, says why, never shows a value, and exits with status 1:
   The synthetic books use reserved ``.example`` addresses, but ``createdBy`` and
   ``lastUpdatedBy`` may carry the address of the user who wrote a record, a real person,
   so the scrub stays.
+- No API user tags. CashCtrl names an API user in ``createdBy`` and ``lastUpdatedBy`` as
+  ``API:`` and the first four characters of its key (observed on 2026-10-23 on the
+  records ``scripts/seed_demo.py`` wrote). Every such tag becomes ``API:REDACTED``,
+  whichever key it comes from.
 
 Nothing unscrubbed touches disk. The request goes through the real client with
 ``raise_on_error=False``, and core's ``fixture_from_response`` turns the exchange into a
 fixture in memory, credentials scrubbed. Then every occurrence of the demo host
 (``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``) in the request URL, the response headers and
-the body becomes ``demo.cashctrl.com``, the host offline tests replay against, and every
-e-mail address becomes ``user@example.com``. The fixture is checked last, before the one
-write: the real subdomain, the real key (plain or as a basic-auth token) or an e-mail
-address other than ``user@example.com`` anywhere in it means nothing is written and the
-exit status is 1; a key-like name whose value is not ``REDACTED`` is written for review,
-also with exit status 1. Only the status and the scrubbed URL are printed.
+the body becomes ``demo.cashctrl.com``, the host offline tests replay against, every
+e-mail address becomes ``user@example.com`` and every API user tag ``API:REDACTED``. The
+fixture is checked last, before the one write: the real subdomain, the real key (plain,
+as a basic-auth token, or its first four characters as an API user tag), an e-mail
+address other than ``user@example.com`` or an API user tag other than ``API:REDACTED``
+anywhere in it means nothing is written and the exit status is 1; a key-like name whose
+value is not ``REDACTED`` is written for review, also with exit status 1. Only the status
+and the scrubbed URL are printed.
 
 A body that is not UTF-8 text, which core would keep as base64, is refused before
 anything is written, should a ``.json`` endpoint ever send one: such a body can be
@@ -96,6 +102,14 @@ EMAIL = re.compile(r"[\w.%+-]+(?P<at>@|%40|&#0*64;?|&#[xX]0*40;?|&commat;)[\w.-]
 # of a JSON body then keeps it JSON.
 _EMAIL_IN_TEXT = re.compile(r"(?:(?<=\\[nrtbf])|(?<![\w.%+\\-]))" + EMAIL.pattern)
 _SCRUBBED_EMAILS = frozenset({SCRUBBED_EMAIL, SCRUBBED_EMAIL.replace("@", "%40")})
+
+SCRUBBED_API_USER = "API:REDACTED"
+API_USER = re.compile(r"(?<![\w.-])API:(?!REDACTED\b)[A-Za-z0-9]+")
+"""CashCtrl's tag for an API user in ``createdBy``/``lastUpdatedBy``: ``API:`` and key[:4].
+
+Observed on 2026-10-23: the records an API user wrote carry ``"createdBy": "API:<the first
+four characters of its key>"``. Any tag but the scrubbed one matches.
+"""
 
 
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -244,6 +258,11 @@ def _holds_an_address(fixture: dict[str, Any]) -> bool:
     return any(address not in _SCRUBBED_EMAILS for address in found)
 
 
+def scrub_api_users(fixture: Fixture) -> Fixture:
+    """``fixture`` with every API user tag in URL, headers and body made ``API:REDACTED``."""
+    return rewrite(fixture, lambda text: API_USER.sub(SCRUBBED_API_USER, text))
+
+
 def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
     """``(leaks, suspicions)`` in a serialised fixture; neither ever contains a value."""
     leaks: list[str] = []
@@ -253,6 +272,9 @@ def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
     if key and (key in text or token in text):
         leaks.append(f"the value of {api_key_env(DEMO)}")
     fixture = json.loads(text)
+    own_tag = re.compile(rf"API:{re.escape(key[:4])}(?![A-Za-z0-9])") if key else None
+    if API_USER.search(text) or (own_tag and own_tag.search(text)):
+        leaks.append(f"an API user tag other than {SCRUBBED_API_USER}")
     if _holds_an_address(fixture):
         leaks.append(f"an e-mail address other than {SCRUBBED_EMAIL}")
     suspicions = list(_key_like_values(fixture, "fixture"))
@@ -286,7 +308,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     subdomain = os.environ[subdomain_env(DEMO)].strip().lower()
     host = re.compile(re.escape(f"{subdomain}.cashctrl.com"), re.IGNORECASE)
-    fixture = scrub_emails(scrub_host(fixture, host))
+    fixture = scrub_api_users(scrub_emails(scrub_host(fixture, host)))
     text = to_json(fixture)
 
     leaks, suspicions = check(text, subdomain, os.environ.get(api_key_env(DEMO), ""))
