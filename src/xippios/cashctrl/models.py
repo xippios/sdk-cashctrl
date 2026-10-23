@@ -14,14 +14,18 @@ computed.
 ``docs/upstream/`` shows no response bodies. Field types come from the create and update
 parameter tables where they describe the field, and from the answers recorded against the
 demo organisation on 2026-10-23 where they do not; the latter are named in each model's
-docstring as typed from observation. What those answers showed:
+docstring as typed from observation. Two demo organisations answered that day: the
+first, a copy of real books, since retired, and the synthetic one seeded by
+``scripts/seed_demo.py``; the committed fixtures come from the synthetic one only. What
+those answers showed:
 
-- Timestamps come as ``YYYY-MM-DD HH:MM:SS.f`` (``2024-01-10 08:19:00.0``) without a zone;
+- Timestamps come as ``YYYY-MM-DD HH:MM:SS.f`` (``2026-10-23 07:06:39.0``) without a zone;
   they are kept as naive ``datetime``.
-- Dates come in the same form (``2024-12-31 23:59:59.0`` for the end of a fiscal period);
-  the date part is kept (``2024-12-31``), the documented ``YYYY-MM-DD`` of the parameters.
-  ``lastEntryDate``, which no table describes and which was seen with a time of day
-  (``2024-12-31 00:00:02.0``), stays a ``datetime``.
+- Dates come in the same form (``2025-12-31 23:59:59.0`` for the end of a fiscal period);
+  the date part is kept (``2025-12-31``), the documented ``YYYY-MM-DD`` of the parameters.
+  ``lastEntryDate``, which no table describes, stays a ``datetime``: the first demo
+  organisation sent it with a time of day (``00:00:02``), the synthetic one at midnight
+  (``2025-12-15 00:00:00.0``).
 - Localised texts (``name``, ``description``) arrive as upstream stores them, plain or as
   ``<values><de>...</de><en>...</en></values>``, and are kept verbatim.
 - A field that may be absent or ``null`` is ``X | None`` and defaults to ``None``. A
@@ -111,7 +115,9 @@ class FiscalPeriod(UpstreamModel):
     flags ``closed``, ``current``, ``salary_closed``, ``transient`` and their ``is_*``
     twins (both spellings come in every record), and the ``created*``/``last_updated*``
     bookkeeping fields. ``is_current`` marks the API user's current fiscal period, which
-    upstream uses for balances when no ``fiscalPeriodId`` is given.
+    upstream uses for balances when no ``fiscalPeriodId`` is given. On the synthetic demo
+    organisation that is 2025, the period ``scripts/seed_demo.py`` created, not 2026, the
+    one the organisation was created with.
     """
 
     id: int
@@ -213,9 +219,10 @@ class TaxCode(UpstreamModel):
     ``is_display_tax_rate`` and ``is_inactive`` are typed from the create and update
     tables; ``description`` and ``document_name`` may hold localised text as
     ``<values><de>...</de></values>``. Typed from observation: ``account_display`` (seen
-    as the number of the components' account), ``current_percentage`` and
-    ``current_percentage_flat`` (the rate in force, typed like ``TaxRate``; the flat one
-    was only seen as ``null``), ``form_codes`` (seen as ``"200, 303"`` or empty),
+    as the numbers of the components' accounts, ``"2200"`` or ``"2200, 1170"``),
+    ``current_percentage`` and ``current_percentage_flat`` (the rate in force, typed like
+    ``TaxRate``; the flat one was only seen as ``null``), ``form_codes`` (seen as
+    ``"200, 303"``, ``"400"`` or empty),
     ``is_flat``, the twins ``display_tax_rate`` and ``inactive``, and the
     ``created*``/``last_updated*`` bookkeeping fields.
     """
@@ -248,7 +255,7 @@ class Filter(UpstreamModel):
 
     ``docs/upstream/account.md``, "List accounts": "An array of filters to filter the list.
     All filters must match (AND)." Sent as the JSON array upstream asks for, e.g.
-    ``[{"comparison":"eq","field":"number","value":"1000"}]``. Unknown keys are refused.
+    ``[{"comparison":"eq","field":"number","value":"1020"}]``. Unknown keys are refused.
 
     Attributes:
         comparison: ``eq``, ``like``, ``gt`` or ``lt`` (``Comparison``); upstream's default
@@ -300,9 +307,10 @@ class Account(_AccountFields):
     ``tax_id`` and ``is_inactive`` are typed from the create and update tables.
     ``number`` stays the string upstream sends (``"1020"``): it is the account's
     identifier, "numeric but can contain a decimal point". ``currency_id`` is ``null`` in
-    the committed list fixtures and a number in the read; the list was also seen sending
-    it as a string (``"2"``), in a recording that was not committed, so a model test
-    feeds ``Account`` a string and ``null``: both parse (``2``, ``None``).
+    the committed fixtures, list and read alike (their accounts are in the default
+    currency); the first demo organisation sent it as a number in the read and as a
+    string (``"2"``) in the list, in recordings never committed, so a model test feeds
+    ``Account`` a string, a number and ``null``: all parse (``2``, ``2``, ``None``).
 
     Typed from observation: the balances of the fiscal period asked for (``fiscalPeriodId``,
     else the current one) as ``opening_amount`` and ``end_amount`` in the account's
@@ -342,10 +350,11 @@ class AccountDetail(_AccountFields):
     flags; it adds the fields below. The fields both send are typed as on ``Account``.
 
     Typed from observation: ``full_name`` (seen as the number and the name),
-    ``is_default_currency`` and ``is_foreign_currency``. ``attachments`` and
-    ``allocations`` are documented as inputs of create and update (``fileId``;
-    ``share``, ``toCostCenterId``) but were only seen empty in a response, so their
-    items are kept as sent.
+    ``is_default_currency`` and ``is_foreign_currency``. ``currency_code`` was ``null`` in
+    the read of an account in the default currency whose list entry says ``CHF``.
+    ``attachments`` and ``allocations`` are documented as inputs of create and update
+    (``fileId``; ``share``, ``toCostCenterId``) but were only seen empty in a response, so
+    their items are kept as sent.
     """
 
     full_name: str | None = Field(default=None, validation_alias="fullName")

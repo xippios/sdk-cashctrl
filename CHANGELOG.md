@@ -33,16 +33,15 @@ All notable changes to this project are documented here. The format follows
   `UpstreamError`. Status error messages and `UpstreamError.body` name `cashctrl.com`,
   never the organisation's subdomain, also where an error page echoes the host.
 - `scripts/record_fixture.py`: records fixtures from the demo organisation only. It
-  scrubs credentials, rewrites the demo host to `demo.cashctrl.com` and every e-mail
-  address to `user@example.com` in memory, checks for the subdomain, the key and any
-  other e-mail address before the one write, and refuses bodies that are not UTF-8 text
-  (exports), any method but GET and any endpoint but `.json`; e-mail addresses written
-  as HTML entities (`&#64;`, `&#x40;`, `&commat;`) are scrubbed too, and so is
-  CashCtrl's API user tag in `createdBy` and `lastUpdatedBy` (`API:` and the first four
-  characters of the API user's key, observed on 2026-10-23), to `API:REDACTED`. The demo
+  scrubs credentials, rewrites the demo host to `demo.cashctrl.com`, every e-mail
+  address to `user@example.com` (also written `%40` or as the HTML entities `&#64;`,
+  `&#x40;`, `&commat;`) and CashCtrl's API user tag in `createdBy` and `lastUpdatedBy`
+  (`API:` and the first four characters of the API user's key, observed on 2026-10-23)
+  to `API:REDACTED`, all in memory; checks for the subdomain, the key, any other e-mail
+  address and any other API user tag before the one write; and refuses bodies that are
+  not UTF-8 text (exports), any method but GET and any endpoint but `.json`. The demo
   organisation is synthetic (`scripts/seed_demo.py`, `docs/demo-org.md`), so any module
-  and any amount may be recorded. Fixtures for an unknown id, a missing id and a wrong
-  key.
+  and any amount may be recorded.
 - Ledger basics, five read-only tasks, each an MCP tool `cashctrl_<task>` and an HTTP
   route `/cashctrl/<task>`, all taking `org` first:
   - `list_fiscal_periods` (`fiscalperiod/list.json`), `list_currencies`
@@ -70,9 +69,13 @@ All notable changes to this project are documented here. The format follows
   `filter` that is not a list, an item that is neither a `Filter` nor a mapping that
   validates as one, and a `query` or `sort` that is not a string: upstream would
   silently ignore them.
-- Fixtures recorded from the demo organisation for the four lists (the account list
-  narrowed twice, to accounts with zero balances) and for one account read by id, with
-  e-mail addresses scrubbed.
+- Nine fixtures recorded on 2026-10-23 from the synthetic demo organisation
+  (`scripts/seed_demo.py`, `docs/demo-org.md`), with e-mail addresses and API user tags
+  scrubbed: the fiscal periods, currencies and tax codes whole; the accounts narrowed
+  twice from CashCtrl's default chart (number `1020`; active accounts matching
+  `Finanz`), since the 139 accounts are too many for one fixture; account 1020 read by
+  the id the filtered list gave; an unknown id, a missing id and a wrong key. Every
+  recorded list holds its whole `total`.
 
 ### Changed
 

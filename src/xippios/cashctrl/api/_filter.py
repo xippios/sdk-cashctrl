@@ -16,7 +16,7 @@ __all__ = ["encode_filter"]
 def encode_filter(filters: Sequence[Filter]) -> str:
     """``filters`` as the compact JSON array upstream reads, keys in the documented order.
 
-    Example: ``[{"comparison":"eq","field":"number","value":"1000"}]``.
+    Example: ``[{"comparison":"eq","field":"number","value":"1020"}]``.
     """
     return json.dumps(
         [item.model_dump(mode="json") for item in filters],

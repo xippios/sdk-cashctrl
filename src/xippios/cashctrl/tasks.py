@@ -116,7 +116,7 @@ def _check_list_arguments(
         if isinstance(filter, str | bytes) or not isinstance(filter, Sequence):
             problems.append(
                 "filter takes a list of filters such as "
-                '[{"comparison": "eq", "field": "number", "value": "1000"}], '
+                '[{"comparison": "eq", "field": "number", "value": "1020"}], '
                 f"not {type(filter).__name__}"
             )
         else:
@@ -210,13 +210,13 @@ async def list_accounts_async(
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
-        query: Full-text search, e.g. ``"Abschreibungen"``.
+        query: Full-text search, e.g. ``"Finanz"``.
         filter: Filters that must all match, each with ``comparison`` (``eq``, ``like``,
             ``gt`` or ``lt``; ``like`` when left out), ``field`` (a column of the list,
             e.g. ``number``) and ``value`` (a text, or a list of texts of which any may
-            match), e.g. ``[{"comparison": "eq", "field": "number", "value": "1000"}]``.
+            match), e.g. ``[{"comparison": "eq", "field": "number", "value": "1020"}]``.
             From Python, these mappings or ``Filter`` objects, e.g.
-            ``[Filter(comparison="eq", field="number", value="1000")]``.
+            ``[Filter(comparison="eq", field="number", value="1020")]``.
         category_id: Only the accounts of one account category, e.g. ``1``.
         fiscal_period_id: The fiscal period whose balances are returned, an ``id`` from
             ``list_fiscal_periods``, e.g. ``2``; the current fiscal period when left out.

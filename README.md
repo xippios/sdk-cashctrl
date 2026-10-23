@@ -47,8 +47,8 @@ accounts = tasks.list_accounts("demo", fiscal_period_id=current.id, only_active=
 for account in accounts.data:
     print(account.number, account.name, account.end_amount)  # a Decimal, or None
 
-cash = tasks.list_accounts("demo", filter=[Filter(comparison="eq", field="number", value="1000")])
-record = tasks.get_account("demo", cash.data[0].id)
+bank = tasks.list_accounts("demo", filter=[Filter(comparison="eq", field="number", value="1020")])
+record = tasks.get_account("demo", bank.data[0].id)
 print(record.meta.endpoint, record.meta.request, record.meta.retrieved_at)
 ```
 
