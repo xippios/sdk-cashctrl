@@ -2,19 +2,21 @@
 
 The family's fixtures and live tests read the demo organisation, and the repository is
 public, so the demo organisation holds fictional books only: Muster Handel AG, a trading
-company in Zürich keeping its books in CHF; six customers and four vendors, all of them
-fictional companies; 48 manual journal entries in 2025 and 2026; four sales invoices and
-two purchase orders. ``docs/demo-org.md`` describes the books, how to create the
-organisation and how to run this script::
+company in Zürich keeping its books in CHF; four vendors and six customers, all of them
+companies whose name starts with a placeholder marker (``PLACEHOLDER_MARKERS``); 48
+manual journal entries in 2025 and 2026; four sales invoices and two purchase orders.
+``docs/demo-org.md`` describes the books, how to create the organisation and how to run
+this script, from the repository root of the sdk-cashctrl checkout::
 
     uv run scripts/seed_demo.py                 # --plan: the plan, no network at all
     direnv exec ~/github/sdk env -u CASHCTRL_ORGS uv run scripts/seed_demo.py --apply --yes
 
 The script reads ``CASHCTRL_DEMO_SUBDOMAIN`` and ``CASHCTRL_DEMO_API_KEY`` and nothing
 else, never ``CASHCTRL_ORGS``, and prints neither value: upstream text it shows (error
-messages, category names, tax codes) has the key, the subdomain and every e-mail address
-outside ``.example`` replaced first, and it never shows the body of a successful create
-beyond its ``insertId``. It never deletes anything.
+messages, category names, tax codes, ``calcType``, balances, an ``insertId`` that is not
+a number, a transport error) has the key, the subdomain and every e-mail address outside
+``.example`` replaced first, and it never shows the body of a successful create beyond
+its ``insertId``. It never deletes anything.
 
 ``--apply --yes`` refuses, with exit status 1 and before the first write, unless
 
@@ -22,23 +24,29 @@ beyond its ``insertId``. It never deletes anything.
 2. ``location/list.json`` answers and the company name (``orgName``) of the main
    location contains ``demo`` in any case. The documentation has no organisation read
    besides ``domain/current/logo``, so the main location stands for the organisation;
-3. the organisation is empty: ``person/list.json``, ``journal/list.json`` for every
-   fiscal period and ``order/list.json`` for SALES and PURCHASE report ``total`` 0;
+3. the organisation is empty: ``person/list.json``, and ``journal/list.json`` and
+   ``order/list.json`` (SALES and PURCHASE) for every fiscal period, report ``total`` 0;
 4. ``account/list.json`` has every account number the plan uses, none of them inactive;
 
 and unless the lookups the writes need resolve: a fiscal period covering the 2026 dates;
 one covering 2025, or an earliest period that starts on 2026-01-01 so that
 ``fiscalperiod/create.json`` with ``type=EARLIEST`` creates 2025; the tax codes by
-``code``; and an invoice category per order type. Person categories are optional.
+``code``, whose components' ``calcType`` (NET or GROSS) it prints; and an invoice
+category per order type. Person categories are optional.
 
-Then it creates, in this order, the currencies ``currency/list.json`` lacks, the 2025
-fiscal period, the persons, the journal entries (2025, then 2026) and the orders, at
-most one request per second, and stops at the first answer that is not HTTP 200 with
-``success: true``, naming the record; no request follows. Writes are form-encoded;
-nested values (``addresses``, ``contacts``, ``items``) are JSON strings; dates are
+Then it creates, in this order, the persons, the currencies ``currency/list.json``
+lacks, the 2025 fiscal period, the journal entries (2025, then 2026) and the orders,
+starting requests at least 1.2 seconds apart. The first person, Muster Büro AG, is read
+back with ``person/read.json``; unless its ``company`` is what was sent, byte for byte,
+the run stops there: the backend garbled UTF-8. It stops as well at the first answer
+that is not HTTP 200 with ``success: true``, naming the record; no request follows.
+Writes are form-encoded with ``charset=UTF-8`` declared, or ``multipart/form-data`` with
+``--multipart``, a switch for a manual rerun and never an automatic fallback; nested
+values (``addresses``, ``contacts``, ``items``) are JSON strings; dates are
 ``YYYY-MM-DD``; the key is the basic-auth user name with an empty password. The summary
-lists what was created, the ``total`` each list now reports and the observed write
-semantics, which the first run copies into ``docs/demo-org.md``.
+lists what was created, the ``total`` each list now reports, the balance of 1100 at
+2025-12-31 and 2026-09-30 and the observed write semantics, which the first run copies
+into ``docs/demo-org.md``.
 """
 
 import argparse
@@ -1375,11 +1383,12 @@ def report_totals(session: Session, context: Context, period_2025: int) -> None:
 
 
 BALANCE_DATES = (date(2025, 12, 31), date(2026, 9, 30))
-"""The days the summary reads the balance of 1100 (debtors) at: the last of each year's entries."""
+"""The days the summary reads the balance of 1100 (debtors) at: the end of 2025, and the
+last day of the 2026 entries."""
 
 
 def report_balances(session: Session, context: Context) -> None:
-    """The balance of 1100 (debtors) after each year, for the gross-or-net comparison."""
+    """The balance of 1100 (debtors) at ``BALANCE_DATES``, for the gross-or-net comparison."""
     say(f"Balance of account {DEBTORS} (debtors), to compare with docs/demo-org.md")
     for day in BALANCE_DATES:
         params = {"id": str(context.accounts[DEBTORS]), "date": day.isoformat()}

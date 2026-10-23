@@ -28,22 +28,29 @@ register. `tests/test_seed_demo.py` checks the rule against the data and this do
 
 ## Creating the organisation
 
-1. In CashCtrl, create a **new, empty** organisation, not a copy, on the PRO Demo plan (the
-   API is available to PRO organisations only, `docs/upstream/introduction.md`). Its name
-   must contain `demo` in any case, for example `Muster Handel AG Demo`. Keep CashCtrl's
-   defaults: the current fiscal period, the default Swiss chart of accounts, the default
-   VAT codes and categories. Change no settings.
-2. Check the company name of the main location (Settings → Locations): it must contain
-   `demo` as well. The seeder reads the organisation's name there (`orgName` in
-   `location/list.json`), because the documentation has no organisation read besides
-   `domain/current/logo` (`docs/upstream/meta.md`). If CashCtrl did not copy the
-   organisation's name into the main location, set it to the same name.
-3. Settings → Users & Roles → Add → Add API user (`docs/upstream/authentication.md`), with
-   a role that may read locations, fiscal periods, accounts, currencies, tax codes, person
-   and order categories, persons, the journal and orders, and may create currencies,
-   fiscal periods, persons, journal entries and orders. After seeding, the role may be
-   reduced to read-only; the write tools' live tests will need write rights again later.
-4. Put the two variables into `~/github/sdk/.envrc` and run `direnv allow`:
+1. In CashCtrl, create a **new, empty** organisation, not a copy, and activate the PRO
+   demo for it (the API is available to PRO organisations only,
+   `docs/upstream/introduction.md`). Its name must contain `demo` in any case, for
+   example `Muster Handel AG Demo`. Keep CashCtrl's defaults: the current fiscal period,
+   the default Swiss chart of accounts, the default VAT codes and categories. Change no
+   settings.
+2. Enter only fictional data, in the organisation creation wizard and in the location
+   (Settings → Locations): a name like the one above, a placeholder address such as
+   `Musterhof 1, 8001 Zürich`, no VAT UID, no IBAN, no logo. The seeder reads
+   `location/list.json`, and that answer can feed fixtures, so whatever the location
+   holds can end up in a public commit.
+3. Check the company name of the main location: it must contain `demo` as well. The
+   seeder reads the organisation's name there (`orgName` in `location/list.json`),
+   because the documentation has no organisation read besides `domain/current/logo`
+   (`docs/upstream/meta.md`). If CashCtrl did not copy the organisation's name into the
+   main location, set it to the same name.
+4. Settings → Users & Roles → Add → Add API user (`docs/upstream/authentication.md`), with
+   a role that may read locations, fiscal periods, accounts and their balances,
+   currencies, tax codes, person and order categories, persons, the journal and orders,
+   and may create currencies, fiscal periods, persons, journal entries and orders. After
+   seeding, the role may be reduced to read-only; the write tools' live tests will need
+   write rights again later.
+5. Put the two variables into `~/github/sdk/.envrc` and run `direnv allow`:
    `CASHCTRL_DEMO_SUBDOMAIN` (the one label before `.cashctrl.com`) and
    `CASHCTRL_DEMO_API_KEY`. The subdomain is treated like the key: never in a file of
    this repository, a commit, a log line or a report. `demo` is reserved and is **never**
@@ -51,7 +58,8 @@ register. `tests/test_seed_demo.py` checks the rule against the data and this do
 
 ## Seeding
 
-First the plan; it makes no request and needs no variable:
+Run both commands from the repository root of the sdk-cashctrl checkout. First the plan;
+it makes no request and needs no variable:
 
 ```bash
 uv run scripts/seed_demo.py            # same as --plan
@@ -70,10 +78,14 @@ no value, and nothing written, unless
 1. both variables are set and the subdomain is one DNS label;
 2. `location/list.json` answers and the company name (`orgName`) of the main location
    contains `demo` in any case;
-3. the organisation is empty: `person/list.json`, `journal/list.json` for every fiscal
-   period (the list shows the current period only unless `fiscalPeriodId` is given) and
-   `order/list.json` for `SALES` and `PURCHASE` all report `total` 0. An organisation with
-   data, such as a copy of real books, is refused; the script never deletes anything;
+3. the organisation is empty: `person/list.json`, and `journal/list.json` and
+   `order/list.json` for `SALES` and `PURCHASE` in every fiscal period (the lists answer
+   for the current period only unless `fiscalPeriodId` is given), all report `total` 0.
+   An organisation with data, such as a copy of real books, is refused; the script never
+   deletes anything. If a fresh organisation already lists a person or an entry (an
+   example record from CashCtrl or from the wizard, for instance), the guard names the
+   list and refuses as well: delete that record in CashCtrl, or start over with a new
+   organisation;
 4. `account/list.json` has every account number the plan uses, none of them inactive; the
    refusal names the missing or inactive numbers. The script creates no accounts.
 
@@ -83,25 +95,56 @@ period that starts on 2026-01-01 (then `fiscalperiod/create.json` with `type=EAR
 creates 2025); the tax codes `UN1` and `VN1` by `code` in `tax/list.json` (the refusal
 lists the active codes); an order category per type, matched by name (the refusal lists
 the categories). Person categories are matched by name too, and a role without a match
-gets none.
+gets none. For each of the two tax codes the run prints the `calcType` of its components
+(`NET` or `GROSS`, `docs/upstream/common.md`), from `tax/list.json` or, when the list
+record has no components, from `tax/read.json`: whether a journal `amount` with a
+`taxId` is net or gross is observed there, not assumed (see the assumptions below).
 
-Then the script creates, in this order: the currencies `currency/list.json` lacks, the
-2025 fiscal period, the ten persons, the 48 journal entries (2025 first) and the six
-orders, last, so that a refusal there leaves everything else seeded. It sends at most one
-request per second (about 90 requests, a minute and a half), and stops at the first
-answer that is not HTTP 200 with `success: true`: it prints the status, upstream's
-`errorMessage`/`message`/`errors` and which record failed, and sends no further request.
-Of a successful create it shows the `insertId` only.
+Then the script creates, in this order: the ten persons, the currencies
+`currency/list.json` lacks, the 2025 fiscal period, the 48 journal entries (2025 first)
+and the six orders, last, so that a refusal there leaves everything else seeded. The
+persons come first because `person/create.json` has a mandatory field, so a body
+upstream cannot read is refused rather than saved with defaults (every parameter of
+`fiscalperiod/create.json` is optional). The first person, Muster Büro AG, carries an
+umlaut: right after its create the run reads it back with `person/read.json` and compares
+`company` with what it sent, byte for byte. On a mismatch it stops before any other
+write, says that the backend garbled UTF-8 and shows both names; delete that person in
+CashCtrl and rerun with `--multipart` (below).
 
-Writes are form-encoded (`application/x-www-form-urlencoded`, as the introduction says;
-the upstream curl examples use multipart `-F`), nested values (`addresses`, `contacts`,
-`items`) are JSON strings as in the examples, dates are `YYYY-MM-DD`, the key is the basic
-auth user name with an empty password, and the User-Agent is `xippios-cashctrl-seed`.
+Requests start at least 1.2 seconds apart (50 a minute, a margin under the 60 a minute
+the package's client allows itself): about 90 requests, about two minutes. The run stops
+at the first answer that is not HTTP 200 with `success: true`, and at a request that gets
+no answer: it prints the status, upstream's `errorMessage`/`message`/`errors` or the
+transport error, and which record failed, and sends no further request. Of a successful
+create it shows the `insertId` only.
+
+Writes are form-encoded with the charset declared, `Content-Type:
+application/x-www-form-urlencoded; charset=UTF-8` (the introduction says the API accepts
+form-encoded bodies; the upstream curl examples use multipart `-F`). Nested values
+(`addresses`, `contacts`, `items`) are JSON strings as in the examples, dates are
+`YYYY-MM-DD`, the key is the basic auth user name with an empty password, and the
+User-Agent is the family's, `xippios-cashctrl/<version> (+https://github.com/xippios)`.
+
+If upstream refuses the form-encoded writes, or garbles the umlaut, rerun by hand with
+
+```bash
+direnv exec ~/github/sdk env -u CASHCTRL_ORGS uv run scripts/seed_demo.py --apply --yes --multipart
+```
+
+which sends the same fields as `multipart/form-data`, as the curl examples do. The script
+never switches encoding by itself: a second attempt after an ambiguous answer could
+create a record twice. Before the rerun, delete what the first run created (the guard
+refuses an organisation that is not empty), or start over with a new organisation.
 
 At the end it prints the records created per resource, the `total` each list endpoint now
-reports, and the section "Observed write semantics": the status codes per endpoint, the
-keys of a successful create answer and the type of `insertId`, and the exact shape of
-any refusal, scrubbed. Copy that section into the placeholder below.
+reports, the balance of account 1100 (debtors) at 2025-12-31 and 2026-09-30
+(`account/balance`, `docs/upstream/account.md`), and the section "Observed write
+semantics": the encoding used, the UTF-8 round trip, the `calcType` of `UN1` and `VN1`,
+the two balances, the status codes per endpoint, the keys of a successful create answer
+and the type of `insertId`, and the exact shape of any refusal, scrubbed. After a stop
+during the writes, the records created and the section are printed as well (the totals
+and the balances only after a complete run). Copy the section into the placeholder
+below.
 
 A run that stops halfway leaves a partly seeded organisation, which the script then
 refuses as not empty. Either finish the rest by hand or delete the organisation and start
@@ -115,8 +158,8 @@ over with a fresh one; the script never deletes or repairs anything.
 | Currency | CHF; fiscal year = calendar year |
 | Fiscal periods | 2026 (the organisation's current one, as created) and 2025 (created by the seeder) |
 | Chart of accounts, VAT codes | CashCtrl's defaults, unchanged |
-| Records | 10 persons, 48 manual journal entries (12 in 2025, 36 in 2026, 3 of them collective), 6 orders |
-| Writes | at most 67 (2 currencies, 1 fiscal period, 10 persons, 48 journal entries, 6 orders) |
+| Records | 10 persons (4 vendors, 6 customers), 48 manual journal entries (12 in 2025, 36 in 2026, 3 of them collective), 6 orders |
+| Writes | at most 67 (10 persons, 2 currencies, 1 fiscal period, 48 journal entries, 6 orders) |
 
 The script does not name the organisation: its name is set by hand when it is created
 (Creating the organisation, step 1).
@@ -307,9 +350,24 @@ the first write:
   documentation; they are the system-created codes the retired demo organisation's
   `tax/list.json` showed. Looked up by `code`; missing ones refuse the run.
 - Whether `amount` with a `taxId` on a manual journal entry is the gross or the net
-  amount is not documented. The payments assume the invoice amount is what the customer
-  pays (gross). If upstream reads it as net, the debtors keep the VAT of each paid
-  invoice; the first run checks the balance of 1100.
+  amount is not documented for the journal; the tax code's components carry a `calcType`
+  of `NET` or `GROSS` (`docs/upstream/common.md`), which the run prints before the first
+  write. The payments assume the invoice amount is what the customer pays (gross). If
+  upstream reads it as net and adds the VAT, the debtors keep the VAT of each paid
+  invoice. The run prints the balance of 1100 at both dates; the human compares it with
+  what the books imply under each reading, at 8.1 %:
+
+  | Balance of 1100 at | amount read as gross | amount read as net, VAT added |
+  | --- | ---: | ---: |
+  | 2025-12-31 | 0.00 | 1'895.40 |
+  | 2026-09-30 | 4'850.00 | 8'158.85 for 2026 alone, 10'054.25 with 2025 carried forward |
+
+  Gross leaves the two open invoices, RE-2026-006 and RE-2026-007, as the only balance.
+  Whether the balance at 2026-09-30 includes the 2025 closing balance depends on how
+  CashCtrl opens a period, which the documentation does not say; under the gross
+  reading it does not matter. If the sales orders booked journal entries (journal total
+  for 2026 above 36), their totals are in 1100 as well (14'400.00 net, 15'566.40 with
+  VAT added) and have to be subtracted before comparing.
 - `journal/create.json` documents `amount`, `debitId` and `creditId` as mandatory but
   ignored when `items` is set; collective entries send `items` only, as the documented
   curl example does.
@@ -334,12 +392,15 @@ the first write:
 
 To be filled from the section the first `--apply --yes` run prints, with its date:
 
+- Encoding of the writes (form-encoded with `charset=UTF-8`, or `--multipart`): _pending_
+- UTF-8 round trip of Muster Büro AG through `person/read.json`: _pending_
+- `calcType` of the components of `UN1` and `VN1`: _pending_
 - Status codes per endpoint: _pending_
 - Keys of a successful create answer (`success`, `message`, `insertId`, ...) and the type
   of `insertId`, per create endpoint: _pending_
 - The exact shape of a refusal, if one occurred: _pending_
 - Whether order creation booked journal entries (journal totals above 36 for 2026):
   _pending_
-- Whether `amount` with a `taxId` was read as gross (balance of 1100 after the run):
-  _pending_
+- Balance of 1100 at 2025-12-31 and 2026-09-30, and the reading of `amount` with a
+  `taxId` it implies (table above): _pending_
 - The `total` each list endpoint reported after seeding: _pending_

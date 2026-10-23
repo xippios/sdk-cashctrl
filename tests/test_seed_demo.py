@@ -1083,6 +1083,46 @@ def test_the_books_are_small_balanced_and_fictional() -> None:
     assert seeder.account_numbers() == list(NUMBERS)
 
 
+VAT = Decimal("0.081")
+"""UN1 at 8.1 %, as the retired demo organisation's tax/list.json showed."""
+
+
+def _chf(value: Decimal) -> str:
+    return f"{value:,.2f}".replace(",", "'")
+
+
+def debtor_balances() -> list[str]:
+    """The balances of 1100 the books imply, gross and net, in the doc's notation.
+
+    Per year: the gross balance (the 2025 one carried forward, it is zero), the net one
+    of that year alone; then 2026 net with 2025 carried forward; then the sales orders'
+    net and with VAT, which the doc says to subtract if the orders booked.
+    """
+    shown = []
+    carried_gross = carried_net = Decimal(0)
+    for entries in (seeder.ENTRIES_2025, seeder.ENTRIES_2026):
+        gross = net = Decimal(0)
+        for entry in entries:
+            for line in entry.lines:
+                if line.account == "1100":
+                    change = (line.debit or Decimal(0)) - (line.credit or Decimal(0))
+                    gross, net = gross + change, net + change
+            if entry.debit == "1100":
+                assert entry.amount is not None
+                vat = (entry.amount * VAT).quantize(Decimal("0.01")) if entry.tax else Decimal(0)
+                gross, net = gross + entry.amount, net + entry.amount + vat
+            if entry.credit == "1100":
+                assert entry.amount is not None
+                gross, net = gross - entry.amount, net - entry.amount
+        carried_gross += gross
+        shown += [_chf(carried_gross), _chf(net)]
+        carried_net += net
+    shown.append(_chf(carried_net))
+    sales = sum((o.net for o in seeder.ORDERS if o.type == "SALES"), Decimal(0))
+    shown += [_chf(sales), _chf(sales * (1 + VAT))]
+    return shown
+
+
 def test_the_document_describes_every_record() -> None:
     doc = (SCRIPT.parents[1] / "docs" / "demo-org.md").read_text(encoding="utf-8")
     for person in seeder.PERSONS:
@@ -1100,6 +1140,22 @@ def test_the_document_describes_every_record() -> None:
     assert f"at most {seeder.max_writes()}" in doc
     assert "## Observed write semantics (filled by the first run)" in doc
     prose = " ".join(doc.split())
+    for phrase in (
+        "Run both commands from the repository root of the sdk-cashctrl checkout",
+        "activate the PRO demo",
+        "no VAT UID, no IBAN, no logo",
+        "uv run scripts/seed_demo.py --apply --yes --multipart",
+        "application/x-www-form-urlencoded; charset=UTF-8",
+        "Requests start at least 1.2 seconds apart",
+        "xippios-cashctrl/<version> (+https://github.com/xippios)",
+    ):
+        assert phrase in prose, phrase
+    b = debtor_balances()
+    assert f"| 2025-12-31 | {b[0]} | {b[1]} |" in doc
+    assert (
+        f"| 2026-09-30 | {b[2]} | {b[3]} for 2026 alone, {b[4]} with 2025 carried forward |" in doc
+    )
+    assert f"({b[5]} net, {b[6]} with VAT added)" in prose
     rule = re.search(
         r"every company name carries a placeholder marker as its first word \(([^)]*)\)", prose
     )
