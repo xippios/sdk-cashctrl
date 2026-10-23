@@ -39,7 +39,9 @@ never shows a value, and exits with status 1:
 - No API user tags. CashCtrl names an API user in ``createdBy`` and ``lastUpdatedBy`` as
   ``API:`` and the first four characters of its key (observed on 2026-10-23 on the
   records ``scripts/seed_demo.py`` wrote). Every such tag becomes ``API:REDACTED``,
-  whichever key it comes from.
+  whichever key it comes from, with the marker in any case, at the start of a word or
+  right after a JSON escape. A tag the scrub cannot reach (glued to a word, or behind a
+  Unicode escape) is refused by the final check.
 
 Nothing unscrubbed touches disk. The request goes through the real client with
 ``raise_on_error=False``, and core's ``fixture_from_response`` turns the exchange into a
@@ -47,20 +49,22 @@ fixture in memory, credentials scrubbed. Then every occurrence of the demo host
 (``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``) in the request URL, the response headers and
 the body becomes ``demo.cashctrl.com``, the host offline tests replay against, every
 e-mail address becomes ``user@example.com`` and every API user tag ``API:REDACTED``. The
-fixture is checked last, before the one write: the real subdomain, the real key (plain,
-as a basic-auth token, or its first four characters as an API user tag), an e-mail
-address other than ``user@example.com`` or an API user tag other than ``API:REDACTED``
-anywhere in it means nothing is written and the exit status is 1; a key-like name whose
-value is not ``REDACTED`` is written for review, also with exit status 1. Only the status
-and the scrubbed URL are printed.
+fixture is checked last, before the one write, in its serialised text and in every
+decoded string of a JSON body: the real subdomain, the real key (plain or as a
+basic-auth token), an e-mail address other than ``user@example.com``, an API user tag
+other than ``API:REDACTED`` in any case and position (the key's own tag also with ``:``
+URL-encoded, as an HTML entity or followed by a space), or the key's first four
+characters on their own, reported as a possible key prefix, means nothing is written and
+the exit status is 1; a key-like name whose value is not ``REDACTED`` is written for
+review, also with exit status 1. Only the status and the scrubbed URL are printed.
 
 A body that is not UTF-8 text, which core would keep as base64, is refused before
 anything is written, should a ``.json`` endpoint ever send one: such a body can be
 neither scrubbed nor reviewed.
 
-Host and e-mail scrubbing are local to this repository for now: they are the pattern
-that moves into core's recorder (``xippios.core.testing.record``) later, for every
-multi-tenant source.
+Host, e-mail and API user tag scrubbing are local to this repository for now: they are
+the pattern that moves into core's recorder (``xippios.core.testing.record``) later, for
+every multi-tenant source.
 """
 
 import argparse
@@ -104,12 +108,21 @@ _EMAIL_IN_TEXT = re.compile(r"(?:(?<=\\[nrtbf])|(?<![\w.%+\\-]))" + EMAIL.patter
 _SCRUBBED_EMAILS = frozenset({SCRUBBED_EMAIL, SCRUBBED_EMAIL.replace("@", "%40")})
 
 SCRUBBED_API_USER = "API:REDACTED"
-API_USER = re.compile(r"(?<![\w.-])API:(?!REDACTED\b)[A-Za-z0-9]+")
+_NOT_SCRUBBED = r"(?!REDACTED(?![A-Za-z0-9]))"
+API_USER = re.compile(
+    r"(?:(?<=\\[nrtbf])|(?<![\w.\\-]))API:" + _NOT_SCRUBBED + r"[A-Za-z0-9]+", re.IGNORECASE
+)
 """CashCtrl's tag for an API user in ``createdBy``/``lastUpdatedBy``: ``API:`` and key[:4].
 
 Observed on 2026-10-23: the records an API user wrote carry ``"createdBy": "API:<the first
-four characters of its key>"``. Any tag but the scrubbed one matches.
+four characters of its key>"``. The scrub is narrow, as the e-mail scrub is: the marker in
+any case, at the start of a word or right after a JSON escape (``\\n``), never inside a
+JSON escape. What it cannot reach, ``API_USER_ANYWHERE`` finds and the check refuses.
 """
+API_USER_ANYWHERE = re.compile(r"API:" + _NOT_SCRUBBED + r"[^\s\"'<>,;&\\]+", re.IGNORECASE)
+"""Any API user tag but the scrubbed one, in any case and any position: the final check."""
+_TAG_SEPARATOR = r"(?::|%3A|&#0*58;?|&#x0*3a;?|&colon;)\s*"
+"""``:`` plain, URL-encoded or as an HTML entity, for the recorder's own key prefix."""
 
 
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -263,6 +276,33 @@ def scrub_api_users(fixture: Fixture) -> Fixture:
     return rewrite(fixture, lambda text: API_USER.sub(SCRUBBED_API_USER, text))
 
 
+def _searched_texts(text: str, fixture: dict[str, Any]) -> list[str]:
+    """The serialised fixture and, for a JSON body, every decoded key and string in it."""
+    is_json, decoded = _decoded(fixture.get("response", {}).get("body", ""))
+    return [text, *(_strings(decoded) if is_json else [])]
+
+
+def _holds_an_api_user_tag(texts: Sequence[str], key: str) -> bool:
+    """An API user tag other than ``API:REDACTED``, or the key's own tag, in any of ``texts``.
+
+    Any tag in any case and position; the key's own prefix also after ``API`` with ``:``
+    URL-encoded or as an HTML entity, or after a space, which the general pattern misses.
+    """
+    own = (
+        re.compile(rf"API{_TAG_SEPARATOR}{re.escape(key[:4])}(?![A-Za-z0-9])", re.IGNORECASE)
+        if len(key) >= 4
+        else None
+    )
+    return any(
+        API_USER_ANYWHERE.search(text) or (own is not None and own.search(text)) for text in texts
+    )
+
+
+def _holds_the_bare_prefix(texts: Sequence[str], key: str) -> bool:
+    """The key's first four characters anywhere, without the marker: a possible prefix."""
+    return len(key) >= 4 and any(key[:4] in text for text in texts)
+
+
 def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
     """``(leaks, suspicions)`` in a serialised fixture; neither ever contains a value."""
     leaks: list[str] = []
@@ -272,9 +312,15 @@ def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
     if key and (key in text or token in text):
         leaks.append(f"the value of {api_key_env(DEMO)}")
     fixture = json.loads(text)
-    own_tag = re.compile(rf"API:{re.escape(key[:4])}(?![A-Za-z0-9])") if key else None
-    if API_USER.search(text) or (own_tag and own_tag.search(text)):
+    texts = _searched_texts(text, fixture)
+    if _holds_an_api_user_tag(texts, key):
         leaks.append(f"an API user tag other than {SCRUBBED_API_USER}")
+    if _holds_the_bare_prefix(texts, key):
+        leaks.append(
+            f"a possible key prefix: the first four characters of {api_key_env(DEMO)}, "
+            "without the API: marker (four characters alone may be a coincidence; "
+            "find them in the response before recording again)"
+        )
     if _holds_an_address(fixture):
         leaks.append(f"an e-mail address other than {SCRUBBED_EMAIL}")
     suspicions = list(_key_like_values(fixture, "fixture"))
