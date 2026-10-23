@@ -36,8 +36,11 @@ organisation. `_client.py` is therefore a registry, not one client:
   startup (exit status 2), its instructions name the organisation, and a tool call naming
   another is refused before the tool runs. The HTTP router has no lock: consumers pass
   `org` explicitly.
-- The subdomain stays out of messages and logs: status errors name `cashctrl.com`
-  (`classify`), and both servers raise the `httpx` and `httpcore` loggers to WARNING so
+- The subdomain stays out of messages and logs: core's status errors name the method and
+  the path, never the host, and `classify` hands core a copy of an error response whose
+  body names `cashctrl.com` instead of the organisation's host, so neither the quoted
+  snippet nor `UpstreamError.body` carries it. Both servers are built and run by core's
+  `build_server` and `main`, which raise the `httpx` and `httpcore` loggers to WARNING so
   request URLs are never logged. The HTTP router does not: a consumer that logs at INFO
   logs httpx's request URLs with the tenant host and should set the `httpx` logger to
   WARNING, as the README says.

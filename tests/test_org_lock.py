@@ -19,11 +19,12 @@ from xippios.core.mcp import build_server
 
 from xippios.cashctrl import mcp, mcp_write
 from xippios.cashctrl._client import DEMO, ORGS_ENV, subdomain_env
-from xippios.cashctrl._org_lock import REQUEST_LOGGERS, main, org_lock, parse_org
+from xippios.cashctrl._org_lock import main, org_lock, parse_org
 
 pytestmark = pytest.mark.anyio
 
 TOOL = "cashctrl_echo_org"
+REQUEST_LOGGERS = ("httpx", "httpcore")
 
 
 def locked_server(
@@ -217,9 +218,17 @@ def test_main_keeps_request_urls_out_of_the_log(
     respx_mock: respx.MockRouter,
     argv: list[str],
 ) -> None:
+    """Core's ``main``, which this ``main`` hands over to, quiets httpx and httpcore.
+
+    ``build_server`` quiets them too, so the levels are reset after building the server:
+    only the call inside ``main`` can raise them again before the request.
+    """
     server = locked_server([], org=None)
+    for name in REQUEST_LOGGERS:
+        logging.getLogger(name).setLevel(logging.NOTSET)
     monkeypatch.setattr(server, "run", lambda *a, **kw: None)
     main(server, argv)
+    assert [logging.getLogger(name).level for name in REQUEST_LOGGERS] == [logging.WARNING] * 2
     respx_mock.get("https://xq-tenant.cashctrl.com/api/v1/x.json").respond(200)
     with caplog.at_level(logging.INFO):
         httpx.get("https://xq-tenant.cashctrl.com/api/v1/x.json")
