@@ -527,6 +527,116 @@ def test_the_scrubbed_tag_and_other_api_words_pass(recorder: ModuleType) -> None
     assert recorder.check(fixture_text(body=body), REAL, KEY) == ([], [])
 
 
+TOKEN = "AbCd" * 8  # the shape of the observed order hash: 32 characters, both cases
+
+
+def test_token_like_fields_become_redacted(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``hash`` (seen in ``order/read.json``) by its name, at any depth; nothing else."""
+    order = {
+        "id": 3,
+        "hash": TOKEN,
+        "hashtag": "kept",
+        "items": [{"id": 6, "HASH": "Zx" * 16, "name": "Bürostuhl"}],
+        "fileId": None,
+    }
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/order/read.json")
+    route.mock(return_value=httpx.Response(200, json={"success": True, "data": order}))
+    assert recorder.main(["order/read.json", "by_id", "id=3"]) == 0
+    text = (tmp_path / "tests" / "fixtures" / "order_read" / "by_id.json").read_text()
+    assert TOKEN not in text
+    assert "Zx" * 16 not in text
+    written = json.loads(json.loads(text)["response"]["body"])["data"]
+    assert (written["hash"], written["items"][0]["HASH"]) == ("REDACTED", "REDACTED")
+    assert (written["hashtag"], written["items"][0]["name"], written["fileId"]) == (
+        "kept",
+        "Bürostuhl",
+        None,
+    ), "only the token-like values change"
+    assert TOKEN not in capsys.readouterr().out
+
+
+def test_other_token_like_fields_are_redacted_and_reviewed(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``token``, ``secret`` and ``apiKey`` were never seen; scrubbed, then named for review."""
+    body = {
+        "token": "t-value",
+        "secret": "s-value",  # pragma: allowlist secret
+        "apiKey": "k-value",  # pragma: allowlist secret
+        "api_key": None,
+    }
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/setting/read.json")
+    route.mock(return_value=httpx.Response(200, json=body))
+    assert recorder.main(["setting/read.json", "tokens"]) == 1
+    text = (tmp_path / "tests" / "fixtures" / "setting_read" / "tokens.json").read_text()
+    written = json.loads(json.loads(text)["response"]["body"])
+    assert written == {
+        "token": "REDACTED",
+        "secret": "REDACTED",  # pragma: allowlist secret
+        "apiKey": "REDACTED",  # pragma: allowlist secret
+        "api_key": None,
+    }
+    out = capsys.readouterr().out
+    assert "review" in out
+    assert "value" not in out.replace("REDACTED", "")
+
+
+def test_a_token_value_the_scrub_cannot_reach_is_never_written(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An escaped field name hides ``hash`` from the raw-text scrub, not from the check."""
+    content = ('{"success": true, "data": {"h\\u0061sh": "' + TOKEN + '"}}').encode()
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/order/read.json")
+    route.mock(return_value=httpx.Response(200, content=content))
+    assert recorder.main(["order/read.json", "escaped"]) == 1
+    assert not (tmp_path / "tests" / "fixtures" / "order_read").exists()
+    out = capsys.readouterr().out
+    assert "a token-like value under hash" in out
+    assert TOKEN not in out
+
+
+@pytest.mark.parametrize(
+    ("body", "refused"),
+    [
+        ({"hash": TOKEN}, True),
+        ({"data": [{"Token": TOKEN}]}, True),
+        ({"hash": "REDACTED"}, False),
+        ({"hash": TOKEN.lower()}, False),
+        ({"hash": TOKEN[:31]}, False),
+        ({"hash": TOKEN[:31] + "-"}, False),
+        ({"hashtag": TOKEN}, False),
+        ({"hash": None}, False),
+    ],
+    ids=[
+        "hash",
+        "nested-token",
+        "scrubbed",
+        "one-case",
+        "31-characters",
+        "not-alphanumeric",
+        "other-name",
+        "null",
+    ],
+)
+def test_the_check_refuses_a_token_shaped_value_under_a_token_like_name(
+    recorder: ModuleType, body: dict[str, Any], refused: bool
+) -> None:
+    leaks, _ = recorder.check(fixture_text(body=json.dumps(body)), REAL, KEY)
+    assert any(leak.startswith("a token-like value under ") for leak in leaks) is refused
+    assert all(TOKEN not in leak for leak in leaks)
+
+
 def test_every_committed_fixture_passes_the_final_check(recorder: ModuleType) -> None:
     """The recorded fixtures hold no tag, address or credential the check would refuse."""
     fixtures = sorted((Path(__file__).parent / "fixtures").glob("*/*.json"))

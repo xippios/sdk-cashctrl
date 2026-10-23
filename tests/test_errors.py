@@ -13,6 +13,7 @@ from xippios.core import (
     InvalidRequestError,
     NotFoundError,
     RateLimitError,
+    TransportError,
     UpstreamError,
     XippiosError,
 )
@@ -299,6 +300,36 @@ async def test_status_errors_do_not_name_the_subdomain(
     assert type(error) is kind
     assert route.call_count == 1
     assert_no_tenant(error)
+
+
+async def test_a_transport_error_does_not_name_the_subdomain(
+    tenant: str, respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure before any answer, quoting the host as a TLS mismatch does, hides it.
+
+    Core replaces the request's host with ``<host>`` in a ``TransportError`` (sdk-core#14);
+    nothing here masks it locally, so this guards every later core pin. The retries of a
+    GET are run without their waits.
+    """
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(
+            f"hostname '{TENANT.upper()}.cashctrl.com' doesn't match '*.example.org' "
+            f"(https://{TENANT}.cashctrl.com/api/v1/account/list.json)",
+            request=request,
+        )
+
+    async def no_wait(seconds: float) -> None:
+        return None
+
+    route = respx_mock.get(f"{tenant}/account/list.json").mock(side_effect=fail)
+    monkeypatch.setattr(client_for(DEMO), "_sleep", no_wait)
+    error = await raised("/account/list.json")
+    assert isinstance(error, TransportError)
+    assert route.call_count >= 1
+    for text in (str(error), repr(error), *map(str, error.args)):
+        assert TENANT not in text.lower()
+    assert "<host>" in str(error)
 
 
 async def test_a_429_is_a_rate_limit_error_with_retry_after(

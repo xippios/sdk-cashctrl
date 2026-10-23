@@ -1111,6 +1111,7 @@ def test_get_order_replays_the_recorded_read(
         Decimal(7750),
     )
     assert (order.tax_type, order.due, order.is_book) == ("AGREED", False, False)
+    assert order.hash == "REDACTED", "scrubbed by the recorder, by its field name"
     assert all(isinstance(item, OrderItem) for item in order.items)
     assert [(i.name, i.quantity, i.unit_price, i.gross_total) for i in order.items] == [
         ("Bürostuhl Ergo", Decimal(10), Decimal(420), Decimal(4200)),
