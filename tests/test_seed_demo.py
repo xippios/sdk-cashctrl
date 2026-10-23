@@ -733,3 +733,21 @@ def test_the_books_are_small_balanced_and_fictional() -> None:
         role = "customer" if order.type == "SALES" else "vendor"
         assert next(p for p in seeder.PERSONS if p.key == order.associate).role == role
     assert seeder.account_numbers() == list(NUMBERS)
+
+
+def test_the_document_describes_every_record() -> None:
+    doc = (SCRIPT.parents[1] / "docs" / "demo-org.md").read_text(encoding="utf-8")
+    for person in seeder.PERSONS:
+        assert f"| {person.company} | {person.address} |" in doc
+        assert f"`{person.email}`" in doc
+    for entry in seeder.all_entries():
+        assert f"| {entry.day} |" in doc
+        assert f"| {entry.title} |" in doc
+    for order in seeder.ORDERS:
+        assert f"| {order.type} | {order.nr} | {order.day} |" in doc
+    for number in seeder.account_numbers():
+        assert f"| {number} |" in doc
+    for currency in seeder.CURRENCIES:
+        assert f"| {currency.code} | {currency.description} | {currency.rate} |" in doc
+    assert f"at most {seeder.max_writes()}" in doc
+    assert "## Observed write semantics (filled by the first run)" in doc
