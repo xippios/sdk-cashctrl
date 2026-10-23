@@ -12,13 +12,10 @@ from xippios.core import parse
 
 from xippios.cashctrl._client import SOURCE, client_for
 from xippios.cashctrl.api._filter import encode_filter
+from xippios.cashctrl.api._params import flag, present
 from xippios.cashctrl.models import Account, Direction, Filter, ListResponse
 
 __all__ = ["account_list", "account_list_params"]
-
-
-def _flag(value: bool | None) -> str | None:
-    return None if value is None else str(value).lower()
 
 
 def account_list_params(
@@ -39,18 +36,19 @@ def account_list_params(
     empty ``filter`` is not sent either. Booleans are sent as ``true``/``false`` and
     ``filter`` as its JSON array.
     """
-    named: dict[str, str | int | None] = {
-        "categoryId": category_id,
-        "dir": dir,
-        "filter": encode_filter(filter) if filter else None,
-        "fiscalPeriodId": fiscal_period_id,
-        "onlyActive": _flag(only_active),
-        "onlyCostCenters": _flag(only_cost_centers),
-        "onlyNotes": _flag(only_notes),
-        "query": query,
-        "sort": sort,
-    }
-    return {name: value for name, value in named.items() if value is not None}
+    return present(
+        {
+            "categoryId": category_id,
+            "dir": dir,
+            "filter": encode_filter(filter) if filter else None,
+            "fiscalPeriodId": fiscal_period_id,
+            "onlyActive": flag(only_active),
+            "onlyCostCenters": flag(only_cost_centers),
+            "onlyNotes": flag(only_notes),
+            "query": query,
+            "sort": sort,
+        }
+    )
 
 
 async def account_list(
