@@ -247,7 +247,7 @@ is paid. Probe Versicherung AG has no bookings.
 | 2025-06-09 | 1020 | 1100 | 15'000.00 |  | Demo Bau AG | RE-2025-002 | Zahlung RE-2025-002 |
 | 2025-06-30 | 6000 | 1020 | 7'200.00 |  | Fiktiv Immobilien AG |  | Miete 2. Quartal 2025 |
 | 2025-07-15 | 2000 | 1020 | 6'400.00 |  | Muster Büro AG | ER-2025-001 | Zahlung ER-2025-001 |
-| 2025-09-30 | 6940 | 1020 | 120.00 |  |  |  | Bankspesen Januar bis September 2025 |
+| 2025-09-30 | 6900 | 1020 | 120.00 |  |  |  | Bankspesen Januar bis September 2025 |
 | 2025-10-20 | 1100 | 3200 | 3'600.00 | UN1 | Beispiel Logistik AG | RE-2025-003 | Rechnung RE-2025-003 Beispiel Logistik AG |
 | 2025-12-15 | collective | | 3'600.00 | | | | Bankauszug Dezember 2025 |
 | | 1020 |  | 2'350.00 | |  | | Saldo Bankauszug Dezember 2025 |
@@ -269,7 +269,7 @@ is paid. Probe Versicherung AG has no bookings.
 | 2026-03-05 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete März 2026 |
 | 2026-03-12 | 2000 | 1020 | 3'200.00 |  | Muster Büro AG | ER-2026-001 | Zahlung ER-2026-001 |
 | 2026-03-18 | 1100 | 3200 | 2'500.00 | UN1 | Testfirma Design GmbH | RE-2026-003 | Rechnung RE-2026-003 Testfirma Design GmbH |
-| 2026-03-31 | 6940 | 1020 | 45.00 |  |  |  | Bankspesen 1. Quartal 2026 |
+| 2026-03-31 | 6900 | 1020 | 45.00 |  |  |  | Bankspesen 1. Quartal 2026 |
 | 2026-04-03 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete April 2026 |
 | 2026-04-09 | collective | | 10'000.00 | | | | Sammelzahlung Debitoren April 2026 |
 | | 1020 |  | 10'000.00 | |  | | Zahlungseingang |
@@ -284,7 +284,7 @@ is paid. Probe Versicherung AG has no bookings.
 | 2026-06-05 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete Juni 2026 |
 | 2026-06-10 | 2000 | 1020 | 5'600.00 |  | Muster Büro AG | ER-2026-002 | Zahlung ER-2026-002 |
 | 2026-06-22 | 1020 | 1100 | 15'000.00 |  | Demo Bau AG | RE-2026-004 | Zahlung RE-2026-004 |
-| 2026-06-30 | 6940 | 1020 | 45.00 |  |  |  | Bankspesen 2. Quartal 2026 |
+| 2026-06-30 | 6900 | 1020 | 45.00 |  |  |  | Bankspesen 2. Quartal 2026 |
 | 2026-07-03 | 6000 | 1020 | 2'400.00 |  | Fiktiv Immobilien AG |  | Miete Juli 2026 |
 | 2026-07-14 | 1020 | 1100 | 6'200.00 |  | Platzhalter Software SA | RE-2026-005 | Zahlung RE-2026-005 |
 | 2026-07-21 | 1100 | 3200 | 1'250.00 | UN1 | Probe Gastro GmbH | RE-2026-006 | Rechnung RE-2026-006 Probe Gastro GmbH |
@@ -299,7 +299,7 @@ is paid. Probe Versicherung AG has no bookings.
 | | 2000 |  | 2'400.00 | | Muster Büro AG | | Zahlung ER-2026-003 |
 | | 6500 |  | 180.00 | | Beispiel Telecom AG | | Telefon und Internet September 2026 |
 | |  | 1020 | 2'580.00 | |  | | Zahlungsausgang |
-| 2026-09-30 | 6940 | 1020 | 45.00 |  |  |  | Bankspesen 3. Quartal 2026 |
+| 2026-09-30 | 6900 | 1020 | 45.00 |  |  |  | Bankspesen 3. Quartal 2026 |
 
 ### Orders
 
@@ -348,7 +348,7 @@ the first write:
 | 4200 | purchases of goods | purchases and the purchase order to Muster Büro AG |
 | 6000 | premises | rent |
 | 6500 | administration | IT support, telecom and the purchase order to Beispiel Telecom AG |
-| 6940 | bank charges | bank fees |
+| 6900 | financial expenses | bank fees |
 
 - The numbers follow the Swiss SME chart of accounts (KMU-Kontenrahmen), which CashCtrl's
   default chart is assumed to follow. The snapshot does not confirm them; guard 4
@@ -356,6 +356,12 @@ the first write:
   missing or inactive. There is no opening-balance entry (the documentation says nothing
   about opening balances, so `9100` is not used); the books start with the payment of
   the share capital in 2025.
+- Bank fees go to 6900, financial expenses (Finanzaufwand). CashCtrl's default chart has
+  no bank-charges account: the first seeding attempt was refused by guard 4 for a
+  missing 6940, the SME chart's bank charges, and the default chart's accounts from 6800
+  to 6999 are 6800 depreciation, 6801 fixed asset disposals, 6900 financial expenses,
+  6950 financial revenue, 6960 exchange differences and 6961 rounding differences
+  (observed in October 2026). The other eight numbers are in the default chart.
 - VAT codes `UN1` (VAT due on sales, 8.1 %) and `VN1` (input VAT, 8.1 %): not in the
   documentation; they are the system-created codes the retired demo organisation's
   `tax/list.json` showed. Looked up by `code`; missing ones refuse the run.

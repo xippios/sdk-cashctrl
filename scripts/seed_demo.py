@@ -260,7 +260,10 @@ PERSONS = (
 _COMPANIES = {person.key: person.company for person in PERSONS}
 
 BANK, DEBTORS, CREDITORS, SHARE_CAPITAL = "1020", "1100", "2000", "2800"
-REVENUE, PURCHASES, RENT, ADMIN, BANK_FEES = "3200", "4200", "6000", "6500", "6940"
+REVENUE, PURCHASES, RENT, ADMIN = "3200", "4200", "6000", "6500"
+BANK_FEES = "6900"
+"""Financial expenses (Finanzaufwand), where the bank fees go: CashCtrl's default chart has
+no bank-charges account such as 6940 of the Swiss SME chart (docs/demo-org.md)."""
 
 
 def _entry(

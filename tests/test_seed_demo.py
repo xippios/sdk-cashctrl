@@ -32,7 +32,7 @@ SUB = "fakesub7x"
 KEY = "fake-key-for-the-seed-test-0123456789"  # pragma: allowlist secret (a test value)
 TOKEN = base64.b64encode(f"{KEY}:".encode()).decode("ascii")
 OWNER = "owner@organisation-owner.test"
-NUMBERS = ("1020", "1100", "2000", "2800", "3200", "4200", "6000", "6500", "6940")
+NUMBERS = ("1020", "1100", "2000", "2800", "3200", "4200", "6000", "6500", "6900")
 DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 CURRENT_PERIOD = 1
 """The fake's current fiscal period, 2026: lists without ``fiscalPeriodId`` answer for it."""
@@ -566,12 +566,12 @@ def test_a_person_total_below_the_records_listed_is_refused(
 def test_missing_or_inactive_account_numbers_are_refused_by_number(
     fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    fake.accounts = [a for a in fake.accounts if a["number"] != "6940"]
+    fake.accounts = [a for a in fake.accounts if a["number"] != "6900"]
     next(a for a in fake.accounts if a["number"] == "6000")["isInactive"] = True
     status, _, err = run(capsys, "--apply", "--yes")
     assert status == 1
     assert fake.posts() == []
-    assert "missing: 6940" in err
+    assert "missing: 6900" in err
     assert "inactive: 6000" in err
 
 
