@@ -1055,6 +1055,7 @@ def test_the_books_are_small_balanced_and_fictional() -> None:
     assert all(p.email.endswith(".example") for p in seeder.PERSONS)
     assert len({p.email for p in seeder.PERSONS}) == 10
     assert all(p.company.endswith((" AG", " GmbH", " SA")) for p in seeder.PERSONS)
+    assert not seeder.PERSONS[0].company.isascii()  # the first write checks UTF-8
     names = [seeder.COMPANY] + [p.company for p in seeder.PERSONS]
     assert all(name.split()[0] in seeder.PLACEHOLDER_MARKERS for name in names)
     assert {name.split()[0] for name in names} == set(seeder.PLACEHOLDER_MARKERS)
