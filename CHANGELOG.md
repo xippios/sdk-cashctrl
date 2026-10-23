@@ -36,3 +36,17 @@ All notable changes to this project are documented here. The format follows
   create it with fictional data only and seed it, the books in full, the assumed account
   numbers and VAT codes, the balances of 1100 the books imply under a gross and a net
   reading, and a placeholder for what the first run observes.
+
+### Changed
+
+- chore: update to sdk-template v0.1.5.
+  - Hygiene files: `.gitattributes` keeps `docs/upstream/` byte-exact, `.gitignore`
+    covers `.env.*` and `.envrc.*`, the secrets baseline skips `.copier-answers.yml`.
+  - Command texts: `/add-endpoint`, `/refresh-reference-data` and `/refresh-upstream`
+    (which now runs `scripts/refresh_upstream.py` where it exists), the MCP server
+    instructions and the `reference/README.md` wording follow the template.
+  - Placeholder-key test: every test but a live one sends the placeholder key, pinned on
+    `CASHCTRL_API_KEY` and on `auth.key` (now in `_client.__all__`), and
+    `test_replay_tests_send_the_placeholder_key` checks the basic auth user name.
+  - `validation_alias` rule for the models to come: upstream spellings are accepted with
+    `Field(validation_alias=...)`, never `alias=` (`models.py` docstring, `/add-endpoint`).
