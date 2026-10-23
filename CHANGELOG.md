@@ -16,6 +16,59 @@ All notable changes to this project are documented here. The format follows
   its table of contents (five general sections, ten modules), listed in `FETCHED.md`.
 - `scripts/refresh_upstream.py`: regenerates the snapshot reproducibly from the one
   documentation page (`uv run scripts/refresh_upstream.py`).
+- Organisations: `_client.py` is a registry of named organisations instead of one
+  client. `CASHCTRL_ORGS` lists them, each with `CASHCTRL_<NAME>_SUBDOMAIN` and
+  `CASHCTRL_<NAME>_API_KEY`; the reserved `demo` is declared by its own pair.
+  `client_for(org)` gives every organisation its own client (base URL, key, 60 requests
+  per minute, no shared cache); an undeclared name is an `InvalidRequestError`.
+- `--org <name>` on `xippios-cashctrl-mcp` and `xippios-cashctrl-mcp-write` locks the
+  server to one organisation: an undeclared name or a missing or malformed subdomain
+  stops it at startup (exit status 2), and its instructions name the organisation. Both
+  servers keep httpx's request lines, which carry the subdomain, out of their log.
+- `RequestRejected` (an `InvalidRequestError`, HTTP 422) for CashCtrl's HTTP 200
+  `success: false` refusals, with the field errors or upstream's single message
+  (`errorMessage`, else `message`). An unknown id on a `read.json` read by id (a
+  non-empty `id`, at most `lang` besides) raises `NotFoundError`, as observed against the
+  demo organisation; a 404, which upstream documents as an unknown endpoint, raises
+  `UpstreamError`. Status error messages and `UpstreamError.body` name `cashctrl.com`,
+  never the organisation's subdomain, also where an error page echoes the host.
+- `scripts/record_fixture.py`: records fixtures from the demo organisation only. It
+  scrubs credentials, rewrites the demo host to `demo.cashctrl.com` and every e-mail
+  address to `user@example.com` in memory, checks for the subdomain, the key and any
+  other e-mail address before the one write, and refuses bodies that are not UTF-8 text
+  (exports). Until the demo organisation is confirmed synthetic it also refuses any
+  method but GET, any endpoint but `.json`, every module but account, currency,
+  fiscalperiod and tax (`account/bank/` is refused), and bodies with a non-zero amount
+  (`--allow-amounts` is for a synthetic demo organisation only); e-mail addresses
+  written as HTML entities (`&#64;`, `&#x40;`, `&commat;`) are scrubbed too. Fixtures
+  for an unknown id, a missing id and a wrong key.
+- Ledger basics, five read-only tasks, each an MCP tool `cashctrl_<task>` and an HTTP
+  route `/cashctrl/<task>`, all taking `org` first:
+  - `list_fiscal_periods` (`fiscalperiod/list.json`), `list_currencies`
+    (`currency/list.json`) and `list_tax_codes` (`tax/list.json`), which document no
+    parameters;
+  - `list_accounts` (`account/list.json`) with its nine documented parameters
+    (`query`, `filter`, `category_id`, `fiscal_period_id`, `only_active`,
+    `only_cost_centers`, `only_notes`, `sort`, `dir`); its HTTP route is a `POST`;
+  - `get_account` (`account/read.json`); an unknown id raises `NotFoundError`.
+- Models mirroring the payloads: `FiscalPeriod`, `Currency`, `TaxCode` with
+  `TaxComponent` and `TaxRate`, `Account` (a `list.json` entry, with balances),
+  `AccountDetail` (the `read.json` record), the envelopes `ListResponse` and
+  `ReadResponse`, and `Filter` for the `filter` parameter. Amounts and rates are
+  `Decimal`, dates `date`, timestamps naive `datetime` (`lastEntryDate`, undocumented
+  and seen with a time of day, stays a timestamp).
+- `dir` and `Filter.comparison` are typed as their documented value sets, `Direction`
+  (`ASC`, `DESC`) and `Comparison` (`eq`, `like`, `gt`, `lt`), so the tool schema lists
+  them and the adapters refuse another value before the task runs.
+- `list_accounts` takes each filter as a `Filter` or as a mapping with the same keys,
+  and refuses, with `InvalidRequestError` and before any request, a `dir` other than
+  `ASC` or `DESC`, a filter `comparison` other than `eq`, `like`, `gt` or `lt`, a
+  `filter` that is not a list, an item that is neither a `Filter` nor a mapping that
+  validates as one, and a `query` or `sort` that is not a string: upstream would
+  silently ignore them.
+- Fixtures recorded from the demo organisation for the four lists (the account list
+  narrowed twice, to accounts with zero balances) and for one account read by id, with
+  e-mail addresses scrubbed.
 
 ### Changed
 
@@ -30,3 +83,12 @@ All notable changes to this project are documented here. The format follows
     `test_replay_tests_send_the_placeholder_key` checks the basic auth user name.
   - `validation_alias` rule for the models to come: upstream spellings are accepted with
     `Field(validation_alias=...)`, never `alias=` (`models.py` docstring, `/add-endpoint`).
+- No reference data is packaged: CashCtrl's lists (accounts, currencies, tax codes,
+  fiscal periods) are per-organisation data, served live by the list tasks. Only value
+  sets the documentation fixes may ship, generated from `docs/upstream/`; none is needed
+  yet, so `scripts/refresh_reference.py` is a stub that exits non-zero.
+
+### Removed
+
+- The scaffold's single client and its `CASHCTRL_API_KEY` variable, replaced by the
+  organisation registry above.
