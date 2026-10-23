@@ -75,8 +75,9 @@ _EMAIL = re.compile(r"[\w.%+-]+(?:@|%40|&#0*64;?|&#[xX]0*40;?|&commat;)[\w-]+(?:
 _LOCALIZED = re.compile(r"<([a-z]{2})>(.*?)</\1>", re.DOTALL)
 _SHOWN_CHARS = 600
 """The most characters of an upstream refusal body shown, after scrubbing."""
-_SHOWN_ID_CHARS = 40
-"""The most characters of an ``insertId`` that is not a number shown, after scrubbing."""
+_SHOWN_VALUE_CHARS = 80
+"""The most characters of one upstream value shown (an ``insertId`` that is not a number, a
+balance), after scrubbing."""
 
 Role = Literal["customer", "vendor"]
 OrderType = Literal["SALES", "PURCHASE"]
@@ -640,6 +641,8 @@ class Observed:
     refusals: list[str] = field(default_factory=list)
     encoding: str = FORM_CONTENT_TYPE
     utf8: str = "not checked: no person was created"
+    calc_types: dict[str, str] = field(default_factory=dict)
+    balances: dict[str, str] = field(default_factory=dict)
 
     def lines(self) -> list[str]:
         """The section "Observed write semantics", one line per finding."""
@@ -648,6 +651,10 @@ class Observed:
             f"  writes sent as: {self.encoding}",
             f"  UTF-8 round trip: {self.utf8}",
         ]
+        for code, shown in self.calc_types.items():
+            out.append(f"  tax code {code}, components calcType {shown}")
+        for day, shown in self.balances.items():
+            out.append(f"  account {DEBTORS} balance at {day}: {shown}")
         for (method, path, status), count in sorted(self.statuses.items()):
             out.append(f"  {method} {path}: HTTP {status} x{count}")
         for path in sorted(self.answer_keys):
@@ -658,6 +665,10 @@ class Observed:
         if not self.refusals:
             out.append("  refusals: none")
         return out
+
+
+def _shorten(shown: str) -> str:
+    return shown if len(shown) <= _SHOWN_VALUE_CHARS else shown[:_SHOWN_VALUE_CHARS] + " ..."
 
 
 def _json_or_none(response: httpx.Response) -> Any:
@@ -789,8 +800,21 @@ class Session:
         value = body.get("insertId")
         if isinstance(value, int) and not isinstance(value, bool):
             return str(value)
-        shown = self.scrub(json.dumps(value, ensure_ascii=False))
-        return shown if len(shown) <= _SHOWN_ID_CHARS else shown[:_SHOWN_ID_CHARS] + " ..."
+        return _shorten(self.scrub(json.dumps(value, ensure_ascii=False)))
+
+    def read_text(self, path: str, what: str, params: Mapping[str, str]) -> str:
+        """GET ``path``, whose answer need not be JSON; HTTP 200, shown scrubbed and short."""
+        response = self._send("GET", path, what, params=params)
+        body = _json_or_none(response)
+        refused = isinstance(body, dict) and body.get("success") is False
+        if response.status_code != 200 or refused:
+            message = self._upstream_message(body)
+            raise Failed(
+                f"{what}: GET {path} answered HTTP {response.status_code}"
+                + (", success: false" if refused else "")
+                + (f" ({message})" if message else "")
+            )
+        return _shorten(self.scrub(response.text.strip())) or "(empty)"
 
 
 # --- Reading upstream answers --------------------------------------------------------
@@ -845,6 +869,28 @@ def _day(value: Any) -> date | None:
 
 def _inactive(record: Mapping[str, Any]) -> bool:
     return record.get("isInactive") is True
+
+
+def _record(body: Any) -> Any:
+    """The record of a read answer: ``data`` when it is an object, else the answer itself."""
+    if isinstance(body, dict) and isinstance(body.get("data"), dict):
+        return body["data"]
+    return body
+
+
+def calc_types(components: Any) -> list[str] | None:
+    """The ``calcType`` of each tax code component, from a list of objects or its JSON text."""
+    if isinstance(components, str):
+        try:
+            components = json.loads(components)
+        except ValueError:
+            return None
+    if not isinstance(components, list) or not components:
+        return None
+    return [
+        c["calcType"] if isinstance(c, dict) and isinstance(c.get("calcType"), str) else "(none)"
+        for c in components
+    ]
 
 
 # --- Guards and lookups ---------------------------------------------------------------
@@ -993,12 +1039,15 @@ def missing_currencies(session: Session) -> list[Currency]:
 
 
 def resolve_taxes(session: Session) -> dict[TaxKind, int]:
-    """The ids of the planned tax codes, active ones only; refuses a missing code."""
+    """The ids of the planned tax codes, active ones only; refuses a missing code.
+
+    Prints the ``calcType`` (NET or GROSS) of each one's components, so whether a journal
+    ``amount`` with a ``taxId`` is read as net or gross is observed, not assumed.
+    """
     path = "tax/list.json"
     found = records(session.read(path, "tax codes"), path)
-    by_code = {
-        str(record.get("code", "")): _id(record, path) for record in found if not _inactive(record)
-    }
+    active = {str(record.get("code", "")): record for record in found if not _inactive(record)}
+    by_code = {code: _id(record, path) for code, record in active.items()}
     missing = [code for code in TAX_CODES.values() if code not in by_code]
     if missing:
         available = ", ".join(sorted(code for code in by_code if code)) or "none"
@@ -1006,7 +1055,28 @@ def resolve_taxes(session: Session) -> dict[TaxKind, int]:
             f"tax/list.json has no active tax code {', '.join(missing)} "
             f"(active codes: {session.scrub(available)})"
         )
+    for code in TAX_CODES.values():
+        observe_calc_type(session, code, active[code], by_code[code])
     return {kind: by_code[code] for kind, code in TAX_CODES.items()}
+
+
+def observe_calc_type(session: Session, code: str, record: Mapping[str, Any], tax_id: int) -> None:
+    """Print the ``calcType`` of one tax code's components.
+
+    From the ``tax/list.json`` record, or from ``tax/read.json`` when the record has none.
+    """
+    source = "tax/list.json"
+    found = calc_types(record.get("components"))
+    if found is None:
+        source = "tax/read.json"
+        detail = _record(session.read(source, f"tax code {code}", {"id": str(tax_id)}))
+        found = calc_types(detail.get("components")) if isinstance(detail, dict) else None
+    if found is None:
+        shown = "not reported by tax/list.json or tax/read.json"
+    else:
+        shown = f"{session.scrub(', '.join(found))} (from {source})"
+    session.observed.calc_types[code] = shown
+    say(f"lookup: tax code {code}, components calcType {shown}")
 
 
 def resolve_person_categories(session: Session) -> dict[Role, int]:
@@ -1185,13 +1255,6 @@ def _insert_id(body: Mapping[str, Any], what: str) -> int:
     return int(value)
 
 
-def _record(body: Any) -> Any:
-    """The record of a read answer: ``data`` when it is an object, else the answer itself."""
-    if isinstance(body, dict) and isinstance(body.get("data"), dict):
-        return body["data"]
-    return body
-
-
 def check_round_trip(session: Session, person: Person, person_id: int, what: str) -> None:
     """Read the first person back; stop unless ``company`` is what was sent, byte for byte.
 
@@ -1290,6 +1353,20 @@ def report_totals(session: Session, context: Context, period_2025: int) -> None:
     say("Totals now reported")
     for label, path, params in reads:
         say(f"  {label}: total {total_of(session.read(path, what, params))}")
+
+
+BALANCE_DATES = (date(2025, 12, 31), date(2026, 9, 30))
+"""The days the summary reads the balance of 1100 (debtors) at: the last of each year's entries."""
+
+
+def report_balances(session: Session, context: Context) -> None:
+    """The balance of 1100 (debtors) after each year, for the gross-or-net comparison."""
+    say(f"Balance of account {DEBTORS} (debtors), to compare with docs/demo-org.md")
+    for day in BALANCE_DATES:
+        params = {"id": str(context.accounts[DEBTORS]), "date": day.isoformat()}
+        shown = session.read_text("account/balance", "summary", params)
+        session.observed.balances[day.isoformat()] = shown
+        say(f"  {day}: {shown}")
 
 
 def report_created(created: Counter[str]) -> None:
@@ -1422,6 +1499,7 @@ def apply(environ: Mapping[str, str], *, multipart: bool = False) -> int:
         if status == 0:
             try:
                 report_totals(session, context, period_2025)
+                report_balances(session, context)
             except (Refused, Failed) as failure:
                 say(f"summary incomplete: {failure}", err=True)
                 status = 1

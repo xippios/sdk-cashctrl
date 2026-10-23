@@ -72,7 +72,15 @@ class FakeCashCtrl:
         ]
         self.periods: list[dict[str, Any]] = [self._period(1, 2026)]
         self.currencies = [{"id": 1, "code": "CHF"}, {"id": 2, "code": "EUR"}]
-        self.taxes = [{"id": 1, "code": "UN1"}, {"id": 6, "code": "VN1"}, {"id": 9, "code": "UN0"}]
+        self.taxes: list[dict[str, Any]] = [
+            {"id": 1, "code": "UN1", "components": [{"accountId": 30, "calcType": "NET"}]},
+            {"id": 6, "code": "VN1"},  # no components in the list: the seeder reads tax/read.json
+            {"id": 9, "code": "UN0"},
+        ]
+        self.tax_details: dict[int, dict[str, Any]] = {
+            6: {"id": 6, "code": "VN1", "components": '[{"accountId":31,"calcType":"GROSS"}]'}
+        }
+        self.balances = {"2025-12-31": "0.0", "2026-09-30": "4850.0"}
         self.person_categories = [
             {"id": 1, "name": _localized("Kunden", "Customers")},
             {"id": 2, "name": _localized("Lieferanten", "Vendors")},
@@ -148,6 +156,15 @@ class FakeCashCtrl:
             return _list(self.currencies)
         if path == "tax/list.json":
             return _list(self.taxes)
+        if path == "tax/read.json":
+            return httpx.Response(
+                200, json={"success": True, "data": self.tax_details[int(params["id"])]}
+            )
+        if path == "account/balance":
+            assert params["id"] == str(
+                next(a["id"] for a in self.accounts if a["number"] == "1100")
+            )
+            return httpx.Response(200, text=self.balances[params["date"]])
         if path == "person/category/list.json":
             return _list(self.person_categories)
         if path == "order/category/list.json":
@@ -566,6 +583,41 @@ def test_a_read_back_without_company_stops_before_any_further_write(
     assert "UTF-8 round trip: not checked: person/read.json answered no company" in out
 
 
+def test_calc_types_are_printed_before_any_write_and_the_balance_after(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
+) -> None:
+    status, out, _ = run(capsys, "--apply", "--yes")
+    assert status == 0
+    lines = out.splitlines()
+    first_write = next(i for i, line in enumerate(lines) if line.startswith("person 1/10"))
+    lookups = [line for line in lines[:first_write] if line.startswith("lookup: tax code")]
+    assert lookups == [
+        "lookup: tax code UN1, components calcType NET (from tax/list.json)",
+        "lookup: tax code VN1, components calcType GROSS (from tax/read.json)",
+    ]
+    read = next(r for r in fake.requests if r.url.path == "/api/v1/tax/read.json")
+    assert read.url.params["id"] == "6"
+    assert fake.requests.index(read) < fake.requests.index(fake.posts()[0])
+    balances = [r for r in fake.requests if r.url.path == "/api/v1/account/balance"]
+    assert [r.url.params["date"] for r in balances] == ["2025-12-31", "2026-09-30"]
+    assert fake.requests.index(balances[0]) > fake.requests.index(fake.posts()[-1])
+    assert "Balance of account 1100 (debtors), to compare with docs/demo-org.md" in out
+    assert "  2025-12-31: 0.0\n  2026-09-30: 4850.0\n" in out
+    assert "  tax code VN1, components calcType GROSS (from tax/read.json)" in out
+    assert "  account 1100 balance at 2026-09-30: 4850.0" in out
+
+
+def test_a_tax_code_without_components_anywhere_is_reported_not_guessed(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake.tax_details[6] = {"id": 6, "code": "VN1"}
+    status, out, _ = run(capsys, "--apply", "--yes")
+    assert status == 0
+    assert (
+        "lookup: tax code VN1, components calcType not reported by tax/list.json or tax/read.json"
+    ) in out
+
+
 def test_an_existing_2025_period_is_used_not_created(
     fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -813,14 +865,18 @@ def test_the_subdomain_key_and_e_mail_never_reach_the_output(
         assert secret.lower() not in shown
 
 
-def test_insert_ids_and_refusal_headers_are_shown_scrubbed(
+def test_insert_ids_calc_types_balances_and_refusal_headers_are_shown_scrubbed(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     upstream = FakeCashCtrl()
     upstream.odd_ids = True
+    upstream.taxes[0]["components"] = [{"calcType": f"NET {SUB}"}]
+    upstream.balances["2025-12-31"] = f"0.0 {OWNER} {KEY}"
     with serving(upstream):
         status, out, err = run(capsys, "--apply", "--yes")
     assert status == 0
+    assert "lookup: tax code UN1, components calcType NET <subdomain> (from tax/list.json)" in out
+    assert "  2025-12-31: 0.0 <e-mail> <key>" in out
     assert 'journal entry 1/48 2025-01-06 Einzahlung Aktienkapital: insertId "<subdomain>-' in out
     assert re.search(r'order 6/6 PURCHASE EK-2026-002: insertId "<subdomain>-\d+ <e-mail>"', out)
     assert (
