@@ -58,6 +58,7 @@ src/xippios/cashctrl/
   reference/       packaged code lists (CSV/JSON) plus README with provenance
 scripts/
   refresh_reference.py   fetches the packaged lists through api/ and regenerates enums.py
+  refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
 tests/
   conftest.py      enables xippios.core.testing.plugin; placeholder key for replay
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
