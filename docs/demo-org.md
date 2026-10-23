@@ -443,7 +443,10 @@ printed the following; the balances and totals are quoted as printed.
   for 2026, two more than the 36 manual entries. The balance of 1100 holds no sales order
   amount, so the four sales invoices did not book to the debtors. Which records the two
   extra entries are was not read; the two purchase orders are the likeliest source, not
-  verified.
+  verified. The order lists recorded the same day (`tests/fixtures/order_list/`) fit
+  that: both purchase orders are in their category's first status, Open, with `isBook`
+  true and `open` equal to their total; the four sales invoices are in Draft with
+  `isBook` false.
 - Balance of 1100 (`account/balance`): `0.00` at 2025-12-31 and `4850.00` at 2026-09-30,
   exactly the gross reading in the table above. The `amount` of a manual journal entry
   with a `taxId` is the gross amount, VAT included, although the tax codes' `calcType` is

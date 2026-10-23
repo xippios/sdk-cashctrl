@@ -50,13 +50,21 @@ for account in accounts.data:
 bank = tasks.list_accounts("demo", filter=[Filter(comparison="eq", field="number", value="1020")])
 record = tasks.get_account("demo", bank.data[0].id)
 print(record.meta.endpoint, record.meta.request, record.meta.retrieved_at)
+
+# The journal, persons and orders page by offset: limit gives one page, and meta.total
+# says how many match; without limit every page is collected.
+page = tasks.list_journal_entries("demo", fiscal_period_id=current.id, limit=20)
+print(len(page.data), "of", page.meta.total)
+entry = tasks.get_journal_entry("demo", page.data[0].id)  # with lines and bookings
+invoices = tasks.list_orders("demo", type="SALES", fiscal_period_id=current.id)
 ```
 
 Every task returns `Result[T]`: `data` holds models that mirror CashCtrl's payloads
 under upstream's names in snake_case (`is_current`, `end_amount`), in Python and in every
 tool and route result alike, `meta` the upstream operation, the parameters as sent under
-upstream's names (`onlyActive`) and when they were fetched. Async twins are named
-`<task>_async`. The tasks are listed in the status table below.
+upstream's names (`onlyActive`), when they were fetched and, for a list, `total`,
+upstream's count of the matching records. Async twins are named `<task>_async`. The
+tasks are listed in the status table below.
 
 ## MCP
 
@@ -91,11 +99,12 @@ tool previews its change unless called with `confirm=true`. It takes `--org` too
 `xippios.cashctrl.http.router` is a FastAPI router the consumer mounts. It has no lock:
 every route takes `org` and the consumer passes it explicitly on each request. A
 deployment that must reach one organisation only declares only that one. A task whose
-parameters are all scalars is a `GET /cashctrl/<task>` with query parameters;
-`list_accounts`, whose `filter` is a list, is a `POST` with a JSON body keyed by
-parameter name. The MCP entry points quiet httpx's request log; the router does not, so
-a consumer that logs at INFO logs httpx's request lines, whose URLs carry the
-organisation's host (its subdomain): set the `httpx` logger to WARNING.
+parameters are all scalars is a `GET /cashctrl/<task>` with query parameters; the list
+tasks that take a `filter`, a list (`list_accounts`, `list_journal_entries`,
+`list_persons`, `list_orders`), are a `POST` with a JSON body keyed by parameter name.
+The MCP entry points quiet httpx's request log; the router does not, so a consumer that
+logs at INFO logs httpx's request lines, whose URLs carry the organisation's host (its
+subdomain): set the `httpx` logger to WARNING.
 
 ## Status
 
@@ -106,6 +115,12 @@ organisation's host (its subdomain): set the `httpx` logger to WARNING.
 | `GET tax/list.json` (List tax codes) | `list_tax_codes` | `cashctrl_list_tax_codes` | available |
 | `GET account/list.json` (List accounts) | `list_accounts` | `cashctrl_list_accounts` | available; HTTP route is `POST` |
 | `GET account/read.json` (Read account) | `get_account` | `cashctrl_get_account` | available |
+| `GET journal/list.json` (List journal entries) | `list_journal_entries` | `cashctrl_list_journal_entries` | available; paged; HTTP route is `POST` |
+| `GET journal/read.json` (Read journal entry) | `get_journal_entry` | `cashctrl_get_journal_entry` | available |
+| `GET person/list.json` (List people) | `list_persons` | `cashctrl_list_persons` | available; paged; HTTP route is `POST` |
+| `GET person/read.json` (Read person) | `get_person` | `cashctrl_get_person` | available |
+| `GET order/list.json` (List orders) | `list_orders` | `cashctrl_list_orders` | available; paged; HTTP route is `POST` |
+| `GET order/read.json` (Read order) | `get_order` | `cashctrl_get_order` | available |
 
 `lang` (`de`, `fr`, `it`, `en`), which upstream takes on every request and which matters
 mostly for error messages and exports, is not exposed yet. `list_accounts` checks `dir`
@@ -113,6 +128,18 @@ mostly for error messages and exports, is not exposed yet. `list_accounts` check
 anything is sent, since upstream silently ignores values it does not know; both are
 typed as these value sets, so the tool schema lists them. A filter is a `Filter` or,
 from Python, a mapping with the same keys.
+
+The paged lists (`list_journal_entries`, `list_persons`, `list_orders`) take `start`
+(default 0) and `limit`. With `limit` they return one page of at most `limit` records
+from `start`; without it, every record from `start` on, fetched 100 at a time (upstream's
+documented page size). `meta.total` is upstream's count of every record the request
+matches, so a page is the last one when `start + limit >= meta.total`. Every other list
+returns its whole answer in one request and reports upstream's `total` too. The journal
+and order lists answer for the API user's current fiscal period unless
+`fiscal_period_id` is given (`list_fiscal_periods` marks it `is_current`); without
+`type` (`SALES`, `PURCHASE`), `list_orders` returns both. Collected over MCP, a long
+journal still meets the result cap (200 rows or 64 KB); page with `limit` and `start`
+instead.
 
 ## Upstream terms and attribution
 

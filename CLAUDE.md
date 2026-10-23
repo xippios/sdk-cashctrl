@@ -169,6 +169,12 @@ Run `/add-endpoint <upstream operation>`. In short:
    `demo_org` fixture.
 7. `CHANGELOG.md` under Unreleased, README status table, then the full check suite.
 
+A list that documents `start` and `limit` (journal, persons, orders) pages through
+`_offset_pages` in `tasks.py` (conventions §4, ADR-0012): `limit` given is one request
+for the page at `start` (default 0); `limit` omitted collects every page from `start`
+through core's `paginate_offset`, `PAGE_SIZE` (100, upstream's documented default) a
+request. `meta.total` is upstream's `total` on every list task, never `len(data)`.
+
 Lookups (accounts, currencies, tax codes, fiscal periods) are tasks too, named
 `list_<thing>`, so agents can form valid calls; they serve the organisation's own data
 live and are never packaged (`/refresh-reference-data`). A task-shaped function that

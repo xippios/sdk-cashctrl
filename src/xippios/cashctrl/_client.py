@@ -297,8 +297,9 @@ def classify(response: httpx.Response) -> XippiosError | None:
       ``setting/read.json``, which takes no ``id``. Known gaps:
       ``order/category/read_status.json``, ``account/balance`` and
       ``account/costcenter/balance`` also read by ``id`` under other paths, so an unknown
-      id there stays a ``RequestRejected``. Only ``account`` and ``currency`` were
-      observed; the other operations are assumed to refuse alike.
+      id there stays a ``RequestRejected``. ``account``, ``currency`` and ``journal``
+      (``"This book entry does not exist."``) were observed; the other operations are
+      assumed to refuse alike.
 
     Everything else falls through (``None``): a 200 that is not a JSON object with
     ``"success": false`` (data, the CSV, Excel and PDF exports, malformed JSON) and every
