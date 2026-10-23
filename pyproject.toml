@@ -50,7 +50,7 @@ dev = [
 [tool.uv.sources]
 # Development only: xippios-core from git until it is on PyPI. Remove this block
 # (re-run copier with core_git_ref="") once the published package is available.
-xippios-core = { git = "https://github.com/xippios/sdk-core.git", rev = "dbe2eba0ad71729065a17ed40134f5479cae2f29" }
+xippios-core = { git = "https://github.com/xippios/sdk-core.git", rev = "dbe2eba0ad71729065a17ed40134f5479cae2f29" }  # pragma: allowlist secret (a commit SHA)
 
 [build-system]
 requires = ["hatchling>=1.27"]
