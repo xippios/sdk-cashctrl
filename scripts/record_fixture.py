@@ -30,7 +30,7 @@ never shows a value, and exits with status 1:
   ``setting/get``) and an export (``.pdf``, ``.xlsx``, ``.csv``, ``.zip``) a file; both
   are refused before a request is sent.
 - No e-mail addresses. Every e-mail-shaped string in the request URL, the response
-  headers and the body becomes ``user@example.com``, with ``@`` written plainly, as
+  header values and the body becomes ``user@example.com``, with ``@`` written plainly, as
   ``%40`` or as the HTML entities ``&#64;``, ``&#x40;`` and ``&commat;`` (``notes`` and
   footers are HTML upstream); ``SYSTEM`` in ``createdBy`` is not an address and stays.
   The synthetic books use reserved ``.example`` addresses, but ``createdBy`` and
@@ -53,29 +53,31 @@ never shows a value, and exits with status 1:
 
 Nothing unscrubbed touches disk. The request goes through the real client with
 ``raise_on_error=False``, and core's ``fixture_from_response`` turns the exchange into a
-fixture in memory, credentials scrubbed. Then every occurrence of the demo host
-(``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``) in the request URL, the response headers and
-the body becomes ``demo.cashctrl.com``, the host offline tests replay against, every
-e-mail address becomes ``user@example.com``, every API user tag ``API:REDACTED`` and
-every token-like field's value ``REDACTED``. The fixture is checked last, before the one
-write, in its serialised text and in every decoded string of a JSON body: the real
-subdomain, the real key (plain or as a basic-auth token), an e-mail address other than
-``user@example.com``, an API user tag other than ``API:REDACTED`` in any case and
-position (the key's own tag also with ``:`` URL-encoded, as an HTML entity or followed by
-a space), the key's first four characters on their own, reported as a possible key
-prefix, or any value but ``null`` or ``REDACTED`` under a token-like field name means
-nothing is written and the exit status is 1; a key-like name whose value is not
-``REDACTED`` is written for review, also with exit status 1. Only the status and the
-scrubbed URL are printed.
+fixture in memory with ``Scrub`` (conventions §10): credentials scrubbed, the demo host
+(``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``, in any case, IDNA or percent-encoded) made
+``demo.cashctrl.com``, the host offline tests replay against, in the URL, the headers and
+the body, the key and its basic-auth token made ``REDACTED`` wherever they appear, and
+this script's ``scrub_text`` applied to the response body and every response header value:
+every e-mail address becomes ``user@example.com``, every API user tag ``API:REDACTED``
+and every token-like field's value ``REDACTED``. Core does not pass the request URL
+through ``scrub_text``, so the recorder applies it to the URL afterwards. Core then
+verifies the result, a JSON body also decoded, and refuses it when the demo host or the
+key is still there; it also refuses a body that is not UTF-8 text, which no scrub can
+read (exports are out of scope). A refusal by core prints its reason, never a value.
 
-A body that is not UTF-8 text, which core would keep as base64, is refused before
-anything is written, should a ``.json`` endpoint ever send one: such a body can be
-neither scrubbed nor reviewed.
+The fixture is then checked last, before the one write, in its serialised text and in
+every decoded string of a JSON body, for what core does not know: the subdomain on its
+own, an e-mail address other than ``user@example.com``, an API user tag other than
+``API:REDACTED`` in any case and position (the key's own tag also with ``:`` URL-encoded,
+as an HTML entity or followed by a space), the key's first four characters on their own,
+reported as a possible key prefix, or any value but ``null`` or ``REDACTED`` under a
+token-like field name; any of them means nothing is written and the exit status is 1. A
+key-like name whose value is not ``REDACTED`` is written for review, also with exit
+status 1. Only the status and the scrubbed URL are printed.
 
-Host, e-mail, API user tag and token field scrubbing are local to this repository for
-now: they are
-the pattern that moves into core's recorder (``xippios.core.testing.record``) later, for
-every multi-tenant source.
+The write is the recorder's own, not core's ``record``: ``record`` writes as soon as
+core's verify passes, before a source's final check could run, and ``Scrub.rewrite``
+does not reach the request URL.
 """
 
 import argparse
@@ -84,23 +86,15 @@ import json
 import os
 import re
 import sys
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
 import httpx
 from xippios.core import AsyncClient, BasicKeyAuth, sync
-from xippios.core.testing import REDACTED, Fixture, fixture_path
-from xippios.core.testing.fixtures import fixture_from_response
+from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response, fixture_path
 
-from xippios.cashctrl._client import (
-    DEMO,
-    ORGS_ENV,
-    SOURCE,
-    api_key_env,
-    client_for,
-    subdomain_env,
-)
+from xippios.cashctrl._client import DEMO, SOURCE, TENANTS, client_for
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -209,30 +203,13 @@ async def exchange_async(
 exchange = sync(exchange_async)
 
 
-def rewrite(fixture: Fixture, sub: Callable[[str], str]) -> Fixture:
-    """``fixture`` with ``sub`` applied to the request URL, every header and the body."""
-    request = fixture.request.model_copy(update={"url": sub(fixture.request.url)})
-    response = fixture.response.model_copy(
-        update={
-            "headers": [(sub(name), sub(value)) for name, value in fixture.response.headers],
-            "body": sub(fixture.response.body),
-        }
-    )
-    return fixture.model_copy(update={"request": request, "response": response})
-
-
-def scrub_host(fixture: Fixture, host: re.Pattern[str]) -> Fixture:
-    """``fixture`` with every match of ``host`` in URL, headers and body made the replay host."""
-    return rewrite(fixture, lambda text: host.sub(REPLAY_HOST, text))
-
-
 def _placeholder(match: re.Match[str]) -> str:
     return SCRUBBED_EMAIL.replace("@", "%40") if match["at"] == "%40" else SCRUBBED_EMAIL
 
 
-def scrub_emails(fixture: Fixture) -> Fixture:
-    """``fixture`` with every e-mail address in URL, headers and body made the placeholder."""
-    return rewrite(fixture, lambda text: _EMAIL_IN_TEXT.sub(_placeholder, text))
+def scrub_emails(text: str) -> str:
+    """``text`` with every e-mail address made the placeholder."""
+    return _EMAIL_IN_TEXT.sub(_placeholder, text)
 
 
 def _decoded(body: str) -> tuple[bool, Any]:
@@ -298,9 +275,9 @@ def _holds_an_address(fixture: dict[str, Any]) -> bool:
     return any(address not in _SCRUBBED_EMAILS for address in found)
 
 
-def scrub_api_users(fixture: Fixture) -> Fixture:
-    """``fixture`` with every API user tag in URL, headers and body made ``API:REDACTED``."""
-    return rewrite(fixture, lambda text: API_USER.sub(SCRUBBED_API_USER, text))
+def scrub_api_users(text: str) -> str:
+    """``text`` with every API user tag made ``API:REDACTED``."""
+    return API_USER.sub(SCRUBBED_API_USER, text)
 
 
 def _searched_texts(text: str, fixture: dict[str, Any]) -> list[str]:
@@ -330,15 +307,44 @@ def _holds_the_bare_prefix(texts: Sequence[str], key: str) -> bool:
     return len(key) >= 4 and any(key[:4] in text for text in texts)
 
 
-def scrub_token_fields(fixture: Fixture) -> Fixture:
-    """``fixture`` with the text value of every token-like body field made ``REDACTED``.
+def scrub_token_fields(text: str) -> str:
+    """``text`` with the text value of every token-like JSON field made ``REDACTED``.
 
     Only the value changes, in the raw text, so the body stays the JSON upstream sent.
     A ``null`` or a number under such a name is left as it is.
     """
-    return rewrite(
-        fixture, lambda text: _TOKEN_FIELD.sub(lambda m: f'{m["field"]}"{REDACTED}"', text)
+    return _TOKEN_FIELD.sub(lambda m: f'{m["field"]}"{REDACTED}"', text)
+
+
+def scrub_text(text: str) -> str:
+    """The recorder's own scrub: e-mail addresses, API user tags, token-like fields.
+
+    ``Scrub.rewrite``: core applies it, after the host and the key, to the response body
+    and every response header value; the recorder applies it to the request URL.
+    """
+    return scrub_token_fields(scrub_api_users(scrub_emails(text)))
+
+
+def scrub(key: str) -> Scrub:
+    """What core removes besides credentials: the demo host, the key and ``scrub_text``.
+
+    Args:
+        key: The demo key, ``""`` when none is set; with its basic-auth token, it becomes
+            ``REDACTED`` wherever it appears, and core refuses the exchange if it survives.
+    """
+    token = base64.b64encode(f"{key}:".encode()).decode("ascii")
+    return Scrub(
+        host=REPLAY_HOST,
+        secrets=[key, token] if key else [],
+        rewrite=scrub_text,
+        allow_binary=False,
     )
+
+
+def scrub_request_url(fixture: Fixture) -> Fixture:
+    """``fixture`` with ``scrub_text`` applied to its request URL, which core's rewrite skips."""
+    request = fixture.request.model_copy(update={"url": scrub_text(fixture.request.url)})
+    return fixture.model_copy(update={"request": request})
 
 
 def _unsettled_token_fields(node: Any) -> Iterator[str]:
@@ -358,20 +364,21 @@ def _unsettled_token_fields(node: Any) -> Iterator[str]:
 
 
 def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
-    """``(leaks, suspicions)`` in a serialised fixture; neither ever contains a value."""
+    """``(leaks, suspicions)`` in a serialised fixture; neither ever contains a value.
+
+    What core's ``Scrub`` verifies (the demo host, the key and its basic-auth token) is not
+    checked again; ``key`` serves the API user tag and the key prefix.
+    """
     leaks: list[str] = []
     if subdomain != DEMO and subdomain in text.lower():
-        leaks.append(f"the value of {subdomain_env(DEMO)}")
-    token = base64.b64encode(f"{key}:".encode()).decode("ascii")
-    if key and (key in text or token in text):
-        leaks.append(f"the value of {api_key_env(DEMO)}")
+        leaks.append(f"the value of {TENANTS.var(DEMO, 'SUBDOMAIN')}")
     fixture = json.loads(text)
     texts = _searched_texts(text, fixture)
     if _holds_an_api_user_tag(texts, key):
         leaks.append(f"an API user tag other than {SCRUBBED_API_USER}")
     if _holds_the_bare_prefix(texts, key):
         leaks.append(
-            f"a possible key prefix: the first four characters of {api_key_env(DEMO)}, "
+            f"a possible key prefix: the first four characters of {TENANTS.var(DEMO, 'API_KEY')}, "
             "without the API: marker (four characters alone may be a coincidence; "
             "find them in the response before recording again)"
         )
@@ -397,26 +404,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     if refused:
         print(f"not recorded: {refused}")  # noqa: T201
         return 1
-    os.environ.pop(ORGS_ENV, None)  # the recorder sees the demo organisation and nothing else
+    os.environ.pop(TENANTS.list_var, None)  # the recorder sees the demo organisation only
     client = client_for(DEMO)
+    key_var = TENANTS.var(DEMO, "API_KEY")
     if args.wrong_key:
-        auth = BasicKeyAuth(api_key_env(DEMO), key=WRONG_KEY, source=SOURCE)
+        auth = BasicKeyAuth(key_var, key=WRONG_KEY, source=SOURCE)
         client = AsyncClient(client.config, auth=auth)
     path = fixture_path(FIXTURES, fixture_endpoint(args.endpoint), args.case)
-    fixture = fixture_from_response(exchange(client, "GET", f"/{args.endpoint}", args.params))
-    if fixture.response.body_base64:
-        print(  # noqa: T201
-            f"not recorded: the body of {args.endpoint} is not UTF-8 text; exports are out "
-            "of scope for fixtures, and such a body can be neither scrubbed nor reviewed"
-        )
+    key = os.environ.get(key_var, "")
+    response = exchange(client, "GET", f"/{args.endpoint}", args.params)
+    try:
+        fixture = scrub_request_url(fixture_from_response(response, scrub=scrub(key)))
+    except ValueError as refusal_by_core:  # names what and where, never a value
+        print(f"not written {path.relative_to(ROOT)}: {refusal_by_core}")  # noqa: T201
         return 1
-
-    subdomain = os.environ[subdomain_env(DEMO)].strip().lower()
-    host = re.compile(re.escape(f"{subdomain}.cashctrl.com"), re.IGNORECASE)
-    fixture = scrub_token_fields(scrub_api_users(scrub_emails(scrub_host(fixture, host))))
     text = to_json(fixture)
 
-    leaks, suspicions = check(text, subdomain, os.environ.get(api_key_env(DEMO), ""))
+    leaks, suspicions = check(text, TENANTS.field(DEMO, "SUBDOMAIN"), key)
     if leaks:
         print(f"not written {path.relative_to(ROOT)}: it would contain " + "; ".join(leaks))  # noqa: T201
         return 1
