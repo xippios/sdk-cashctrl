@@ -158,9 +158,101 @@ All notable changes to this project are documented here. The format follows
 - `meta.tenant` on every task's result: the organisation the data came from, by name
   (`ResultMeta.tenant`, ADR-0014); `org` stays in `meta.request` too. `None` for
   `list_organisations`.
+- Write tools, eight confirm-gated tasks in `tasks_write.py`, re-exported from
+  `xippios.cashctrl` and served by `xippios-cashctrl-mcp-write` only (never by the read
+  server, never as an HTTP route): `create_journal_entry`, `update_journal_entry`,
+  `delete_journal_entry` (`journal/create.json`, `update.json`, `delete.json`),
+  `create_person`, `update_person`, `delete_person` (`person/...`), `create_order` and
+  `delete_order` (`order/create.json`, `delete.json`). Decided by Johannes in the wave 2
+  interview on 2026-10-23, and in the follow-up on 2026-10-24:
+  - every create and update takes exactly the parameters its create table documents,
+    snake_cased, `custom` among them, and `confirm: bool = False` last;
+  - while `confirm` is false nothing is written: the result is a `WritePreview`
+    (`performed` false) with the exact form `payload` upstream would receive and, for
+    an update or a delete, the record as it is (`before`), for an update next to the
+    `changes`; a create's preview sends no request, an update's or a delete's one read.
+    With `confirm` the result is a `WriteResult` (`performed` true, `insert_id`,
+    `message`). Results are `Result[WritePreview[<record>] | WriteResult]`;
+    `meta.request` holds `org` and, for a performed write, the fields as sent;
+  - updates fail closed: they read the record, apply the arguments given and send every
+    parameter `update.json` documents, derived from the record, and refuse with
+    `InvalidRequestError` before any write when a mandatory parameter cannot be derived
+    or a stored list of a shape never observed (attachments, allocations, bank accounts,
+    children, service periods, insurance contracts, certificate values) would be lost;
+  - `custom` maps `customField<ID>` names to text, sent as upstream's
+    `<values>...</values>` XML with every value escaped; an update keeps the stored
+    values it is not given;
+  - deletes take one id and preview the record they would delete;
+  - the gate is `confirm is True`: from Python anything else (`"false"`, `1`, `[0]`)
+    previews; over MCP the schema turns `"true"`, `"yes"`, `"1"`, `1` into true and
+    `"false"`, `"no"`, `"0"`, `0` into false and refuses anything else;
+  - `update_journal_entry` and `update_person` take `clear`, the parameters to send
+    empty, checked against the documented update parameters (an unknown name, or one
+    both given and cleared, is refused before any request) and shown in `changes`,
+    where a list given empty shows as `[]`;
+  - journal `associate_id` (entry and lines) is a person's id; a name, which upstream
+    would turn into a new person, is refused;
+  - `update_journal_entry` refuses an entry an order or a salary run booked
+    (`orderId`, `orderBookEntryId` or `salaryBookEntryId` set);
+  - `update_person` follows what a live read showed on 2026-10-24: every stored
+    documented field comes back under its own name, empty ones left out; an
+    insurance's `insuranceNr` and `insuranceMemberNr` and an employee's `userId`, never
+    seen come back, must be given or cleared; a stored address `titleId` or contact
+    `purpose`, which the tables do not document, refuses the update unless the list is
+    given or cleared;
+  - `update_order` is left for a later wave; a delete of an unknown id stays a
+    `RequestRejected`; custom field names stay `customField<ID>`.
+- `list_order_categories` (`order/category/list.json`, with `type` and
+  `fiscal_period_id`), a read tool `cashctrl_list_order_categories` and route
+  `GET /cashctrl/list_order_categories`: the categories and their statuses, the ids
+  `create_order` takes. Models `OrderCategory`, `OrderCategoryStatus`,
+  `OrderBookTemplate`, typed from the category tables and the recorded answer.
+- `api/_form.py`: the one form encoding (booleans `true`/`false`, `Decimal` as plain
+  digits, dates `YYYY-MM-DD`, lists as compact JSON under upstream's keys, `None` and
+  empty lists left out), the custom field XML, and `post_form`, which posts through
+  core's `data=` with `charset=UTF-8` declared, as the seeder did. Write wrappers
+  `journal_create`, `journal_update`, `journal_delete`, `person_create`,
+  `person_update`, `person_delete`, `order_create`, `order_delete` with the field
+  builders `journal_fields`, `person_fields`, `order_fields` and `delete_fields`, and
+  `order_category_list`.
+- Models for the write payloads, snake_case with upstream's camelCase accepted and
+  written to the form (`JournalItemInput`, `OrderItemInput`, `PersonAddressInput`,
+  `PersonContactInput`, `AllocationInput`, `AttachmentInput`, `BankAccountInput`,
+  `ChildInput`, `InsuranceContractInput`, `ServicePeriodInput`; unknown keys refused),
+  the documented value sets as `Literal` types (`NotifyType`, `Recurrence`,
+  `Language`, `Color`, `AddressType`, `Canton`, `ContactType`, `BankAccountType`,
+  `OrderItemType`), `WriteAnswer` for upstream's `{success, insertId, message}`, and
+  `WritePreview` and `WriteResult`. `PersonDetail.certificate_values`.
+- The recorder records writes against the demo organisation: `--method POST` for the
+  eight write paths the write tools call only (`journal/create|update|delete.json`,
+  `person/create|update|delete.json`, `order/create|delete.json`; every other POST and
+  method refused before a request), and a `create.json` only when one of its values
+  carries `xippios-live`; the `key=value` pairs are sent as the form body in their
+  order; it then says that the organisation changed and asks for the matching delete. Its rewrite and final check cover the request body as well (raw, each form
+  field decoded, each JSON value's strings).
+- Thirteen fixtures recorded on 2026-10-24 from the synthetic demo organisation, every
+  record marked `xippios-live` and deleted again: the sales order categories; a journal
+  entry created (1020/3200, 100.00 with `UN1`), a create refused without `debitId`
+  (the first recorded field-error list), the entry read back, updated (title changed,
+  the whole record sent), deleted, and deleted again; a person created (an address in
+  Zürich, one contact), read back, updated and deleted; a sales invoice with one item
+  created and deleted.
+- Live tests for the write tools: one per resource that creates a marked record,
+  updates it (journal, person; previewed first, read back after, every other derived
+  field unchanged) and deletes it with the tools, after sweeping marked leftovers (by
+  marked text or `nr`); and one for `list_order_categories`.
 
 ### Changed
 
+- The recorder's e-mail scrub no longer takes percent-escapes into an address's local
+  part: in the form body `contacts=%5B%7B%22address%22%3A%22user%40example.com...` it
+  read `%5B%7B%22address%22%3A%22user` as the local part and wrote a body other than
+  the one sent; now only the address is rewritten (found recording
+  `person_create/ok`, whose first recording was replaced).
+- `classify` documents the refusal shapes the writes showed on 2026-10-24: the
+  documented `errors` list with `"message": null`, and a single `message` (not
+  `errorMessage`) for a delete of an id that no longer exists; both stay
+  `RequestRejected`.
 - `xippios-core` is pinned to sdk-core commit `863a443` (`core_git_ref` in
   `.copier-answers.yml`, `[tool.uv.sources]` in `pyproject.toml`), the unreleased merge
   of sdk-core#17, for the tenant registry, the tenant lock and the option hooks

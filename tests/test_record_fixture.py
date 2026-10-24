@@ -1,6 +1,7 @@
 """The fixture recorder records the demo organisation only and never writes its host or key.
 
-It also holds to its policies: GET only, .json only, no e-mail address. The demo
+It also holds to its policies: GET, and POST for the write tools' create, update and
+delete operations only; .json only; no e-mail address, in the request body neither. The demo
 organisation is synthetic, so every module and every amount may be recorded. The host,
 the key and binary bodies are core's ``Scrub``; the rest is the recorder's own.
 """
@@ -11,6 +12,7 @@ import json
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 import pytest
@@ -254,6 +256,7 @@ def test_arguments_are_checked() -> None:
     assert args.endpoint == "account/read.json"
     assert args.params == {"id": "1", "q": "a=b"}
     assert args.method == "GET"
+    assert recorder.parse_args(["journal/create.json", "c", "--method", "POST"]).method == "POST"
     with pytest.raises(SystemExit):  # lifted with the amount refusal: the demo is synthetic
         recorder.parse_args(["account/list.json", "case", "--allow-amounts"])
 
@@ -337,8 +340,8 @@ def test_the_check_names_an_address_but_never_shows_it(recorder: ModuleType) -> 
         assert leaks == ["an e-mail address other than user@example.com"]
 
 
-@pytest.mark.parametrize("method", ["POST", "post", "PUT", "DELETE"])
-def test_only_get_is_recorded(
+@pytest.mark.parametrize("method", ["PUT", "DELETE", "patch"])
+def test_only_get_and_post_are_recorded(
     recorder: ModuleType,
     tmp_path: Path,
     respx_mock: respx.MockRouter,
@@ -349,8 +352,198 @@ def test_only_get_is_recorded(
     assert not respx_mock.calls, "refused before any request"
     assert not (tmp_path / "tests" / "fixtures").exists()
     out = capsys.readouterr().out
-    assert out.startswith(f"not recorded: only GET is recorded, not {method.upper()}")
-    assert "the write tools will add writes deliberately" in out
+    assert out.startswith(
+        f"not recorded: only GET, and POST for the write tools' operations, is recorded, "
+        f"not {method.upper()}"
+    )
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "journal/list.json",
+        "journal/read.json",
+        "journal/update_attachments.json",
+        "journal/update_recurrence.json",
+        "order/update_status.json",
+        "order/continue_as.json",
+        "fiscalperiod/switch.json",
+        "person/categorize.json",
+        "journal/create",
+        "order/document/mail.json",
+        "order/update.json",
+        "account/create.json",
+        "fiscalperiod/delete.json",
+        "person/category/create.json",
+        "order/category/delete.json",
+    ],
+)
+def test_a_post_is_recorded_for_the_eight_write_paths_only(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+) -> None:
+    assert recorder.main([endpoint, "write", "--method", "POST", "id=1"]) == 1
+    assert not respx_mock.calls, "refused before any request"
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    out = capsys.readouterr().out
+    assert out.startswith("not recorded: a POST is recorded only for one of the eight write paths")
+    assert out.rstrip().endswith(f"not {endpoint}")
+
+
+EIGHT = [
+    "journal/create.json",
+    "journal/update.json",
+    "journal/delete.json",
+    "person/create.json",
+    "person/update.json",
+    "person/delete.json",
+    "order/create.json",
+    "order/delete.json",
+]
+
+
+@pytest.mark.parametrize("endpoint", EIGHT)
+def test_the_eight_write_paths_may_be_posted(recorder: ModuleType, endpoint: str) -> None:
+    assert frozenset(EIGHT) == recorder.WRITE_PATHS
+    assert recorder.refusal("POST", endpoint) is None
+    assert recorder.refusal("post", endpoint) is None
+
+
+@pytest.mark.parametrize("endpoint", ["journal/create.json", "person/create.json"])
+def test_a_create_without_the_marker_is_refused(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+) -> None:
+    assert recorder.main([endpoint, "ok", "--method", "POST", "title=Barverkauf"]) == 1
+    assert not respx_mock.calls, "refused before any request"
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    assert capsys.readouterr().out.startswith(
+        "not recorded: a create.json is recorded only for a record marked xippios-live"
+    )
+    assert recorder.unmarked("POST", endpoint, {"company": "xippios-live AG"}) is None
+    assert recorder.unmarked("POST", "journal/update.json", {"id": "51"}) is None
+
+
+def test_a_write_is_recorded_with_its_form_body(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The pairs go as a form body, in their order, as the write tools send theirs."""
+    route = respx_mock.post(f"https://{REAL}.cashctrl.com/api/v1/journal/create.json")
+    answer = {"success": True, "insertId": 52, "message": "Buchung gespeichert"}
+    route.mock(return_value=httpx.Response(200, json=answer))
+    pairs = ["title=xippios-live fixture", "amount=100.00", "debitId=3", "notes=a&b=c"]
+    assert recorder.main(["journal/create.json", "ok", "--method", "POST", *pairs]) == 0
+    sent = route.calls.last.request
+    assert sent.url.query == b"", "no query: the pairs are the form body"
+    assert sent.headers["Content-Type"] == "application/x-www-form-urlencoded; charset=UTF-8"
+    assert sent.content == b"title=xippios-live+fixture&amount=100.00&debitId=3&notes=a%26b%3Dc"
+    written = tmp_path / "tests" / "fixtures" / "journal_create" / "ok.json"
+    fixture = json.loads(written.read_text())
+    assert fixture["request"]["method"] == "POST"
+    assert fixture["request"]["url"] == "https://demo.cashctrl.com/api/v1/journal/create.json"
+    assert fixture["request"]["body"] == sent.content.decode()
+    assert fixture["request"]["content_type"] == (
+        "application/x-www-form-urlencoded; charset=UTF-8"
+    )
+    out = capsys.readouterr().out
+    assert "the demo organisation changed: POST journal/create.json was sent;" in out
+    assert "upstream answered insertId 52;" in out
+    assert "record or run the matching delete.json" in out
+    assert "Buchung" not in out, "nothing of the answer but the insertId is printed"
+
+
+def test_a_write_without_insert_id_still_says_the_organisation_changed(
+    recorder: ModuleType, respx_mock: respx.MockRouter, capsys: pytest.CaptureFixture[str]
+) -> None:
+    route = respx_mock.post(f"https://{REAL}.cashctrl.com/api/v1/journal/delete.json")
+    route.mock(return_value=httpx.Response(200, json={"success": True, "message": "ok"}))
+    assert recorder.main(["journal/delete.json", "ok", "--method", "POST", "ids=52"]) == 0
+    assert route.calls.last.request.content == b"ids=52"
+    out = capsys.readouterr().out
+    assert "the demo organisation changed: POST journal/delete.json was sent; record" in out
+    assert "insertId" not in out
+
+
+def test_the_request_body_is_scrubbed_like_the_rest(
+    recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter
+) -> None:
+    """An e-mail address, the demo host and the key in a form body never reach the file."""
+    route = respx_mock.post(f"https://{REAL}.cashctrl.com/api/v1/person/create.json")
+    route.mock(return_value=httpx.Response(200, json={"success": True, "insertId": 13}))
+    contacts = '[{"type":"EMAIL_WORK","address":"jane@corp.example"}]'
+    pairs = [
+        "company=xippios-live Fixture GmbH",
+        f"contacts={contacts}",
+        f"notes=see https://{REAL}.cashctrl.com and {KEY}",
+    ]
+    assert recorder.main(["person/create.json", "ok", "--method", "POST", *pairs]) == 0
+    text = (tmp_path / "tests" / "fixtures" / "person_create" / "ok.json").read_text()
+    for gone in ("jane", "corp.example", REAL, KEY):
+        assert gone not in text
+    body = json.loads(text)["request"]["body"]
+    assert "user%40example.com" in body
+    assert "demo.cashctrl.com" in body
+    assert "REDACTED" in body
+
+
+def test_a_form_body_keeps_its_percent_escapes_around_an_address(recorder: ModuleType) -> None:
+    """The local part never takes in an escape: ``%22user%40...`` keeps its ``%22``.
+
+    Found when ``person_create/ok`` was first recorded on 2026-10-24: the scrub read
+    ``%5B%7B%22address%22%3A%22user`` as the local part and wrote ``contacts=user%40...``,
+    a body other than the one sent. Only the address changes now.
+    """
+    contacts = '[{"address":"user@example.com","type":"EMAIL_WORK"}]'
+    other = '[{"address":"jane.doe@corp.example","type":"EMAIL_WORK"}]'
+    body = urlencode({"contacts": contacts, "x": other, "q": "jane@corp.example"})
+    expected = urlencode({"contacts": contacts, "x": contacts, "q": "user@example.com"})
+    assert recorder.scrub_text(body) == expected
+
+
+@pytest.mark.parametrize(
+    ("body", "leak"),
+    [
+        ("title=a%40b.example", "an e-mail address other than user@example.com"),
+        (
+            "items=%5B%7B%22description%22%3A%22jo%40corp.example%22%7D%5D",
+            "an e-mail address other than user@example.com",
+        ),
+        ("createdBy=API%3AZZZZ", "an API user tag other than API:REDACTED"),
+        (f"notes={REAL}", f"the value of {TENANTS.var(DEMO, 'SUBDOMAIN')}"),
+        ("token=abc", "a value other than null or REDACTED under token"),
+    ],
+    ids=["address", "address-in-json", "api-tag", "subdomain", "token-field"],
+)
+def test_the_final_check_covers_the_request_body(
+    recorder: ModuleType, body: str, leak: str
+) -> None:
+    text = json.dumps(
+        {
+            "request": {"url": "https://demo.cashctrl.com/api/v1/x/create.json", "body": body},
+            "response": {"headers": [], "body": "{}"},
+        }
+    )
+    leaks, _ = recorder.check(text, REAL, KEY)
+    assert leak in leaks
+
+
+def test_a_key_like_word_in_the_request_body_goes_to_review(recorder: ModuleType) -> None:
+    text = json.dumps(
+        {
+            "request": {"url": "https://demo.cashctrl.com/", "body": "notes=password+reset"},
+            "response": {"headers": [], "body": "{}"},
+        }
+    )
+    assert recorder.check(text, REAL, KEY) == ([], ["request body mentions 'password'"])
 
 
 def test_get_may_be_spelt_in_lower_case(recorder: ModuleType, respx_mock: respx.MockRouter) -> None:
@@ -778,6 +971,6 @@ def test_a_settled_token_like_field_needs_no_review(recorder: ModuleType) -> Non
 def test_every_committed_fixture_passes_the_final_check(recorder: ModuleType) -> None:
     """The recorded fixtures hold no tag, address or credential the check would refuse."""
     fixtures = sorted((Path(__file__).parent / "fixtures").glob("*/*.json"))
-    assert len(fixtures) == 23
+    assert len(fixtures) == 36
     for path in fixtures:
         assert recorder.check(path.read_text(encoding="utf-8"), "demo", "") == ([], []), path.name

@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-10-24T08:50:39.379781Z",
+  "request": {
+    "body": "ids=14",
+    "body_base64": false,
+    "content_type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "method": "POST",
+    "url": "https://demo.cashctrl.com/api/v1/person/delete.json"
+  },
+  "response": {
+    "body": "{\"success\":true,\"message\":\"1 person deleted\"}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Sat, 24 Oct 2026 08:50:37 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

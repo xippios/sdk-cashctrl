@@ -12,8 +12,12 @@ file is written. The final check refuses any other tag in any case and position,
 key's first four characters on their own as a possible key prefix, and any value but
 `null` or `REDACTED` under a token-like name; a compound name such as `publicHash` is
 written for review.
-Bodies that are not UTF-8 text, methods other than GET and endpoints other than `.json`
-are refused. Still grep before committing:
+Bodies that are not UTF-8 text, methods other than GET and POST, a POST to anything but
+the eight write paths the write tools call, a create without `xippios-live`, and
+endpoints other than `.json` are refused. A write's fixture holds the request body too (core records it), scrubbed and
+checked like the rest; the write fixtures of 2026-10-24 record a journal entry, a person
+and an order marked `xippios-live`, created, read, updated and deleted again in that
+order. Still grep before committing:
 
 ```bash
 grep -rniE 'api[_-]?key|token|secret' tests/fixtures

@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-10-24T08:50:48.048328Z",
+  "request": {
+    "body": "associateId=7&categoryId=4&date=2026-10-24&description=xippios-live+fixture&items=%5B%7B%22accountId%22%3A42%2C%22name%22%3A%22xippios-live+item%22%2C%22unitPrice%22%3A100%2C%22quantity%22%3A1%2C%22taxId%22%3A9%7D%5D&language=DE&nr=xippios-live",
+    "body_base64": false,
+    "content_type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "method": "POST",
+    "url": "https://demo.cashctrl.com/api/v1/order/create.json"
+  },
+  "response": {
+    "body": "{\"success\":true,\"message\":\"Rechnung saved\",\"insertId\":7}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Sat, 24 Oct 2026 08:50:45 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

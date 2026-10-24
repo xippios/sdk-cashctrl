@@ -50,8 +50,8 @@ register. `tests/test_seed_demo.py` checks the rule against the data and this do
    a role that may read locations, fiscal periods, accounts and their balances,
    currencies, tax codes, person and order categories, persons, the journal and orders,
    and may create currencies, fiscal periods, persons, journal entries and orders. After
-   seeding, the role may be reduced to read-only; the write tools' live tests will need
-   write rights again later.
+   seeding, the role may be reduced to read-only; the write tools' live tests and write
+   fixtures need it to create, update and delete persons, journal entries and orders.
 5. Put the two variables into `~/github/sdk/.envrc` and run `direnv allow`:
    `CASHCTRL_DEMO_SUBDOMAIN` (the one label before `.cashctrl.com`) and
    `CASHCTRL_DEMO_API_KEY`. The subdomain is treated like the key: never in a file of
@@ -406,6 +406,11 @@ the first write:
 - Nothing else is created or changed: no accounts, tax codes, locations, settings,
   salary, files, inventory or custom fields.
 
+The write tools' live tests and write fixtures create records marked `xippios-live`
+(title, company or description, and `nr`), dated 2026-10-24, and delete them again in
+the same run; each live test first deletes marked leftovers of an earlier run. No seeded
+record is changed.
+
 ## Observed write semantics (filled by the first run)
 
 The first complete `--apply --yes` run, on 2026-10-23 against the new demo organisation,
@@ -461,5 +466,22 @@ printed the following; the balances and totals are quoted as printed.
   seeded persons and CashCtrl's two system insurance persons); `journal/list.json` 12 for
   2025 and 38 for 2026; `order/list.json` 4 `SALES` and 2 `PURCHASE` for 2026;
   `currency/list.json` 3; `fiscalperiod/list.json` 2.
+- Person reads (verified on 2026-10-24, four requests: a refused create, then a person
+  marked `xippios-live`
+  created with every documented scalar field of `person/create.json` set but `userId`
+  (it links a CashCtrl login) and `sequenceNumberId` (it advances a sequence), one
+  address with a `titleId`, one contact with a `purpose`; read back; deleted). A first
+  attempt with all five roles was refused, nothing created: "Invalid role combination."
+  and "At least one insurance contract must be set."; the second set customer, vendor
+  and employee. `person/read.json` returned every stored documented field under its own
+  name (`dateBirth` as `1990-05-17 00:00:00.0`) and no key with a `null` value: it leaves
+  empty fields out. `insuranceNr` and `insuranceMemberNr` did not come back (the person
+  was no insurance, which the table says they need); `userId` was not tested. The
+  address came back with its `id` and the `titleId` sent (with `titleName`), a key the
+  addresses table does not document; the contact came back with its `id` and
+  `purpose` `null`, so the `purpose` sent was not stored. `update_person` follows this:
+  it takes each field from the read by name, needs an insurance's numbers and an
+  employee's `userId` given or cleared, and refuses a stored address `titleId` or
+  contact `purpose`.
 - `x-cashctrl-requests-left`: the seeder does not record response headers. The read-only
   freshness check before the run saw the header on every answer (8 of 8, name only).

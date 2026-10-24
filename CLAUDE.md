@@ -78,9 +78,11 @@ organisation is synthetic: invented books seeded by `scripts/seed_demo.py` and d
 in `docs/demo-org.md`, never a copy of real books. So the recorder records any module and
 any amount; it still scrubs e-mail addresses to `user@example.com`, API user tags to
 `API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) to
-`REDACTED`, and refuses any method but GET and any endpoint but `.json`. The demo
-subdomain is treated like a key: never in a file, a commit, a log line or a report. The
-repository is public.
+`REDACTED`, in the request body as well, and refuses any method but GET and POST, a POST
+to anything but the eight write paths, a create without the marker `xippios-live`, and
+any endpoint but `.json`. Writes against demo create a record marked `xippios-live`, update it and delete
+it again, nothing else (see Write tools). The demo subdomain is treated like a key: never
+in a file, a commit, a log line or a report. The repository is public.
 
 ## Rate limit (ADR-0010)
 
@@ -131,9 +133,9 @@ src/xippios/cashctrl/
   _cli.py          --org for both MCP servers: core's TenantLock through main's option hooks
   errors.py        RequestRejected (HTTP 200 with success:false) and FieldError
   models.py        pydantic models mirroring upstream payloads (UpstreamModel)
-  api/             endpoint wrappers, one module per upstream operation
+  api/             endpoint wrappers, one module per upstream operation; _form.py encodes and posts writes
   tasks.py         task functions and list_organisations; __all__ is what the adapters register
-  tasks_write.py   confirm-gated write tasks for the separate write server
+  tasks_write.py   confirm-gated write tasks for the separate write server (Write tools below)
   mcp_write.py     xippios-cashctrl-mcp-write entry point
   mcp.py           xippios-cashctrl-mcp entry point
   http.py          FastAPI router
@@ -149,6 +151,7 @@ tests/
   conftest.py      core's plugin; demo-only environment, placeholder subdomain, clients reset per test, demo_org
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
   test_tasks.py    structural checks on every task plus per-task replay tests
+  test_tasks_write.py  the write tasks: previews send nothing, writes replay, updates fail closed
   test_adapters.py the adapters expose exactly tasks.__all__
   test_layout.py   namespace levels stay empty; py.typed ships
   test_registry.py organisation declaration, lookup and per-organisation clients
@@ -157,7 +160,7 @@ tests/
   test_record_fixture.py  the recorder never writes the demo host or key
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
   test_refresh_reference.py  nothing is packaged; the refresh script is a stub
-  test_live.py     @pytest.mark.live smoke tests, one per task, demo_org only
+  test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
 docs/upstream/     documentation snapshot and FETCHED.md
 docs/demo-org.md   the synthetic demo organisation: why, how to create and seed it, its books
 .claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep
@@ -210,6 +213,83 @@ HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFound
 for an unknown id on a `read.json` read by id; a 404 means an unknown endpoint and
 raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
 
+## Write tools
+
+`tasks_write.py` holds the write tasks (`create_*`, `update_*`, `delete_*` for journal
+entries, persons and orders), served by `xippios-cashctrl-mcp-write` only: never by the
+read server, never on the HTTP router (`tests/test_adapters.py` runs core's
+`assert_write_tools`). The decisions behind them were taken by Johannes in the wave 2
+interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more:
+
+1. **Layer 1.** `api/<module>_create.py` (and `_update`, `_delete`): a `<module>_fields`
+   builder takes every parameter the create table documents, snake_cased, and returns
+   the form fields under upstream's names through `api/_form.py`'s `form_fields`
+   (booleans `true`/`false`, `Decimal` as plain digits, dates `YYYY-MM-DD`, lists as
+   compact JSON with upstream's keys, `None` and empty lists left out); the wrapper
+   takes `org` and those fields and posts them with `post_form` (core's `data=`, with
+   `charset=UTF-8` declared), returning a `WriteAnswer`. A `delete.json` takes
+   `delete_fields(ids)`. JSON array items are `*Input` models in `models.py`
+   (`validation_alias=AliasChoices(snake, camel)`, `serialization_alias=camel`,
+   unknown keys refused).
+2. **Layer 2.** An async task, `org` first and `confirm: bool = False` last (core
+   refuses to register a write task without it), the create table's parameters as
+   keyword arguments, `custom: Mapping[str, str] | None` among them. The gate is
+   `if confirm is not True:`, never truthiness: from Python only `True` writes (over
+   MCP the schema turns `"true"`, `"yes"`, `"1"`, `1` into `True` and refuses what is
+   no boolean). Ids are ids: journal `associate_id` is an `int`, since upstream would
+   create a person from a name. It returns
+   `Result[WritePreview[<record>] | WriteResult]`: while `confirm` is false a
+   `WritePreview` (`performed=False`, `endpoint`, `payload` = the exact fields,
+   `before` = the record for an update or a delete, `changes` for an update) with
+   `meta.request` = `{"org": org}`; with `confirm` a `WriteResult` (`performed=True`,
+   `insert_id`, `message`) with `meta.request` = `org` plus the fields as sent. The
+   payload is never in a result twice. A create's preview sends nothing; an update's
+   or a delete's sends one read, never a write.
+3. **Updates read, merge, send.** Upstream empties every parameter an update omits.
+   `update_*` reads the record, maps every parameter `update.json` documents from it
+   (`_journal_values`, `_person_values`), applies the arguments given (not `None`), and
+   sends all of them. A mandatory parameter neither the record nor the call gives
+   raises `InvalidRequestError` before any write; so does a stored list whose shape was
+   never observed (attachments, allocations, bank accounts, children, service periods,
+   insurance contracts, certificate values), a stored key the input table does not
+   document (an address's `titleId`, a contact's `purpose`), and a field whose absence
+   from the read is unknown rather than empty (an insurance's `insuranceNr` and
+   `insuranceMemberNr`, an employee's `userId`), unless the call gives or clears it.
+   `person/read.json` returns every stored documented field and leaves empty ones out
+   (verified live on 2026-10-24, `docs/demo-org.md`). `clear: list[str] | None` names
+   parameters to send empty, checked against a `<RESOURCE>_UPDATE` table of the
+   documented update parameters; one both given and cleared is refused. A journal entry
+   an order or a salary run booked (`orderId`, `orderBookEntryId`,
+   `salaryBookEntryId`) is refused. A confirmed call reads again and recomputes, so its
+   payload can differ from the preview's if the record changed. Never send a partial
+   record.
+4. **Custom fields** are `customField<ID>` to text (`api/_form.py`'s `CUSTOM_FIELD`),
+   rendered as `<values><customField1>...</customField1></values>`, values escaped; an
+   update merges the given values into the stored XML (`merge_custom`) and refuses XML
+   it cannot carry over value for value.
+5. **Facts for docstrings.** A journal `amount` with a `tax_id` is gross, and order
+   items' `unitPrice` was read as gross (observed, `docs/demo-org.md`); previews are
+   free; `confirm=true` writes; ids come from `list_accounts`, `list_tax_codes`,
+   `list_persons`, `list_order_categories`. Upstream refuses with HTTP 200 and an
+   `errors` list (`RequestRejected` naming the fields); a delete of an id that no longer
+   exists answers `success: false` with `message` (`RequestRejected`, not
+   `NotFoundError`). `person.nr` is unique: a second person with the same `nr` is
+   refused.
+6. **Tests.** Record the create, the read the update starts from, the update, the
+   delete, in that order, so every record created is deleted again; compute the
+   payload offline through the task's preview and pass exactly those pairs to the
+   recorder. In `tests/test_tasks_write.py`: the preview sends no request and its
+   `payload` equals the recorded request body; `confirm=True` replays it; an update's
+   refusal is tested on a recorded read changed in memory (say so). In
+   `tests/test_live.py`: one test per resource calls each write tool once with
+   `confirm=True`, every record marked `xippios-live` (title, company or description,
+   and `nr` where it has one, so no sequence number advances), dated 2026-10-24; it
+   first sweeps leftovers (list with `query=xippios-live`, delete each whose marked
+   field holds the marker), deletes what it created by id with the delete tool, and a
+   `finally` deletes it through the wrapper if an assertion failed first. An update is
+   previewed, confirmed and read back: the changed field holds the new value and every
+   other derived field is unchanged.
+
 ## How to record a fixture
 
 Run `/record-fixture <endpoint> <case> <parameters>`. It runs
@@ -238,6 +318,20 @@ verify passes, before a source's final check could run. A compound name such as
 addresses, API user tags and token-like fields before committing. Fixtures are never
 typed in by hand.
 
+Writes: `--method POST` is accepted for the eight write paths the write tools call only
+(`journal/create|update|delete.json`, `person/create|update|delete.json`,
+`order/create|delete.json`, `WRITE_PATHS`), every other POST and every other method
+refused before a request, and a `create.json` only when one of its values carries
+`xippios-live`; the `key=value` pairs go as the form body, in their order, with the
+write tools' `Content-Type` (`application/x-www-form-urlencoded; charset=UTF-8`). Core
+records the request body, and the recorder's rewrite and final check cover it (the raw
+text, each form field decoded, each JSON value's strings): host, key, e-mail addresses,
+API user tags, token-like fields. After the request the recorder says that the demo
+organisation changed, names the `insertId` it answered, and asks for the matching
+delete, recorded or run. Record only a record marked `xippios-live`, its update and its
+delete; confirm afterwards with one list per resource (`query=xippios-live`, counts
+only) that nothing is left.
+
 ## Commands
 
 ```bash
@@ -248,6 +342,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run mypy
 uv run pre-commit run --all-files
 uv run xippios-cashctrl-mcp --org demo   # stdio, locked to demo; --http for streamable HTTP
+uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loopback only
 ```
 
 ## Workflow rules

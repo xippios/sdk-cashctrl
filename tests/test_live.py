@@ -1,21 +1,57 @@
 """Live smoke tests: skipped unless XIPPIOS_LIVE_TESTS=1 (conventions §10).
 
-Every task function gets one live smoke test here, next to the reachability check. Every
+Every task function gets a live smoke test here, next to the reachability check. Every
 live test takes the ``demo_org`` fixture: live runs reach the demo organisation only, whose
-books are synthetic (``scripts/seed_demo.py``). Each test makes one read-only call, but
-the reads, which first look an id up in a list (account 1020 by number, the first journal
+books are synthetic (``scripts/seed_demo.py``). Each read test makes one call, but the
+reads, which first look an id up in a list (account 1020 by number, the first journal
 entry, person and sales order). ``fiscal_periods`` looks the fiscal periods up once for
 the module: the API user's current period is 2025, and the orders are in 2026.
+
+The write tools are tested live per resource, one test that calls each of its write
+tools once with ``confirm=True`` (create, update, delete), so that every record a test
+creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10-23):
+
+- every record carries the marker ``xippios-live`` (``MARK``) in its title, company or
+  description, and ``nr`` where it has one, so that no sequence number advances;
+- before it writes, a test sweeps the leftovers of an earlier run: it lists its
+  resource with ``query=xippios-live`` (the journal and the orders in 2026, where the
+  tests write) and deletes every record whose marked field holds the marker or whose
+  ``nr`` is the marker;
+- an update is previewed first (its ``before`` is the record as stored), confirmed,
+  and the record read back: the changed field holds the new value and every other
+  field the update derives is unchanged, the end-to-end proof that an update sends the
+  whole record;
+- it deletes what it created by id with the delete tool, and a ``finally`` deletes it
+  through the endpoint wrapper should an assertion fail first.
+
+The calls of one run: 17 for the reads, 4 lookups (accounts, tax codes, customers, the
+sales categories), 8 for the journal (sweep, create, the sweep's query seeing the new
+entry, the update's preview, the update as read and write, the read back, delete), 7
+for a person (the same without the query) and 3 for an order; 39 in all, at least one
+more per leftover swept.
 """
 
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
-from xippios.cashctrl import tasks
+from xippios.cashctrl import api, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
-from xippios.cashctrl.models import Filter
+from xippios.cashctrl.models import (
+    Filter,
+    JournalEntryDetail,
+    OrderCategory,
+    PersonDetail,
+    WritePreview,
+    WriteResult,
+)
+
+MARK = "xippios-live"
+"""The marker every record a live test creates carries, and the query its sweep lists."""
+DAY = date(2026, 10, 24)
+"""The date of every record a live test creates: in 2026, a fiscal period the seed holds."""
 
 pytestmark = [pytest.mark.live, pytest.mark.anyio]
 
@@ -140,3 +176,197 @@ async def test_get_order(demo_org: str, fiscal_periods: dict[str, int]) -> None:
         listed.total,
     )
     assert result.data.items
+
+
+@pytest.fixture(scope="module")
+def write_ids(fiscal_periods: dict[str, int]) -> dict[str, int]:
+    """The ids the write tests book with, looked up once: never constants.
+
+    Accounts 1020 and 3200 by number, the tax code ``UN1`` by code, the first customer
+    that no live test created (a leftover of an interrupted run could be one), and the
+    2026 fiscal period.
+    """
+    names = TENANTS.names()
+    assert names == (DEMO,), "live tests run against the demo organisation and nothing else"
+    numbers = Filter(comparison="eq", field="number", value=["1020", "3200"])
+    accounts = {a.number: a.id for a in tasks.list_accounts(DEMO, filter=[numbers]).data}
+    taxes = {tax.code: tax.id for tax in tasks.list_tax_codes(DEMO).data}
+    customers = tasks.list_persons(DEMO, only_customers=True, limit=20).data
+    customer = next(person for person in customers if not marked(person.company, person.nr))
+    return {
+        "bank": accounts["1020"],
+        "revenue": accounts["3200"],
+        "un1": taxes["UN1"],
+        "customer": customer.id,
+        "fp2026": fiscal_periods["2026"],
+    }
+
+
+@pytest.fixture(scope="module")
+def sales_categories() -> list[OrderCategory]:
+    """``list_order_categories`` called once, live: its smoke test and the order test use it."""
+    names = TENANTS.names()
+    assert names == (DEMO,), "live tests run against the demo organisation and nothing else"
+    result = tasks.list_order_categories(DEMO)
+    assert result.meta.tenant == DEMO
+    assert result.meta.total == len(result.data)
+    return result.data
+
+
+def test_list_order_categories(demo_org: str, sales_categories: list[OrderCategory]) -> None:
+    assert sales_categories
+    assert {category.type for category in sales_categories} == {"SALES"}
+    assert all(category.status for category in sales_categories if not category.is_inactive)
+
+
+def marked(text: str | None, nr: str | None = None) -> bool:
+    """Whether a record carries the marker in its marked field or as its ``nr``."""
+    return MARK in (text or "") or nr == MARK
+
+
+def derived_except(values: dict[str, Any], changed: str) -> dict[str, Any]:
+    """The fields an update derives from the record, but the one the test changed."""
+    return {name: value for name, value in values.items() if name != changed}
+
+
+def performed(result: Any) -> WriteResult:
+    """The ``WriteResult`` of a confirmed write, for the organisation the test named."""
+    assert result.meta.tenant == DEMO
+    assert isinstance(result.data, WriteResult)
+    assert result.data.performed is True
+    return result.data
+
+
+async def test_journal_entry_create_update_delete(demo_org: str, write_ids: dict[str, int]) -> None:
+    period = write_ids["fp2026"]
+    leftovers = await tasks.list_journal_entries_async(
+        demo_org, query=MARK, fiscal_period_id=period, limit=50
+    )
+    for entry in leftovers.data:
+        if marked(entry.title):
+            performed(
+                await tasks_write.delete_journal_entry_async(demo_org, entry.id, confirm=True)
+            )
+    arguments: dict[str, Any] = {
+        "date_added": DAY,
+        "amount": Decimal("100.00"),
+        "debit_id": write_ids["bank"],
+        "credit_id": write_ids["revenue"],
+        "tax_id": write_ids["un1"],
+        "title": f"{MARK} test",
+    }
+    preview = await tasks_write.create_journal_entry_async(demo_org, **arguments)
+    assert isinstance(preview.data, WritePreview)
+    created: int | None = None
+    try:
+        result = await tasks_write.create_journal_entry_async(demo_org, **arguments, confirm=True)
+        created = performed(result).insert_id
+        assert isinstance(created, int)
+        assert result.meta.request == {"org": demo_org, **preview.data.payload}
+        found = await tasks.list_journal_entries_async(
+            demo_org, query=MARK, fiscal_period_id=period, limit=50
+        )
+        assert created in {entry.id for entry in found.data}, "the sweep's query finds it"
+        title = f"{MARK} test updated"
+        planned = await tasks_write.update_journal_entry_async(demo_org, created, title=title)
+        assert isinstance(planned.data, WritePreview)
+        assert isinstance(planned.data.before, JournalEntryDetail)
+        before, _ = tasks_write._journal_values(planned.data.before)
+        updated = await tasks_write.update_journal_entry_async(
+            demo_org, created, title=title, confirm=True
+        )
+        assert performed(updated).insert_id == created
+        assert updated.meta.request["debitId"] == str(write_ids["bank"]), "the whole record"
+        read_back = await tasks.get_journal_entry_async(demo_org, created)
+        after, _ = tasks_write._journal_values(read_back.data)
+        assert after["title"] == title
+        assert derived_except(after, "title") == derived_except(before, "title")
+        deleted = await tasks_write.delete_journal_entry_async(demo_org, created, confirm=True)
+        assert performed(deleted).message
+        created = None
+    finally:
+        if created is not None:
+            await api.journal_delete(demo_org, [created])
+
+
+async def test_person_create_update_delete(demo_org: str) -> None:
+    leftovers = await tasks.list_persons_async(demo_org, query=MARK, limit=50)
+    for person in leftovers.data:
+        if marked(person.company, person.nr):
+            performed(await tasks_write.delete_person_async(demo_org, person.id, confirm=True))
+    created: int | None = None
+    try:
+        result = await tasks_write.create_person_async(
+            demo_org,
+            company=f"{MARK} Test GmbH",
+            addresses=[{"type": "MAIN", "city": "Zürich", "country": "CHE"}],  # type: ignore[list-item]
+            contacts=[{"type": "EMAIL_WORK", "address": "user@example.com"}],  # type: ignore[list-item]
+            is_customer=True,
+            nr=MARK,
+            confirm=True,
+        )
+        created = performed(result).insert_id
+        assert isinstance(created, int)
+        planned = await tasks_write.update_person_async(demo_org, created, department=MARK)
+        assert isinstance(planned.data, WritePreview)
+        assert isinstance(planned.data.before, PersonDetail)
+        before, _, _ = tasks_write._person_values(planned.data.before)
+        updated = await tasks_write.update_person_async(
+            demo_org, created, department=MARK, confirm=True
+        )
+        assert performed(updated).insert_id == created
+        assert updated.meta.request["company"] == f"{MARK} Test GmbH", "the whole record"
+        read_back = await tasks.get_person_async(demo_org, created)
+        after, _, _ = tasks_write._person_values(read_back.data)
+        assert after["department"] == MARK
+        assert derived_except(after, "department") == derived_except(before, "department")
+        deleted = await tasks_write.delete_person_async(demo_org, created, confirm=True)
+        assert performed(deleted).message
+        created = None
+    finally:
+        if created is not None:
+            await api.person_delete(demo_org, [created])
+
+
+async def test_order_create_delete(
+    demo_org: str, write_ids: dict[str, int], sales_categories: list[OrderCategory]
+) -> None:
+    (invoice,) = [
+        category
+        for category in sales_categories
+        if "<en>Invoice</en>" in (category.name_singular or "") and not category.is_inactive
+    ]
+    leftovers = await tasks.list_orders_async(
+        demo_org, query=MARK, fiscal_period_id=write_ids["fp2026"], limit=50
+    )
+    for order in leftovers.data:
+        if marked(order.description, order.nr):
+            performed(await tasks_write.delete_order_async(demo_org, order.id, confirm=True))
+    created: int | None = None
+    try:
+        result = await tasks_write.create_order_async(
+            demo_org,
+            associate_id=write_ids["customer"],
+            category_id=invoice.id,
+            date=DAY,
+            nr=MARK,
+            description=f"{MARK} test",
+            status_id=invoice.status[0].id,
+            items=[
+                {  # type: ignore[list-item]
+                    "account_id": write_ids["revenue"],
+                    "name": f"{MARK} item",
+                    "unit_price": Decimal("100.00"),
+                    "tax_id": write_ids["un1"],
+                }
+            ],
+            confirm=True,
+        )
+        created = performed(result).insert_id
+        assert isinstance(created, int)
+        deleted = await tasks_write.delete_order_async(demo_org, created, confirm=True)
+        assert performed(deleted).message
+        created = None
+    finally:
+        if created is not None:
+            await api.order_delete(demo_org, [created])

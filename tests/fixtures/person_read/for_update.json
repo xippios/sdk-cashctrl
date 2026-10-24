@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-10-24T08:50:12.984183Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/person/read.json?id=14"
+  },
+  "response": {
+    "body": "{\"success\":true,\"data\":{\"id\":14,\"created\":\"2026-10-24 10:50:02.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-24 10:50:02.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"contacts\":[{\"id\":12,\"personId\":14,\"type\":\"EMAIL_WORK\",\"purpose\":null,\"address\":\"user@example.com\",\"notes\":null,\"pos\":0}],\"addresses\":[{\"id\":12,\"personId\":14,\"titleId\":null,\"type\":\"MAIN\",\"company\":null,\"firstName\":null,\"lastName\":null,\"address\":\"Musterstrasse 1\",\"zip\":\"8001\",\"city\":\"Z\u00fcrich\",\"canton\":\"ZH\",\"country\":\"CHE\",\"pos\":0,\"hideCompany\":false,\"hideName\":false,\"companyForAddress\":\"xippios-live Fixture GmbH\",\"firstNameForAddress\":null,\"lastNameForAddress\":null,\"streetName\":\"Musterstrasse\",\"streetNumber\":\"1\",\"titleName\":\"\",\"cantonCode\":\"ZH\",\"countryCode2\":\"CH\",\"countryCode3\":\"CHE\",\"isHideCompany\":false,\"isHideName\":false}],\"bankAccounts\":[],\"servicePeriods\":[],\"children\":[],\"insuranceContracts\":[],\"attachments\":[],\"nr\":\"xippios-live\",\"name\":\"xippios-live Fixture GmbH\",\"company\":\"xippios-live Fixture GmbH\",\"language\":\"DE\",\"emailWork\":\"user@example.com\",\"address\":\"Musterstrasse 1\",\"zip\":\"8001\",\"city\":\"Z\u00fcrich\",\"canton\":\"ZH\",\"country\":\"CHE\",\"attachmentCount\":0,\"fullName\":\"\",\"inactive\":false,\"companyOrFullName\":\"xippios-live Fixture GmbH\",\"customer\":true,\"vendor\":false,\"employee\":false,\"insurance\":false,\"family\":false,\"titleName\":\"\",\"numberOfChildren\":0,\"abbreviatedName\":\"xippios-live Fixture GmbH\",\"languageName\":\"Deutsch\",\"languageCode\":\"de\",\"cantonCode\":\"ZH\",\"countryCode2\":\"CH\",\"countryCode3\":\"CHE\",\"iconCls\":\"person\",\"certificateValuesMap\":{},\"isCustomer\":true,\"isVendor\":false,\"isEmployee\":false,\"isInsurance\":false,\"isFamily\":false,\"isInactive\":false,\"isAutoFillResponsiblePerson\":false}}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Sat, 24 Oct 2026 08:50:11 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

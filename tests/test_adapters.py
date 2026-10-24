@@ -60,3 +60,25 @@ def test_the_write_server_serves_write_tasks_only() -> None:
     assert_write_tools(
         mcp_write.server, write_tasks, source=SOURCE, read_server=server, router=router
     )
+
+
+async def test_write_tools_are_the_write_tasks_with_their_parameters() -> None:
+    """Each write tool takes its task's parameters, confirm among them, and says it writes."""
+    tools = {tool.name: tool for tool in await mcp_write.server.list_tools()}
+    for name in tasks_write.__all__:
+        fn = getattr(tasks_write, name)
+        tool = tools[tool_name(SOURCE, fn)]
+        assert set(tool.input_schema.get("properties", {})) == set(_parameters(fn)), name
+        assert "confirm" in tool.input_schema["properties"], name
+        assert tool.description, f"{name} has no docstring; agents read it"
+        assert tool.annotations is not None
+        assert (tool.annotations.read_only_hint, tool.annotations.destructive_hint) == (False, True)
+
+
+async def test_the_order_categories_are_on_the_read_server_and_the_router() -> None:
+    """``list_order_categories`` is a read task: agents need its ids to form ``create_order``."""
+    assert "cashctrl_list_order_categories" in {tool.name for tool in await server.list_tools()}
+    routes = {route.path for route in router.routes if isinstance(route, APIRoute)}
+    assert f"/{SOURCE}/list_order_categories" in routes
+    write_tools = {tool.name for tool in await mcp_write.server.list_tools()}
+    assert "cashctrl_list_order_categories" not in write_tools
