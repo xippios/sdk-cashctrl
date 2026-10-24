@@ -215,7 +215,10 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--wrong-key", action="store_true", help=f"send {WRONG_KEY!r} instead of the key"
     )
-    args = parser.parse_args(argv)
+    # Intermixed: the key=value pairs may follow --method or --wrong-key. Plain
+    # parse_args does not collect a nargs="*" positional after an option on every 3.12
+    # patch level (3.12.3 refused "unrecognized arguments"; 3.12.15 accepted them).
+    args = parser.parse_intermixed_args(argv)
     args.endpoint = args.endpoint.removeprefix("/").removeprefix("api/v1/")
     if not _ENDPOINT.fullmatch(args.endpoint):
         parser.error(f"endpoint {args.endpoint!r} is not an upstream path like account/read.json")
