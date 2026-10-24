@@ -14,7 +14,7 @@ from decimal import Decimal
 import pytest
 
 from xippios.cashctrl import tasks
-from xippios.cashctrl._client import DEMO, client_for, orgs
+from xippios.cashctrl._client import DEMO, TENANTS, client_for
 from xippios.cashctrl.models import Filter
 
 pytestmark = [pytest.mark.live, pytest.mark.anyio]
@@ -23,7 +23,8 @@ pytestmark = [pytest.mark.live, pytest.mark.anyio]
 @pytest.fixture(scope="module")
 def fiscal_periods() -> dict[str, int]:
     """The demo organisation's fiscal period ids by name (``2025``, ``2026``), read once."""
-    assert orgs() == (DEMO,), "live tests run against the demo organisation and nothing else"
+    names = TENANTS.names()
+    assert names == (DEMO,), "live tests run against the demo organisation and nothing else"
     return {
         period.name: period.id
         for period in tasks.list_fiscal_periods(DEMO).data
@@ -37,11 +38,19 @@ async def test_upstream_answers(demo_org: str) -> None:
     assert response.status_code == 200
 
 
+def test_list_organisations(demo_org: str) -> None:
+    """Names only, and no request: the live environment declares the demo organisation alone."""
+    result = tasks.list_organisations()
+    assert result.data == [demo_org] == ["demo"]
+    assert result.meta.tenant is None
+
+
 async def test_list_fiscal_periods(demo_org: str) -> None:
     result = await tasks.list_fiscal_periods_async(demo_org)
     assert result.data
     assert all(isinstance(period.start, date) for period in result.data)
     assert result.meta.request == {"org": demo_org}
+    assert result.meta.tenant == demo_org
 
 
 async def test_list_currencies(demo_org: str) -> None:

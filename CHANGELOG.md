@@ -151,16 +151,26 @@ All notable changes to this project are documented here. The format follows
   CashCtrl's two insurance records) and the four vendors; the four 2026 sales and two
   purchase orders and one order read, re-recorded after the token field scrub so its
   `hash` is `REDACTED`.
+- `list_organisations`, the MCP tool `cashctrl_list_organisations` and the route
+  `GET /cashctrl/list_organisations` (ADR-0014): the declared organisations' names,
+  nothing else, without a request; core's `list_task` over the registry. It stays off the
+  write server; on a server locked with `--org` it lists that organisation only.
+- `meta.tenant` on every task's result: the organisation the data came from, by name
+  (`ResultMeta.tenant`, ADR-0014); `org` stays in `meta.request` too. `None` for
+  `list_organisations`.
 
 ### Changed
 
-- `xippios-core` is pinned to sdk-core commit `dbe2eba` (`core_git_ref` in
-  `.copier-answers.yml`, `[tool.uv.sources]` in `pyproject.toml`), an unreleased commit,
-  for `ResultMeta.total` (ADR-0012). This package releases only after core 0.2.0 is on
-  PyPI. Removing the pin alone would let core 0.1.0 back in, which names the tenant host
-  in status error messages and ignores `total`, so the same change raises `xippios-core`
-  and its three extras to `>=0.2.0` and deletes the pin's `# pragma: allowlist secret`
-  line by hand. The bound cannot be raised yet: core main still reports 0.1.0.
+- `xippios-core` is pinned to sdk-core commit `863a443` (`core_git_ref` in
+  `.copier-answers.yml`, `[tool.uv.sources]` in `pyproject.toml`), the unreleased merge
+  of sdk-core#17, for the tenant registry, the tenant lock and the option hooks
+  (ADR-0014), the plugin's offline guarantees (ADR-0013), `Scrub`, `ResultMeta.total`
+  (ADR-0012) and `ResultMeta.tenant`; before, `dbe2eba`. It is re-pinned at core 0.2.0.
+  This package releases only after core 0.2.0 is on PyPI. Removing the pin alone would
+  let core 0.1.0 back in, which has none of these, names the tenant host in status error
+  messages and ignores `total`, so the same change raises `xippios-core` and its three
+  extras to `>=0.2.0` and deletes the pin's `# pragma: allowlist secret` comment by hand.
+  The bound cannot be raised yet: core main still reports 0.1.0.
 - Adopted from that core: status error messages name the method and the path, never the
   host (`404 from GET /api/v1/account/nope.json: ...`, sdk-core#14), so `classify` no
   longer rewrites the request URL; it still hands core a copy of the response whose body
@@ -191,16 +201,61 @@ All notable changes to this project are documented here. The format follows
   that the shell's `CASHCTRL_DEMO_API_KEY` is nowhere in the request. Instead of pinning
   a module-level `auth.key`, `tests/conftest.py` drops every cached client before and
   after each test, and a `pytester` run of the conftest proves that a key a live test
-  cached never reaches the next offline test (and that it would without the reset).
+  cached never reaches the next offline test (and that it would without the reset)
+  (superseded by core's class-level pin, see Removed below).
 - Rate limit, ADR-0010 decisions 1, 2, 3 and 5 adopted (CLAUDE.md, Rate limit): 60
   requests per minute per organisation, a self-imposed pace since CashCtrl documents no
   limit; no longer-window quota to ration; a 429 is `RateLimitError` with `retry_after`
   from `Retry-After` through core's mapping in `classify`, now tested through the client;
   pauses are stated by core's adapters. `x-cashctrl-requests-left` is not read (unknown
   window and scope); decision 4 waits for core's quota helper.
+- Adopted from core (ADR-0014): the organisation registry is `xippios.core.Tenants`,
+  `TENANTS` in `_client.py`, with the same variables (`CASHCTRL_ORGS`,
+  `CASHCTRL_<NAME>_SUBDOMAIN`, `CASHCTRL_<NAME>_API_KEY`, the reserved `demo`) and the
+  one-label subdomain check, lower-cased, as `check_subdomain`; `client_for(org)` is
+  `TENANTS.client_for(org, ...)`. Messages read "unknown tenant" and "declared tenants"
+  for an undeclared name; a malformed `CASHCTRL_ORGS` entry is named by its position,
+  never quoted; a refused subdomain is "does not hold a valid SUBDOMAIN". A changed key
+  now builds a new client, as a changed subdomain did.
+- Adopted from core: `--org` on both servers is core's `TenantLock`, reached through
+  `main`'s `add_options` and `apply_options` (`_cli.py`), the command line parsed once.
+  Three behaviours follow core: a call that leaves `org` out of a tool that takes it is
+  refused by the lock (`... the call did not name the tenant`) instead of by the tool's
+  argument validation; a refused call reads `error: InvalidRequestError: this server is
+  locked to org=<name>; the call named another tenant`; the instructions end with "This
+  server is locked to org <name>; every tool call that takes org must pass org=<name>."
+  Core also serves the write server over `--http` on a loopback `--host` only, unless
+  `--allow-remote` is passed.
+- Adopted from core (conventions §10): the recorder scrubs with
+  `Scrub(host="demo.cashctrl.com", secrets=[key, its basic-auth token],
+  rewrite=scrub_text, allow_binary=False)` through `fixture_from_response`. A key in a
+  response is now written as `REDACTED` instead of refusing the fixture, and the fixture
+  goes to review (exit status 1, a note naming the variable); core's verify refuses a key
+  the scrub could not reach (behind a JSON escape); core refuses a body that is not UTF-8
+  text with its own message, which the recorder prefixes with "exports are out of scope
+  for fixtures;". The e-mail, API user tag and
+  token-field scrubs stay local, as `scrub_text`, which the recorder also applies to the
+  request URL, since core's rewrite does not reach it; the final check keeps the bare
+  subdomain, e-mail addresses, API user tags, the key prefix and token-like values, and
+  runs before the one write, which stays the recorder's own.
+- Adopted from core (ADR-0013): the plugin keeps the run offline and sends the
+  placeholder key from every auth object; `CASHCTRL_DEMO_API_KEY` is named in
+  `xippios_placeholder_key_envs`. `tests/conftest.py` keeps the demo-only handling: the
+  `CASHCTRL_*` strip at import, `CASHCTRL_ORGS` removed per test, the placeholder
+  subdomain and `TENANTS.reset()` around each test. Tests that resolve keys themselves
+  override `placeholder_api_key`. `mcp_call` goes through an in-process `mcp.Client`, so
+  a schema refusal fails it with `AssertionError` instead of `ToolError`.
 
 ### Removed
 
+- `_org_lock.py` (`org_lock`, `announce_lock`, `parse_org` and its `main`), replaced by
+  core's `TenantLock` and option hooks; and from `_client.py` `orgs()`, `require_org()`,
+  `reset_clients()`, `subdomain_env()`, `api_key_env()`, `ORGS_ENV` and the local client
+  cache, replaced by `TENANTS.names()`, `require()`, `reset()`, `var()` and `list_var`.
+  Nothing was released, so no compatibility names remain.
+- The `pytester` proof that a key a live test cached never reaches the next offline
+  test, and its `pytester` plugin: core's class-level placeholder pin guarantees it and
+  core's own tests prove it.
 - The scaffold's single client (`client`, `auth`, `config`, `BASE_URL` and `API_KEY_ENV`
   in `_client.py`) and its `CASHCTRL_API_KEY` variable, replaced by the organisation
   registry above.

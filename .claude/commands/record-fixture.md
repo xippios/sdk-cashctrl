@@ -26,10 +26,12 @@ writes nothing and exits non-zero:
   `account/costcenter/balance`, `fiscalperiod/result`, `setting/get`) answers a bare
   number or a document, and an export (`.pdf`, `.xlsx`, `.csv`, `.zip`) a file; both
   are refused before a request is sent.
-- **No e-mail addresses.** Every e-mail address in the URL, the headers and the body
-  (`createdBy`, `lastUpdatedBy`, HTML fields such as `notes`) becomes
-  `user@example.com`, also when `@` is written `%40`, `&#64;`, `&#x40;` or `&commat;`;
-  `SYSTEM` stays. `createdBy` may carry the address of the real user who wrote a record.
+- **No e-mail addresses.** Every e-mail address in the request URL, the request body,
+  the response body (`createdBy`, `lastUpdatedBy`, HTML fields such as `notes`) and the
+  response header values becomes `user@example.com`, also when `@` is written `%40`,
+  `&#64;`, `&#x40;` or `&commat;`; `SYSTEM` stays. A header name is not scrubbed: the
+  final check refuses one that holds an address. `createdBy` may carry the address of
+  the real user who wrote a record.
 - **No API user tags.** CashCtrl names an API user in `createdBy` and `lastUpdatedBy` as
   `API:` and the first four characters of its key (observed on the records
   `scripts/seed_demo.py` wrote). Every such tag becomes `API:REDACTED`, the marker in any
@@ -59,20 +61,21 @@ writes nothing and exits non-zero:
    direnv exec ~/github/sdk uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]
    ```
 
-   It builds the fixture in memory with core's `fixture_from_response` (credentials
-   scrubbed), replaces the demo host with `demo.cashctrl.com` everywhere in it (the host
-   offline tests replay against), every e-mail address with `user@example.com`,
-   every API user tag in `createdBy` and `lastUpdatedBy` with `API:REDACTED` and the
-   value of every token-like field (`hash`, `token`, `secret`, `apiKey`) with
-   `REDACTED`, checks it,
-   and only then writes `tests/fixtures/<endpoint>/<case>.json` (`account/read.json`
-   becomes `account_read/`). It prints only the status and that URL. `--wrong-key`
-   sends an invalid key instead of the real one, to record a 401.
+   It builds the fixture in memory with core's `fixture_from_response` and `Scrub`
+   (credentials scrubbed, the demo host replaced with `demo.cashctrl.com` everywhere in
+   it, the host offline tests replay against, the key replaced with `REDACTED`, and a
+   fixture still holding either refused), replaces every e-mail address with
+   `user@example.com`, every API user tag in `createdBy` and `lastUpdatedBy` with
+   `API:REDACTED` and the value of every token-like field (`hash`, `token`, `secret`,
+   `apiKey`) with `REDACTED`, checks it, and only then writes
+   `tests/fixtures/<endpoint>/<case>.json` (`account/read.json` becomes `account_read/`).
+   It prints only the status and that URL. `--wrong-key` sends an invalid key instead of
+   the real one, to record a 401.
    Error cases (an unknown id, a refusal) are worth recording; the recorder keeps them
    instead of raising.
 4. The check runs on the scrubbed fixture before the write, over its text and the
-   decoded strings of its body: if the real subdomain, the real key, an e-mail address
-   other than `user@example.com`, an API user tag other than `API:REDACTED` (in any case
+   decoded strings of its body: if the subdomain on its own, an e-mail address other
+   than `user@example.com`, an API user tag other than `API:REDACTED` (in any case
    and position), the key's first four characters on their own ("possible key
    prefix") or a value other than `null` or `REDACTED` under a token-like field name is
    in it, nothing is written and the script exits non-zero; if a key-like name carries a

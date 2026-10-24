@@ -14,7 +14,7 @@ that works here; the family rules it points to apply as well.
 | Credentials | `CASHCTRL_ORGS` names the organisations; per name `CASHCTRL_<NAME>_SUBDOMAIN` and `CASHCTRL_<NAME>_API_KEY`, the key sent as the HTTP basic user name. The reserved `demo` is declared by its own pair and never listed |
 | Rate limit | 60 requests per minute per organisation, a self-imposed pace in `_client.py` (upstream documents no limit, only a 429); ADR-0010 decisions 1, 2, 3 and 5 adopted, see Rate limit below |
 | Write tools | yes, in `tasks_write.py`, served by `xippios-cashctrl-mcp-write` |
-| Core pin | `xippios-core` from git at sdk-core `dbe2eba` (`core_git_ref` in `.copier-answers.yml`, `[tool.uv.sources]` in `pyproject.toml`), an unreleased commit, for `ResultMeta.total` (ADR-0012), host-free error messages and the quiet request log. This package releases only after core 0.2.0 is on PyPI. Removing the pin (`uvx copier update -d core_git_ref=`) is not enough: it would let core 0.1.0 back in, which names the tenant host in status error messages (the local URL rewrite is gone) and ignores `total`. The same change raises `xippios-core` and its three extras (`mcp`, `http`, `testing`) to `>=0.2.0` in `pyproject.toml` and deletes the `# pragma: allowlist secret` line by hand. The bound cannot be raised yet: core main still reports version 0.1.0 |
+| Core pin | `xippios-core` from git at sdk-core `863a443` (`core_git_ref` in `.copier-answers.yml`, `[tool.uv.sources]` in `pyproject.toml`), the unreleased merge of sdk-core#17, for the tenant registry, the tenant lock and the option hooks (ADR-0014), the plugin's offline guarantees (ADR-0013), the recorder's `Scrub`, `ResultMeta.total` (ADR-0012) and `ResultMeta.tenant`, host-free error messages and the quiet request log. Decided on 2026-10-24: re-pin at core 0.2.0. This package releases only after core 0.2.0 is on PyPI. Removing the pin (`uvx copier update -d core_git_ref=`) is not enough: it would let core 0.1.0 back in, which has no `Tenants`, no `TenantLock`, no `Scrub` and no `ResultMeta.tenant`, names the tenant host in status error messages and ignores `total`. The same change raises `xippios-core` and its three extras (`mcp`, `http`, `testing`) to `>=0.2.0` in `pyproject.toml` and deletes the `# pragma: allowlist secret` comment by hand. The bound cannot be raised yet: core main still reports version 0.1.0 |
 
 The snapshot in `docs/upstream/` is the reference for names, parameters and semantics.
 If it is empty or stale, run `/refresh-upstream` first and review the diff. Never write a
@@ -23,18 +23,35 @@ wrapper from memory of the API.
 ## Organisations
 
 CashCtrl serves each organisation from its own subdomain, and an API user belongs to one
-organisation. `_client.py` is therefore a registry, not one client:
+organisation. `_client.py` is therefore a registry, not one client: `TENANTS`, an
+`xippios.core.Tenants` (ADR-0014, conventions §7), declared as `CASHCTRL_ORGS` with the
+fields `SUBDOMAIN` and `API_KEY`, the reserved `demo` and `check_subdomain` (one DNS
+label, lower-cased) as the subdomain's check.
 
 - `org` is the first, required parameter of every task and tool, the name of a declared
-  organisation (`demo`, `acme`). `client_for(org)` returns that organisation's own
-  client: own base URL, own key, own token bucket, no shared cache. An undeclared name is
-  an `InvalidRequestError` listing the declared ones.
-- `orgs()` reads `CASHCTRL_ORGS` (comma-separated, `^[a-z0-9_]+$`) on every call and
-  appends `demo` when `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY` are both set.
-- `--org <name>` locks an MCP server (read or write) to one organisation
-  (`_org_lock.py`): an undeclared name or a missing or malformed subdomain stops it at
-  startup (exit status 2), its instructions name the organisation, and a tool call naming
-  another is refused before the tool runs. The HTTP router has no lock: consumers pass
+  organisation (`demo`, `acme`), and every result names it as `meta.tenant` (it stays in
+  `meta.request` as well). `client_for(org)` is `TENANTS.client_for(org, _build)`: that
+  organisation's own client, own base URL, own key, own token bucket, no shared cache,
+  rebuilt when one of its variables changes (the key included). An undeclared name is an
+  `InvalidRequestError` listing the declared ones ("unknown tenant"); a malformed
+  `CASHCTRL_ORGS` or a missing or malformed subdomain is a `ConfigError` naming the
+  variable, never its value.
+- `TENANTS.names()` reads `CASHCTRL_ORGS` (comma-separated, `^[a-z0-9_]+$`) on every call
+  and appends `demo` when `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY` are both
+  set. `list_organisations` (core's `list_task`, the tool `cashctrl_list_organisations`)
+  returns those names, nothing else, on the read server and as a route; on a locked
+  server, the locked organisation only.
+- `--org <name>` locks an MCP server (read or write) to one organisation (`_cli.py`,
+  core's `TenantLock` through `main`'s `add_options` and `apply_options`): an undeclared
+  name or a missing or malformed subdomain stops it at startup (exit status 2), its
+  instructions name the organisation, and a tool call that names another organisation,
+  or leaves `org` out of a tool that takes it, is refused with
+  `error: InvalidRequestError: this server is locked to org=<name>; ...` before the tool
+  runs. Core serves the write server over `--http` on a loopback `--host` only, unless
+  `--allow-remote` is passed. Three things differ from the former local lock
+  (`_org_lock.py`): a call without `org` is refused by the lock, not left to the tool's
+  argument validation; the list lists the locked organisation only; and the write server
+  needs `--allow-remote` beyond loopback. The HTTP router has no lock: consumers pass
   `org` explicitly.
 - The subdomain stays out of messages and logs: core's status errors name the method and
   the path, never the host, and `classify` hands core a copy of an error response whose
@@ -46,13 +63,17 @@ organisation. `_client.py` is therefore a registry, not one client:
   WARNING, as the README says.
 - Isolation is by configuration: a deployment reaches exactly what its environment
   declares. Nothing is cross-tenant: no task, tool or helper spans organisations, and
-  `orgs()` returns names only.
+  `TENANTS.names()` and `list_organisations` return names only.
 
 **Demo only.** Fixtures, live tests and the fixture recorder use the organisation `demo`
 and nothing else, ever. The recorder takes no organisation; every live test takes the
 `demo_org` fixture, which fails unless `demo` is the only declared organisation;
 `tests/conftest.py` removes every `CASHCTRL_*` variable but the demo pair when pytest
-imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every test. The demo
+imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every test, sets the
+placeholder subdomain in every offline test and calls `TENANTS.reset()` around each.
+Core's plugin does the rest (ADR-0013): no network outside a test marked `live` or
+`network`, no rate-limit waits, and the placeholder key on every auth object, with
+`CASHCTRL_DEMO_API_KEY` named in `xippios_placeholder_key_envs`. The demo
 organisation is synthetic: invented books seeded by `scripts/seed_demo.py` and described
 in `docs/demo-org.md`, never a copy of real books. So the recorder records any module and
 any amount; it still scrubs e-mail addresses to `user@example.com`, API user tags to
@@ -106,12 +127,12 @@ src/xippios/cashctrl/
   __init__.py      public surface: __version__ and re-exported task functions
   py.typed         PEP 561 marker; consumers' mypy --strict needs it
   _version.py      __version__ from distribution metadata
-  _client.py       organisation registry: orgs(), require_org(), client_for(org), classify
-  _org_lock.py     the --org lock both MCP servers use (middleware and command line)
+  _client.py       organisation registry: TENANTS (core's Tenants), client_for(org), classify
+  _cli.py          --org for both MCP servers: core's TenantLock through main's option hooks
   errors.py        RequestRejected (HTTP 200 with success:false) and FieldError
   models.py        pydantic models mirroring upstream payloads (UpstreamModel)
   api/             endpoint wrappers, one module per upstream operation
-  tasks.py         task functions; __all__ is what the adapters register
+  tasks.py         task functions and list_organisations; __all__ is what the adapters register
   tasks_write.py   confirm-gated write tasks for the separate write server
   mcp_write.py     xippios-cashctrl-mcp-write entry point
   mcp.py           xippios-cashctrl-mcp entry point
@@ -122,17 +143,17 @@ src/xippios/cashctrl/
 scripts/
   refresh_reference.py   stub until a documented value set is needed (refresh-reference-data)
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
-  record_fixture.py      records one exchange with the demo organisation; host, e-mails, API tags, tokens scrubbed
+  record_fixture.py      records one exchange with the demo organisation; core's Scrub plus e-mails, API tags, tokens
   seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md)
 tests/
-  conftest.py      core's plugin; demo-only environment, placeholder demo pair, clients reset per test, demo_org
+  conftest.py      core's plugin; demo-only environment, placeholder subdomain, clients reset per test, demo_org
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
   test_tasks.py    structural checks on every task plus per-task replay tests
   test_adapters.py the adapters expose exactly tasks.__all__
   test_layout.py   namespace levels stay empty; py.typed ships
   test_registry.py organisation declaration, lookup and per-organisation clients
   test_errors.py   classify, RequestRejected and the recorded refusals
-  test_org_lock.py the --org lock, driven through an in-process MCP client
+  test_org_lock.py the --org lock, driven through core's mcp_call_text (an in-process MCP client)
   test_record_fixture.py  the recorder never writes the demo host or key
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
   test_refresh_reference.py  nothing is packaged; the refresh script is a stub
@@ -159,15 +180,17 @@ Run `/add-endpoint <upstream operation>`. In short:
 3. `api/<operation>.py`: one async wrapper that takes `org` first, calls
    `_client.client_for(org)` and returns models through `xippios.core.parse`.
 4. `tasks.py`: an async task, `org` its first parameter, that composes wrappers and
-   returns `Result[T]` with full `ResultMeta` (source, endpoint, request parameters,
-   `published_at`/`vintage` when the upstream gives them). Derive the sync one with
+   returns `Result[T]` with full `ResultMeta` through `_meta(org, ...)` (source,
+   endpoint, `tenant=org`, request parameters, `published_at`/`vintage` when the upstream
+   gives them). Derive the sync one with
    `sync()`, add its name to `__all__`, re-export it from `__init__.py`.
 5. Docstring for agents: one sentence, then `Args:` with examples of valid values for
    every parameter. The MCP tool description and the OpenAPI summary come from it.
 6. `/record-fixture` for at least one case (demo only), a replay test in `test_tasks.py`
    with `org="demo"` that also calls the tool end to end with
-   `xippios.core.testing.mcp_call`, a live smoke test in `test_live.py` that takes the
-   `demo_org` fixture.
+   `xippios.core.testing.mcp_call`, a case in `TOOL_CASES` (which checks `meta.tenant`
+   and snake_case keys for every tool), a live smoke test in `test_live.py` that takes
+   the `demo_org` fixture.
 7. `CHANGELOG.md` under Unreleased, README status table, then the full check suite.
 
 A list that documents `start` and `limit` (journal, persons, orders) pages through
@@ -191,20 +214,29 @@ raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
 
 Run `/record-fixture <endpoint> <case> <parameters>`. It runs
 `direnv exec ~/github/sdk uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]`,
-which performs one live request against the demo organisation, always and only, builds
-the fixture in memory with credentials scrubbed, the demo host rewritten to
-`demo.cashctrl.com`, e-mail addresses to `user@example.com`, CashCtrl's API user tags
-(`API:` and the first four characters of a key, in `createdBy` and `lastUpdatedBy`) to
-`API:REDACTED` and the value of every token-like body field (`hash`, `token`, `secret`,
-`apiKey`, by name; `order/read.json` sends `hash`) to `REDACTED`, and only then writes
-`tests/fixtures/<endpoint>/<case>.json`. It writes nothing when the fixture, in its text
-or in a decoded string of its body, still holds the subdomain, the key, an e-mail
+which performs one live request against the demo organisation, always and only, and
+builds the fixture in memory with core's `fixture_from_response` and
+`Scrub(host="demo.cashctrl.com", secrets=[key, its basic-auth token], rewrite=scrub_text)`
+(conventions §10): credentials scrubbed, the demo host made `demo.cashctrl.com`, the key
+made `REDACTED`, and the recorder's `scrub_text` over the body, the header values and
+(applied by the recorder, which core's rewrite does not reach) the request URL: e-mail
+addresses to `user@example.com`, CashCtrl's API user tags (`API:` and the first four
+characters of a key, in `createdBy` and `lastUpdatedBy`) to `API:REDACTED` and the value
+of every token-like body field (`hash`, `token`, `secret`, `apiKey`, by name;
+`order/read.json` sends `hash`) to `REDACTED`. Core refuses the exchange when its verify
+still finds the demo host or the key, a JSON body decoded included, and when the body is
+not UTF-8 text (exports are out of scope). A response in which core redacted the key is
+written but goes to review (exit status 1). The recorder's own final check then refuses,
+before the one write to `tests/fixtures/<endpoint>/<case>.json`, a fixture that in its
+text or in a decoded string of its body still holds the subdomain on its own, an e-mail
 address, an API user tag in any case and position, the key's first four characters on
 their own (a possible key prefix) or any value but `null` or `REDACTED` under a
-token-like name, when the body is not UTF-8 text (exports are out of scope), or when a
-policy of the demo-only rule above refuses it. A compound name such as `publicHash` is
-not scrubbed and goes to review. Grep the file for key patterns, e-mail addresses, API
-user tags and token-like fields before committing. Fixtures are never typed in by hand.
+token-like name, and the recorder refuses what a policy of the demo-only rule above
+refuses. The write stays the recorder's: core's `record` writes as soon as its own
+verify passes, before a source's final check could run. A compound name such as
+`publicHash` is not scrubbed and goes to review. Grep the file for key patterns, e-mail
+addresses, API user tags and token-like fields before committing. Fixtures are never
+typed in by hand.
 
 ## Commands
 
