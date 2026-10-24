@@ -45,34 +45,59 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, ConfigDict, Field, JsonValue
+from pydantic import AliasChoices, BeforeValidator, ConfigDict, Field, JsonValue
 from xippios.core import UpstreamModel
 
 __all__ = [
     "Account",
     "AccountDetail",
+    "AddressType",
+    "AllocationInput",
+    "AttachmentInput",
+    "BankAccountInput",
+    "BankAccountType",
+    "Canton",
+    "ChildInput",
+    "Color",
     "Comparison",
+    "ContactType",
     "Currency",
     "Direction",
     "Filter",
     "FiscalPeriod",
+    "InsuranceContractInput",
     "JournalEntry",
     "JournalEntryDetail",
     "JournalItem",
+    "JournalItemInput",
     "JournalRow",
+    "Language",
     "ListResponse",
+    "NotifyType",
     "Order",
+    "OrderBookTemplate",
+    "OrderCategory",
+    "OrderCategoryStatus",
     "OrderDetail",
     "OrderItem",
+    "OrderItemInput",
+    "OrderItemType",
     "OrderType",
     "Person",
     "PersonAddress",
+    "PersonAddressInput",
     "PersonContact",
+    "PersonContactInput",
     "PersonDetail",
     "ReadResponse",
+    "Recurrence",
+    "ServicePeriodInput",
     "TaxCode",
     "TaxComponent",
     "TaxRate",
+    "WriteAnswer",
+    "WritePreview",
+    "WriteResult",
 ]
 
 
@@ -722,10 +747,11 @@ class PersonDetail(_PersonFields):
     ``PersonContact``). ``bank_accounts``, ``children``, ``service_periods``,
     ``insurance_contracts`` and ``attachments`` are documented as inputs but were only
     seen empty, so their items are kept as sent; so is ``certificate_values_map``, only
-    seen as ``{}``. Typed from observation: ``full_name`` (empty for a company),
-    ``company_or_full_name``, ``abbreviated_name``, ``title_name``, ``language_code``
-    (``de``), ``canton_code``, ``country_code2`` (``CH``), ``country_code3`` (``CHE``),
-    ``number_of_children`` and ``icon_cls``.
+    seen as ``{}``, and ``certificate_values``, documented as an input and never seen in
+    a read (which leaves out ``null``), kept should it come. Typed from observation:
+    ``full_name`` (empty for a company), ``company_or_full_name``, ``abbreviated_name``,
+    ``title_name``, ``language_code`` (``de``), ``canton_code``, ``country_code2``
+    (``CH``), ``country_code3`` (``CHE``), ``number_of_children`` and ``icon_cls``.
     """
 
     addresses: list[PersonAddress] = Field(default_factory=list)
@@ -740,6 +766,7 @@ class PersonDetail(_PersonFields):
     )
     attachments: list[JsonValue] = Field(default_factory=list)
     certificate_values_map: JsonValue = Field(default=None, validation_alias="certificateValuesMap")
+    certificate_values: JsonValue = Field(default=None, validation_alias="certificateValues")
     full_name: str | None = Field(default=None, validation_alias="fullName")
     company_or_full_name: str | None = Field(default=None, validation_alias="companyOrFullName")
     abbreviated_name: str | None = Field(default=None, validation_alias="abbreviatedName")
@@ -1009,3 +1036,539 @@ class OrderDetail(_OrderFields):
     hash: str | None = None
     file_id: JsonValue = Field(default=None, validation_alias="fileId")
     recurrence_id: JsonValue = Field(default=None, validation_alias="recurrenceId")
+
+
+class OrderCategoryStatus(UpstreamModel):
+    """One status of an order category, an item of ``OrderCategory.status``.
+
+    Typed from the ``status`` table of ``order/category/create.json``
+    (``docs/upstream/order.md``): ``icon`` (``BLUE``, ``GREEN``, ``RED``, ...), ``name``
+    (localised, ``<values><de>Entwurf</de>...</values>``), ``action_id`` (what follows
+    the status, ``CATEGORY_9`` or ``BOOK_TEMPLATE_3``; empty for none), ``is_add_stock``,
+    ``is_book`` (whether orders in this status book journal entries), ``is_closed`` and
+    ``is_remove_stock``. Typed from observation on 2026-10-24: ``id`` (the id
+    ``create_order`` takes as ``status_id``), ``category_id``, ``pos``, the twins without
+    ``is_`` and the ``created*``/``last_updated*`` bookkeeping fields; the first status of
+    the invoice category came without ``created`` and with an empty ``createdBy``.
+    """
+
+    id: int
+    category_id: int | None = Field(default=None, validation_alias="categoryId")
+    name: str | None = None
+    icon: str | None = None
+    action_id: str | None = Field(default=None, validation_alias="actionId")
+    pos: int | None = None
+    book: bool
+    is_book: bool = Field(validation_alias="isBook")
+    add_stock: bool = Field(validation_alias="addStock")
+    is_add_stock: bool = Field(validation_alias="isAddStock")
+    remove_stock: bool = Field(validation_alias="removeStock")
+    is_remove_stock: bool = Field(validation_alias="isRemoveStock")
+    closed: bool
+    is_closed: bool = Field(validation_alias="isClosed")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class OrderBookTemplate(UpstreamModel):
+    """One book template of an order category, an item of ``OrderCategory.book_templates``.
+
+    Typed from the ``bookTemplates`` table of ``order/category/create.json``:
+    ``account_id`` (typically a bank account for a payment template), ``name``
+    (localised), ``is_allow_tax`` and ``tax_id``. Typed from observation on 2026-10-24:
+    ``id``, ``category_id``, ``pos``, the twin ``allow_tax``, ``text`` and ``value`` (only
+    seen ``null``) and the ``created*``/``last_updated*`` bookkeeping fields.
+    """
+
+    id: int
+    category_id: int | None = Field(default=None, validation_alias="categoryId")
+    account_id: int | None = Field(default=None, validation_alias="accountId")
+    tax_id: int | None = Field(default=None, validation_alias="taxId")
+    name: str | None = None
+    pos: int | None = None
+    text: JsonValue = None
+    value: JsonValue = None
+    allow_tax: bool | None = Field(default=None, validation_alias="allowTax")
+    is_allow_tax: bool | None = Field(default=None, validation_alias="isAllowTax")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class OrderCategory(UpstreamModel):
+    """One order category, an entry of ``order/category/list.json`` (``docs/upstream/order.md``).
+
+    "An order category is for example 'Offers', 'Invoices', 'Delivery notes', etc. A
+    category contains the configuration for the order document and how it behaves." Its
+    ``id`` is what ``create_order`` takes as ``category_id``, and one of its ``status``
+    ids what it takes as ``status_id``.
+
+    Typed from the tables of ``order/category/create.json`` and ``update.json``:
+    ``account_id`` (typically the debtors account for sales), ``name_plural`` and
+    ``name_singular`` (localised), ``status``, ``address_type``, ``book_templates``,
+    ``book_type`` (``DEBIT``, ``CREDIT``), ``currency_id``, ``due_days``, ``file_id``,
+    ``footer_template_id``, ``has_due_days``, ``header_template_id``,
+    ``is_display_item_gross``, ``is_display_prices``, ``is_inactive``,
+    ``is_switch_recipient``, ``layout_id``, ``mail_subject``, ``mail_template_id``,
+    ``message``, ``responsible_person_id`` (documented as TEXT, an id; only seen
+    ``null``), ``rounding_id``, ``sent_status_id``, ``sequence_nr_id`` and ``type``
+    (``SALES``, ``PURCHASE``).
+
+    Typed from observation on 2026-10-24 against the demo organisation (CashCtrl's six
+    default sales categories): the answer is ``{"total": ..., "data": [...]}``; ``id``,
+    ``name`` (seen equal to ``name_singular``), ``pos``, ``default_status_id``,
+    ``sequence_nr_id_inherited``, ``template_id``, ``layout_name`` (localised),
+    ``value`` (the id as text), the twins without ``is_`` and ``is_free`` with its twin,
+    and the ``created*``/``last_updated*`` bookkeeping fields. ``attachments`` were only
+    seen empty and are kept as sent; ``responsible_person_name``, ``text`` and
+    ``type_name`` were only seen ``null``.
+    """
+
+    id: int
+    type: str
+    name: str | None = None
+    name_singular: str | None = Field(default=None, validation_alias="nameSingular")
+    name_plural: str | None = Field(default=None, validation_alias="namePlural")
+    pos: int | None = None
+    account_id: int | None = Field(default=None, validation_alias="accountId")
+    address_type: str | None = Field(default=None, validation_alias="addressType")
+    book_type: str | None = Field(default=None, validation_alias="bookType")
+    currency_id: int | None = Field(default=None, validation_alias="currencyId")
+    due_days: int | None = Field(default=None, validation_alias="dueDays")
+    has_due_days: bool | None = Field(default=None, validation_alias="hasDueDays")
+    default_status_id: int | None = Field(default=None, validation_alias="defaultStatusId")
+    sent_status_id: int | None = Field(default=None, validation_alias="sentStatusId")
+    sequence_nr_id: int | None = Field(default=None, validation_alias="sequenceNrId")
+    sequence_nr_id_inherited: int | None = Field(
+        default=None, validation_alias="sequenceNrIdInherited"
+    )
+    rounding_id: int | None = Field(default=None, validation_alias="roundingId")
+    responsible_person_id: int | None = Field(default=None, validation_alias="responsiblePersonId")
+    responsible_person_name: JsonValue = Field(
+        default=None, validation_alias="responsiblePersonName"
+    )
+    file_id: int | None = Field(default=None, validation_alias="fileId")
+    footer_template_id: int | None = Field(default=None, validation_alias="footerTemplateId")
+    header_template_id: int | None = Field(default=None, validation_alias="headerTemplateId")
+    mail_template_id: int | None = Field(default=None, validation_alias="mailTemplateId")
+    template_id: int | None = Field(default=None, validation_alias="templateId")
+    layout_id: int | None = Field(default=None, validation_alias="layoutId")
+    layout_name: str | None = Field(default=None, validation_alias="layoutName")
+    mail_subject: str | None = Field(default=None, validation_alias="mailSubject")
+    message: str | None = None
+    status: list[OrderCategoryStatus] = Field(default_factory=list)
+    book_templates: list[OrderBookTemplate] = Field(
+        default_factory=list, validation_alias="bookTemplates"
+    )
+    attachments: list[JsonValue] = Field(default_factory=list)
+    display_item_gross: bool | None = Field(default=None, validation_alias="displayItemGross")
+    is_display_item_gross: bool | None = Field(default=None, validation_alias="isDisplayItemGross")
+    display_prices: bool | None = Field(default=None, validation_alias="displayPrices")
+    is_display_prices: bool | None = Field(default=None, validation_alias="isDisplayPrices")
+    free: bool | None = None
+    is_free: bool | None = Field(default=None, validation_alias="isFree")
+    inactive: bool | None = None
+    is_inactive: bool | None = Field(default=None, validation_alias="isInactive")
+    switch_recipient: bool | None = Field(default=None, validation_alias="switchRecipient")
+    is_switch_recipient: bool | None = Field(default=None, validation_alias="isSwitchRecipient")
+    text: JsonValue = None
+    type_name: JsonValue = Field(default=None, validation_alias="typeName")
+    value: str | None = None
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+# The write tools' payloads (``tasks_write.py``) and their outcomes.
+#
+# Input models mirror the JSON arrays the create and update tables document (``items``,
+# ``addresses``, ``contacts``, ...): snake_case fields, typed from those tables, with the
+# documented value sets as ``Literal``. ``validation_alias=AliasChoices(snake, camel)``
+# accepts both spellings and shows the snake_case name in the tool schema, as the tool
+# arguments are snake_case; ``serialization_alias`` is the upstream name, which
+# ``api/_form.py`` writes into the form's JSON. These models only ever go upstream: no
+# result carries them (a preview shows the encoded form fields). Unknown keys are
+# refused, so a misspelt key never goes missing silently.
+
+NotifyType = Literal["NONE", "USER", "PERSON", "RESPONSIBLE_PERSON", "EMAIL"]
+"""``notifyType`` of journal entries and orders: "Possible values: NONE, USER, PERSON, ..."."""
+
+Recurrence = Literal[
+    "MONTHLY", "WEEKLY", "DAILY", "YEARLY", "SEMESTRAL", "QUARTERLY", "BI_MONTHLY", "BI_WEEKLY"
+]
+"""``recurrence`` of journal entries and orders: "Possible values: MONTHLY, WEEKLY, ..."."""
+
+Language = Literal["DE", "EN", "FR", "IT"]
+"""``language`` of persons and orders: "Possible values: DE, EN, FR, IT"."""
+
+Color = Literal[
+    "BLUE", "GREEN", "RED", "YELLOW", "ORANGE", "BLACK", "GRAY", "BROWN", "VIOLET", "PINK"
+]
+"""``color`` of a person: "Possible values: BLUE, GREEN, RED, ..."; white when not set."""
+
+AddressType = Literal["MAIN", "INVOICE", "DELIVERY", "SALARY", "HISTORICAL", "OTHER"]
+"""``type`` of an address: "Possible values: MAIN, INVOICE, DELIVERY, SALARY, ..."."""
+
+Canton = Literal[
+    "AG", "AI", "AR", "BE", "BL", "BS", "FR", "GE", "GL", "GR", "JU", "LU", "NE",
+    "NW", "OW", "SG", "SH", "SO", "SZ", "TG", "TI", "UR", "VD", "VS", "ZG", "ZH",
+]  # fmt: skip
+"""``canton`` of an address, Switzerland only: "Possible values: AG, AI, AR, ..."."""
+
+ContactType = Literal[
+    "EMAIL_INVOICE", "EMAIL_WORK", "EMAIL_PRIVATE", "PHONE_RECEPTION", "PHONE_WORK",
+    "PHONE_PRIVATE", "MOBILE_WORK", "MOBILE_PRIVATE", "FAX", "WEBSITE", "MESSENGER", "OTHER",
+]  # fmt: skip
+"""``type`` of a contact: "Possible values: EMAIL_INVOICE, EMAIL_WORK, ..."."""
+
+BankAccountType = Literal["DEFAULT", "ORDER", "SALARY", "HISTORICAL", "OTHER"]
+"""``type`` of a bank account: "Possible values: DEFAULT, ORDER, SALARY, HISTORICAL, OTHER"."""
+
+OrderItemType = Literal["ARTICLE", "TEXT", "PAGEBREAK", "SUBTOTAL", "TITLE", "OPTIONTOTAL"]
+"""``type`` of an order item: "Defaults to ARTICLE. Possible values: ARTICLE, TEXT, ..."."""
+
+
+class _Input(UpstreamModel):
+    """An object of a JSON array a write takes; unknown keys are refused."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AllocationInput(_Input):
+    """One allocation to a cost center, an item of ``allocations`` (journal, order items).
+
+    Attributes:
+        share: ``share``, the allocation share; shares 3 and 1 split the amount 3:1.
+        to_cost_center_id: ``toCostCenterId``, the cost center to allocate to.
+    """
+
+    share: Decimal
+    to_cost_center_id: int = Field(
+        validation_alias=AliasChoices("to_cost_center_id", "toCostCenterId"),
+        serialization_alias="toCostCenterId",
+    )
+
+
+class AttachmentInput(_Input):
+    """One file to attach, an item of ``attachments`` (journal entries, persons, orders).
+
+    Attributes:
+        file_id: ``fileId``, the id of a file uploaded through the File API.
+    """
+
+    file_id: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("file_id", "fileId"),
+        serialization_alias="fileId",
+    )
+
+
+class JournalItemInput(_Input):
+    """One line of a collective journal entry, an item of ``items`` (``journal/create.json``).
+
+    Attributes:
+        account_id: ``accountId``, the account of the line (an id from ``list_accounts``).
+        allocations: ``allocations``, the line's allocations to cost centers.
+        associate_id: ``associateId``, a person's id; upstream also takes a name, which
+            creates a new person.
+        credit: ``credit``, the amount on the credit side; ``debit`` or ``credit`` is set.
+        debit: ``debit``, the amount on the debit side.
+        description: ``description``, the text of the line.
+        tax_id: ``taxId``, a tax code's id from ``list_tax_codes``.
+    """
+
+    account_id: int = Field(
+        validation_alias=AliasChoices("account_id", "accountId"), serialization_alias="accountId"
+    )
+    allocations: list[AllocationInput] | None = None
+    associate_id: int | str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("associate_id", "associateId"),
+        serialization_alias="associateId",
+    )
+    credit: Decimal | None = None
+    debit: Decimal | None = None
+    description: str | None = None
+    tax_id: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("tax_id", "taxId"),
+        serialization_alias="taxId",
+    )
+
+
+class OrderItemInput(_Input):
+    """One item of an order, an item of ``items`` (``order/create.json``).
+
+    Attributes:
+        account_id: ``accountId``, the revenue account for sales, the expense account for
+            purchase (an id from ``list_accounts``).
+        name: ``name``, the item's name.
+        unit_price: ``unitPrice``, the price of one unit. Observed on the demo
+            organisation: CashCtrl read the seeded unit prices as gross, VAT included
+            (``baseValue`` ``GROSS``, ``docs/demo-org.md``).
+        allocations: ``allocations``, the item's allocations to cost centers.
+        article_nr: ``articleNr``, the article number.
+        description: ``description``, a description of the item.
+        discount_percentage: ``discountPercentage``, a discount on the item price.
+        inventory_id: ``inventoryId``, an inventory article.
+        quantity: ``quantity``, the number of units; upstream's default is 1.
+        tax_id: ``taxId``, a tax code's id from ``list_tax_codes``.
+        type: ``type``; upstream's default is ``ARTICLE``.
+        unit_id: ``unitId``, the unit (pcs., hours); documented as TEXT holding an id.
+    """
+
+    account_id: int = Field(
+        validation_alias=AliasChoices("account_id", "accountId"), serialization_alias="accountId"
+    )
+    name: str
+    unit_price: Decimal = Field(
+        validation_alias=AliasChoices("unit_price", "unitPrice"), serialization_alias="unitPrice"
+    )
+    allocations: list[AllocationInput] | None = None
+    article_nr: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("article_nr", "articleNr"),
+        serialization_alias="articleNr",
+    )
+    description: str | None = None
+    discount_percentage: Decimal | None = Field(
+        default=None,
+        validation_alias=AliasChoices("discount_percentage", "discountPercentage"),
+        serialization_alias="discountPercentage",
+    )
+    inventory_id: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("inventory_id", "inventoryId"),
+        serialization_alias="inventoryId",
+    )
+    quantity: Decimal | None = None
+    tax_id: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("tax_id", "taxId"),
+        serialization_alias="taxId",
+    )
+    type: OrderItemType | None = None
+    unit_id: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("unit_id", "unitId"),
+        serialization_alias="unitId",
+    )
+
+
+class PersonAddressInput(_Input):
+    """One address of a person, an item of ``addresses`` (``person/create.json``).
+
+    Attributes:
+        type: ``type``, e.g. ``MAIN`` or ``INVOICE``.
+        address: ``address``, street, house number and more; may span lines.
+        canton: ``canton``, Switzerland only, e.g. ``ZH``.
+        city: ``city``.
+        company: ``company``, the recipient's company name.
+        country: ``country``, ISO 3166 alpha-3, e.g. ``CHE`` (upstream lists the codes).
+        first_name: ``firstName``, the recipient's first name.
+        is_hide_company: ``isHideCompany``, no company name in the address window.
+        is_hide_name: ``isHideName``, no title and name in the address window.
+        last_name: ``lastName``, the recipient's last name.
+        zip: ``zip``, the postal code.
+    """
+
+    type: AddressType
+    address: str | None = None
+    canton: Canton | None = None
+    city: str | None = None
+    company: str | None = None
+    country: str | None = None
+    first_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("first_name", "firstName"),
+        serialization_alias="firstName",
+    )
+    is_hide_company: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("is_hide_company", "isHideCompany"),
+        serialization_alias="isHideCompany",
+    )
+    is_hide_name: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("is_hide_name", "isHideName"),
+        serialization_alias="isHideName",
+    )
+    last_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("last_name", "lastName"),
+        serialization_alias="lastName",
+    )
+    zip: str | None = None
+
+
+class PersonContactInput(_Input):
+    """One piece of contact information, an item of ``contacts`` (``person/create.json``).
+
+    Attributes:
+        address: ``address``, the e-mail address, phone number or URL itself.
+        type: ``type``, e.g. ``EMAIL_WORK`` or ``PHONE_WORK``.
+        notes: ``notes``, a short note (at most 255 characters).
+    """
+
+    address: str
+    type: ContactType
+    notes: str | None = None
+
+
+class BankAccountInput(_Input):
+    """One bank account of a person, an item of ``bankAccounts`` (``person/create.json``).
+
+    Attributes:
+        iban: ``iban``, at most 32 characters.
+        type: ``type``, what the account is used for, e.g. ``DEFAULT``.
+        bic: ``bic``, at most 11 characters.
+        notes: ``notes``, at most 255 characters.
+    """
+
+    iban: str
+    type: BankAccountType
+    bic: str | None = None
+    notes: str | None = None
+
+
+class ChildInput(_Input):
+    """One child of an employee or family, an item of ``children`` (``person/create.json``).
+
+    Attributes:
+        name: ``name``, first and last name.
+        date_benefit_begin: ``dateBenefitBegin``, child benefit start.
+        date_benefit_end: ``dateBenefitEnd``, child benefit end.
+        date_birth: ``dateBirth``.
+        date_in_education: ``dateInEducation``, in education since.
+        notes: ``notes``, at most 255 characters.
+    """
+
+    name: str
+    date_benefit_begin: date | None = Field(
+        default=None,
+        validation_alias=AliasChoices("date_benefit_begin", "dateBenefitBegin"),
+        serialization_alias="dateBenefitBegin",
+    )
+    date_benefit_end: date | None = Field(
+        default=None,
+        validation_alias=AliasChoices("date_benefit_end", "dateBenefitEnd"),
+        serialization_alias="dateBenefitEnd",
+    )
+    date_birth: date | None = Field(
+        default=None,
+        validation_alias=AliasChoices("date_birth", "dateBirth"),
+        serialization_alias="dateBirth",
+    )
+    date_in_education: date | None = Field(
+        default=None,
+        validation_alias=AliasChoices("date_in_education", "dateInEducation"),
+        serialization_alias="dateInEducation",
+    )
+    notes: str | None = None
+
+
+class InsuranceContractInput(_Input):
+    """One insurance contract, an item of ``insuranceContracts`` (``person/create.json``).
+
+    Attributes:
+        type_id: ``typeId``, the insurance type (AHV, BVG, ...).
+        contract_nr: ``contractNr``, the contract number.
+        sub_nr: ``subNr``, a sub-contract number.
+    """
+
+    type_id: int = Field(
+        validation_alias=AliasChoices("type_id", "typeId"), serialization_alias="typeId"
+    )
+    contract_nr: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("contract_nr", "contractNr"),
+        serialization_alias="contractNr",
+    )
+    sub_nr: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("sub_nr", "subNr"),
+        serialization_alias="subNr",
+    )
+
+
+class ServicePeriodInput(_Input):
+    """One service period of an employee, an item of ``servicePeriods`` (``person/create.json``).
+
+    Attributes:
+        date_entry: ``dateEntry``, the entry date.
+        date_exit: ``dateExit``, the exit date; none for the current period.
+        notes: ``notes``, at most 255 characters.
+    """
+
+    date_entry: date = Field(
+        validation_alias=AliasChoices("date_entry", "dateEntry"), serialization_alias="dateEntry"
+    )
+    date_exit: date | None = Field(
+        default=None,
+        validation_alias=AliasChoices("date_exit", "dateExit"),
+        serialization_alias="dateExit",
+    )
+    notes: str | None = None
+
+
+class WriteAnswer(UpstreamModel):
+    """The answer of a create, update or delete: ``{"success": true, "message": ...}``.
+
+    ``docs/upstream/`` says only "Returns either a success or multiple error messages"
+    (or "a success or error message" for a delete). Observed on 2026-10-23 when
+    ``scripts/seed_demo.py`` seeded the demo organisation: ``person/create.json``,
+    ``journal/create.json`` and ``order/create.json`` answer with ``success``,
+    ``message`` and ``insertId``, a JSON integer, the new record's id. A refusal
+    (``"success": false``) never gets here: ``_client.classify`` raises it.
+
+    Attributes:
+        success: ``True``.
+        insert_id: ``insertId``, the id of the record created; ``None`` when absent.
+        message: Upstream's message, in the language of the request.
+    """
+
+    success: bool
+    insert_id: int | None = Field(default=None, validation_alias="insertId")
+    message: str | None = None
+
+
+class WritePreview[T](UpstreamModel):
+    """What a write tool would send, returned while ``confirm`` is false; nothing was written.
+
+    Attributes:
+        performed: ``False``: no write was sent. The tag that tells a preview from a
+            ``WriteResult``.
+        endpoint: The operation that would be called, e.g. ``journal/create.json``.
+        payload: The exact form fields upstream would receive, upstream name to encoded
+            text, e.g. ``{"debitId": "3", "amount": "100.00"}``: booleans ``true`` or
+            ``false``, dates ``YYYY-MM-DD``, lists as JSON, ``custom`` as XML.
+        before: For an update or a delete, the record as upstream holds it now, read with
+            ``read.json``; ``None`` for a create.
+        changes: For an update, the fields the call changes, upstream name to encoded
+            text; ``None`` otherwise.
+    """
+
+    performed: Literal[False] = False
+    endpoint: str
+    payload: dict[str, str]
+    before: T | None = None
+    changes: dict[str, str] | None = None
+
+
+class WriteResult(UpstreamModel):
+    """What a write tool did, returned when ``confirm`` is true: upstream accepted the write.
+
+    Attributes:
+        performed: ``True``: the write was sent and upstream answered ``success: true``.
+        insert_id: The new record's id upstream answered (``insertId``); ``None`` when
+            the answer carries none.
+        message: Upstream's message, e.g. that the record was saved.
+    """
+
+    performed: Literal[True] = True
+    insert_id: int | None = None
+    message: str | None = None
