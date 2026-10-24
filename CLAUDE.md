@@ -80,9 +80,10 @@ any amount; it still scrubs e-mail addresses to `user@example.com`, API user tag
 `API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) to
 `REDACTED`, in the request body as well, and refuses any method but GET and POST, a POST
 to anything but the eight write paths, a create without the marker `xippios-live`, and
-any endpoint but `.json`. Writes against demo create a record marked `xippios-live`, update it and delete
-it again, nothing else (see Write tools). The demo subdomain is treated like a key: never
-in a file, a commit, a log line or a report. The repository is public.
+any endpoint but `.json`. Writes against demo create a record marked `xippios-live`,
+update it and delete it again, nothing else (see Write tools). The demo subdomain is
+treated like a key: never in a file, a commit, a log line or a report. The repository is
+public.
 
 ## Rate limit (ADR-0010)
 
@@ -257,12 +258,14 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
    `insuranceMemberNr`, an employee's `userId`), unless the call gives or clears it.
    `person/read.json` returns every stored documented field and leaves empty ones out
    (verified live on 2026-10-24, `docs/demo-org.md`). `clear: list[str] | None` names
-   parameters to send empty, checked against a `<RESOURCE>_UPDATE` table of the
-   documented update parameters; one both given and cleared is refused. A journal entry
-   an order or a salary run booked (`orderId`, `orderBookEntryId`,
-   `salaryBookEntryId`) is refused. A confirmed call reads again and recomputes, so its
-   payload can differ from the preview's if the record changed. Never send a partial
-   record.
+   parameters to send empty, a flag (`_FLAGS`) as `false`, checked against a
+   `<RESOURCE>_UPDATE` table of the documented update parameters; one both given and
+   cleared is refused, and so is one an update sends only when given (`_UNSENT`:
+   `sequence_number_id`). A journal entry an order or a salary run booked (`orderId`,
+   `orderBookEntryId`, `salaryBookEntryId`) is refused, by `delete_journal_entry` as
+   well, which reads the entry first, confirmed or not. A confirmed call reads again and
+   recomputes, so its payload can differ from the preview's if the record changed. Never
+   send a partial record.
 4. **Custom fields** are `customField<ID>` to text (`api/_form.py`'s `CUSTOM_FIELD`),
    rendered as `<values><customField1>...</customField1></values>`, values escaped; an
    update merges the given values into the stored XML (`merge_custom`) and refuses XML
