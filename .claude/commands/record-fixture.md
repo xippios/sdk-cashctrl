@@ -1,7 +1,8 @@
 Record a fixture for CashCtrl: $ARGUMENTS
 
-Expected arguments: `<endpoint> <case> [key=value ...] [--wrong-key]`, for example
-`account/read.json unknown_id id=999999999`.
+Expected arguments: `<endpoint> <case> [key=value ...] [--wrong-key] [--method POST]`, for
+example `account/read.json unknown_id id=999999999` or, for a write,
+`journal/delete.json ok --method POST ids=51`.
 
 Fixtures are recorded through the real client by `scripts/record_fixture.py`, never typed
 in by hand. **Every fixture comes from the demo organisation and from nothing else**: the
@@ -20,8 +21,18 @@ recorded. If the demo pair ever points at an organisation that is not that synth
 one, stop: never record from it. These policies stand all the same, and each refusal
 writes nothing and exits non-zero:
 
-- **GET only.** Any other `--method` is refused before a request is sent. The recorder
-  for the write tools will add writes deliberately; never work around this.
+- **GET, and POST for the write tools only.** `--method POST` is accepted for a path
+  ending in `/create.json`, `/update.json` or `/delete.json`, the operations the write
+  tools call; every other POST (`update_status.json`, `switch.json`, ...) and every
+  other method is refused before a request is sent. A POST sends the `key=value` pairs
+  as the form body, in their order, as the write tools send theirs
+  (`application/x-www-form-urlencoded; charset=UTF-8`). A recorded write changes the
+  demo organisation: the recorder says so, names the `insertId` upstream answered, and
+  asks for the matching delete. Record only a record marked `xippios-live` (in its
+  title, company or description, and `nr` where it has one), its update and its
+  delete, in that order, so that every record created is deleted again; never touch a
+  seeded record. Afterwards confirm with one list per resource (`query=xippios-live`,
+  counts only) that nothing is left. Never work around this.
 - **`.json` only.** An endpoint without the extension (`account/balance`,
   `account/costcenter/balance`, `fiscalperiod/result`, `setting/get`) answers a bare
   number or a document, and an export (`.pdf`, `.xlsx`, `.csv`, `.zip`) a file; both
@@ -52,13 +63,19 @@ writes nothing and exits non-zero:
 2. Find the request path and parameters in `docs/upstream/` and in the wrapper under
    `src/xippios/cashctrl/api/`. Parameters are named as upstream names them
    (`fiscalPeriodId`).
-   Recordings are read-only `.json` endpoints (`list.json`, `read.json`). Exports (PDF,
-   Excel, ZIP) are out of scope, and the recorder also refuses a body that is not UTF-8
-   text, because it can be neither scrubbed nor reviewed.
+   Recordings are `.json` endpoints: reads (`list.json`, `read.json`) and the write
+   tools' `create.json`, `update.json` and `delete.json`. Exports (PDF, Excel, ZIP) are
+   out of scope, and the recorder also refuses a body that is not UTF-8 text, because
+   it can be neither scrubbed nor reviewed. For a write, compute the form fields
+   offline through the task's preview (`confirm=False`, which sends nothing for a
+   create; an update's preview replays the recorded read) and pass exactly those pairs,
+   in that order: the tests compare the preview's `payload` with the recorded request
+   body.
 3. Record, from the repository root:
 
    ```bash
    direnv exec ~/github/sdk uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]
+   direnv exec ~/github/sdk uv run scripts/record_fixture.py <path>/create.json ok --method POST [key=value ...]
    ```
 
    It builds the fixture in memory with core's `fixture_from_response` and `Scrub`
@@ -73,8 +90,9 @@ writes nothing and exits non-zero:
    the real one, to record a 401.
    Error cases (an unknown id, a refusal) are worth recording; the recorder keeps them
    instead of raising.
-4. The check runs on the scrubbed fixture before the write, over its text and the
-   decoded strings of its body: if the subdomain on its own, an e-mail address other
+4. The check runs on the scrubbed fixture before the write, over its text, the
+   decoded strings of its response body and, for a write, the request body (the raw
+   text, every form field decoded and every string of a JSON value such as `items`): if the subdomain on its own, an e-mail address other
    than `user@example.com`, an API user tag other than `API:REDACTED` (in any case
    and position), the key's first four characters on their own ("possible key
    prefix") or a value other than `null` or `REDACTED` under a token-like field name is

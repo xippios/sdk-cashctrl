@@ -96,15 +96,107 @@ declared with a well-formed subdomain, its instructions name the organisation, a
 tool call that names another organisation or leaves `org` out is refused before it
 reaches CashCtrl; `cashctrl_list_organisations` then lists `acme` only. Without
 `--org`, a server serves every declared organisation and the agent picks one per call,
-after `cashctrl_list_organisations` has named them. Tools are read-only and named
+after `cashctrl_list_organisations` has named them. Its tools are read-only and named
 `cashctrl_<verb>_<noun>`. Results are capped at 200 rows or 64 KB with a note on how to
 narrow the query. `--http` serves streamable HTTP instead of stdio.
 
-Write tools run in a separate server, `xippios-cashctrl-mcp-write`; every write
-tool previews its change unless called with `confirm=true`. It takes `--org` too. It
-carries no authentication, so `--http` serves it on a loopback `--host` (`127.0.0.1`,
-`localhost`, `::1`) only; `--allow-remote` serves it beyond, behind a gateway that
-authenticates.
+Write tools run in a separate server, `xippios-cashctrl-mcp-write` (see Write tools
+below); every write tool previews its change unless called with `confirm=true`. It
+takes `--org` too. It carries no authentication, so `--http` serves it on a loopback
+`--host` (`127.0.0.1`, `localhost`, `::1`) only; `--allow-remote` serves it beyond,
+behind a gateway that authenticates.
+
+```json
+{
+  "mcpServers": {
+    "cashctrl-write": {
+      "command": "uvx",
+      "args": ["--from", "xippios-cashctrl[mcp]", "xippios-cashctrl-mcp-write", "--org", "acme"],
+      "env": {
+        "CASHCTRL_ORGS": "acme",
+        "CASHCTRL_ACME_SUBDOMAIN": "acme",
+        "CASHCTRL_ACME_API_KEY": "..."
+      }
+    }
+  }
+}
+```
+
+## Write tools
+
+Eight tools create, change and delete journal entries, persons and orders. They are
+tasks in `xippios.cashctrl.tasks_write` (re-exported from `xippios.cashctrl`), served
+by the write server only: never by the read server, never as an HTTP route.
+
+| Upstream operation | Task function | MCP tool |
+| --- | --- | --- |
+| `POST journal/create.json` (Create journal entry) | `create_journal_entry` | `cashctrl_create_journal_entry` |
+| `POST journal/update.json` (Update journal entry) | `update_journal_entry` | `cashctrl_update_journal_entry` |
+| `POST journal/delete.json` (Delete journal entries) | `delete_journal_entry` | `cashctrl_delete_journal_entry` |
+| `POST person/create.json` (Create person) | `create_person` | `cashctrl_create_person` |
+| `POST person/update.json` (Update person) | `update_person` | `cashctrl_update_person` |
+| `POST person/delete.json` (Delete people) | `delete_person` | `cashctrl_delete_person` |
+| `POST order/create.json` (Create order) | `create_order` | `cashctrl_create_order` |
+| `POST order/delete.json` (Delete orders) | `delete_order` | `cashctrl_delete_order` |
+
+- **The confirm gate.** Every write tool takes `confirm`, last, `false` by default.
+  Without it nothing is written: the result is a preview, `performed: false`, with
+  `endpoint`, `payload` (the exact form fields CashCtrl would receive, under upstream's
+  names: booleans `true`/`false`, dates `YYYY-MM-DD`, lists as JSON, custom fields as
+  XML), `before` (for an update or a delete, the record as it is now) and `changes`
+  (for an update). A create's preview sends no request; an update's or a delete's sends
+  one read and never a write. With `confirm=true` the write is sent and the result is
+  `performed: true` with `insert_id` (the new record's id; an update answers the
+  record's own) and upstream's `message`. Call once without `confirm`, show the
+  preview, then confirm. In Python the result is `Result[WritePreview[<record>] |
+  WriteResult]`; narrow it with `isinstance` or `performed`.
+- **Updates send the whole record.** CashCtrl empties every parameter an update leaves
+  out. `update_journal_entry` and `update_person` therefore read the record, apply the
+  parameters given, and send every parameter `update.json` documents, the rest taken
+  from the record. A parameter left out keeps its value; `""` empties a text field.
+  A record that gives no value for a mandatory parameter, or holds a list whose shape
+  was never observed (attachments, allocations, bank accounts, children, service
+  periods, insurance contracts, certificate values), is refused with
+  `InvalidRequestError` before anything is written, unless the call passes it.
+- **Deletes** take one id; the preview shows the record that would go. An id that no
+  longer exists is refused by upstream (`RequestRejected`).
+- **Custom fields**: `custom` maps upstream's names (`customField1`, `customField<ID>`)
+  to text, sent as `<values><customField1>...</customField1></values>`, values escaped.
+  An update keeps every stored value it is not given.
+- **Amounts.** A journal `amount` with a `tax_id` is the gross amount, VAT included, and
+  order items' `unit_price` was read as gross too (observed on the demo organisation,
+  although the tax codes' calculation type reads NET; `docs/demo-org.md`).
+- **Ids** come from the read tools: account ids from `cashctrl_list_accounts` (the
+  `id`, not the account number), tax codes from `cashctrl_list_tax_codes`, persons from
+  `cashctrl_list_persons`, order categories and their statuses from
+  `cashctrl_list_order_categories`, currencies from `cashctrl_list_currencies`.
+- CashCtrl checks every write and refuses with the fields it objects to, e.g.
+  `error: RequestRejected: CashCtrl rejected the request: debitId: This field cannot be
+  empty.`; a refused write changed nothing. A write that meets a server error or a
+  timeout is never repeated (ADR-0011): read back before sending it again.
+
+```python
+from datetime import date
+from decimal import Decimal
+
+from xippios.cashctrl import tasks_write
+from xippios.cashctrl.models import WritePreview, WriteResult
+
+entry = dict(
+    date_added=date(2026, 10, 24),
+    amount=Decimal("100.00"),  # gross, VAT included, with a tax_id
+    debit_id=3,  # account ids from list_accounts, not account numbers
+    credit_id=42,
+    tax_id=9,  # from list_tax_codes
+    title="Barverkauf",
+)
+preview = tasks_write.create_journal_entry("demo", **entry)
+assert isinstance(preview.data, WritePreview)
+print(preview.data.payload)  # what CashCtrl would receive; nothing was written
+done = tasks_write.create_journal_entry("demo", **entry, confirm=True)
+assert isinstance(done.data, WriteResult)
+print(done.data.insert_id)  # the new entry's id
+```
 
 ## HTTP
 
@@ -135,6 +227,10 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET person/read.json` (Read person) | `get_person` | `cashctrl_get_person` | available |
 | `GET order/list.json` (List orders) | `list_orders` | `cashctrl_list_orders` | available; paged; HTTP route is `POST` |
 | `GET order/read.json` (Read order) | `get_order` | `cashctrl_get_order` | available |
+| `GET order/category/list.json` (List categories) | `list_order_categories` | `cashctrl_list_order_categories` | available |
+| `POST journal/create.json`, `update.json`, `delete.json` | `create_journal_entry`, `update_journal_entry`, `delete_journal_entry` | `cashctrl_create_journal_entry`, ... | available on the write server only |
+| `POST person/create.json`, `update.json`, `delete.json` | `create_person`, `update_person`, `delete_person` | `cashctrl_create_person`, ... | available on the write server only |
+| `POST order/create.json`, `delete.json` | `create_order`, `delete_order` | `cashctrl_create_order`, `cashctrl_delete_order` | available on the write server only |
 
 `lang` (`de`, `fr`, `it`, `en`), which upstream takes on every request and which matters
 mostly for error messages and exports, is not exposed yet. `list_accounts` checks `dir`
@@ -158,7 +254,8 @@ The journal and order lists answer for the API user's current fiscal period unle
 `fiscal_period_id` is given; that period is server-side state that
 `fiscalperiod/switch.json` changes, and `meta.request` does not show which period
 answered, so pass `fiscal_period_id` (an id from `list_fiscal_periods`) for a
-reproducible answer. Without `type` (`SALES`, `PURCHASE`), `list_orders` returns both.
+reproducible answer. Without `type` (`SALES`, `PURCHASE`), `list_orders` returns both;
+`list_order_categories` lists `SALES` (upstream's default) unless given `PURCHASE`.
 
 ## Upstream terms and attribution
 

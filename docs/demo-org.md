@@ -50,8 +50,8 @@ register. `tests/test_seed_demo.py` checks the rule against the data and this do
    a role that may read locations, fiscal periods, accounts and their balances,
    currencies, tax codes, person and order categories, persons, the journal and orders,
    and may create currencies, fiscal periods, persons, journal entries and orders. After
-   seeding, the role may be reduced to read-only; the write tools' live tests will need
-   write rights again later.
+   seeding, the role may be reduced to read-only; the write tools' live tests and write
+   fixtures need it to create, update and delete persons, journal entries and orders.
 5. Put the two variables into `~/github/sdk/.envrc` and run `direnv allow`:
    `CASHCTRL_DEMO_SUBDOMAIN` (the one label before `.cashctrl.com`) and
    `CASHCTRL_DEMO_API_KEY`. The subdomain is treated like the key: never in a file of
@@ -405,6 +405,11 @@ the first write:
   2026-01-01, and checks afterwards that a period covers 2025.
 - Nothing else is created or changed: no accounts, tax codes, locations, settings,
   salary, files, inventory or custom fields.
+
+The write tools' live tests and write fixtures create records marked `xippios-live`
+(title, company or description, and `nr`), dated 2026-10-24, and delete them again in
+the same run; each live test first deletes marked leftovers of an earlier run. No seeded
+record is changed.
 
 ## Observed write semantics (filled by the first run)
 
