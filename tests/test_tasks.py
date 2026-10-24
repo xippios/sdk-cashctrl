@@ -1127,6 +1127,67 @@ async def test_get_order_as_a_tool(
     assert payload["data"]["total"] == 7750
 
 
+def test_list_order_categories_replays_the_sales_categories(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    route = replay_fixture("order_category_list", "default")
+    result = tasks.list_order_categories(DEMO)
+    assert not route.calls.last.request.url.params, "upstream's default type, SALES"
+    assert result.meta.endpoint == "order/category/list.json"
+    assert result.meta.request == {"org": DEMO}
+    assert (result.meta.tenant, result.meta.total) == (DEMO, 6)
+    assert {category.type for category in result.data} == {"SALES"}
+    (invoice,) = [
+        c for c in result.data if c.name_singular and "<en>Invoice</en>" in c.name_singular
+    ]
+    assert (invoice.id, invoice.account_id, invoice.sequence_nr_id) == (4, 4, 1)
+    draft, opened = invoice.status[:2]
+    assert (draft.id, draft.is_book, opened.id, opened.is_book) == (12, False, 16, True)
+    assert "<en>Draft</en>" in (draft.name or "")
+    assert [template.account_id for template in invoice.book_templates] == [3, 157]
+
+
+def test_list_order_categories_sends_type_and_period(respx_mock: respx.MockRouter) -> None:
+    route = respx_mock.get("https://demo.cashctrl.com/api/v1/order/category/list.json")
+    route.respond(200, json={"total": 0, "data": []})
+    result = tasks.list_order_categories(DEMO, type="PURCHASE", fiscal_period_id=1)
+    assert dict(route.calls.last.request.url.params) == {"fiscalPeriodId": "1", "type": "PURCHASE"}
+    assert result.meta.request == {"org": DEMO, "fiscalPeriodId": 1, "type": "PURCHASE"}
+    with pytest.raises(InvalidRequestError, match="type must be SALES or PURCHASE, not 'sales'"):
+        tasks.list_order_categories(DEMO, type="sales")  # type: ignore[arg-type]
+    assert route.call_count == 1
+
+
+@pytest.mark.anyio
+async def test_list_order_categories_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("order_category_list", "default")
+    payload = await mcp_call(server, "cashctrl_list_order_categories", {"org": DEMO})
+    assert payload["meta"]["total"] == 6
+    invoice = next(c for c in payload["data"] if c["id"] == 4)
+    assert [status["id"] for status in invoice["status"]] == [12, 16, 40, 43, 18, 17]
+
+
+def test_list_order_categories_as_a_route(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from xippios.cashctrl.http import router
+
+    app = FastAPI()
+    app.include_router(router)
+    replay_fixture("order_category_list", "default")
+    response = TestClient(app).get(
+        "/cashctrl/list_order_categories", params={"org": DEMO, "type": "SALES"}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["meta"]["total"] == 6
+    assert response.json()["meta"]["tenant"] == DEMO
+
+
 PAGED_LISTS: dict[str, Callable[..., typing.Any]] = {
     "list_journal_entries": tasks.list_journal_entries,
     "list_persons": tasks.list_persons,
@@ -1231,6 +1292,7 @@ RECORDED_LISTS: dict[str, tuple[Callable[..., typing.Any], dict[str, typing.Any]
     "person_list/only_vendors": (api.person_list, {"only_vendors": True}),
     "order_list/fp2026_sales": (api.order_list, {"type": "SALES", "fiscal_period_id": 1}),
     "order_list/fp2026_purchase": (api.order_list, {"type": "PURCHASE", "fiscal_period_id": 1}),
+    "order_category_list/default": (api.order_category_list, {}),
 }
 
 
@@ -1280,6 +1342,7 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
     "cashctrl_get_person": ("person_read/by_id", {}),
     "cashctrl_list_orders": ("order_list/fp2026_sales", {"type": "SALES", "fiscal_period_id": 1}),
     "cashctrl_get_order": ("order_read/by_id", {}),
+    "cashctrl_list_order_categories": ("order_category_list/default", {}),
 }
 
 
