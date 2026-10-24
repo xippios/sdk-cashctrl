@@ -15,8 +15,9 @@ from xippios.cashctrl._version import __version__
 
 INSTRUCTIONS = (
     "CashCtrl via xippios. "
-    "Tools are read-only. Every tool takes org, the name of a configured organisation; "
-    "an unknown name is answered with the declared ones. "
+    "Tools are read-only. cashctrl_list_organisations lists the configured organisations; "
+    "every other tool takes org, the name of one of them, and an unknown name is answered "
+    "with the declared ones. "
     "Call the list tools (cashctrl_list_*) first to find valid ids, then query."
 )
 

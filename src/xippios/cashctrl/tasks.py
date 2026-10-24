@@ -9,12 +9,15 @@ exactly what is named there.
 ``org: str`` is the first, required parameter of every task: the name of a declared
 organisation (``demo``, ``acme``), handed to the endpoint wrappers, which reach CashCtrl
 through ``client_for(org)``. No task spans organisations. ``tests/test_tasks.py`` checks
-every name in ``__all__``.
+every name in ``__all__``. The one exception is ``list_organisations``, core's tenant
+list (``xippios.core.tenants.list_task``, ADR-0014): no argument, the declared
+organisations' names only, so an agent can form valid calls.
 
 Docstrings are read by agents: one sentence first, then ``Args:`` with examples of
 valid values for every parameter. ``/add-endpoint`` walks through the whole recipe.
 
-``meta.endpoint`` is the upstream path after ``/api/v1/`` (``account/list.json``) and
+``meta.endpoint`` is the upstream path after ``/api/v1/`` (``account/list.json``),
+``meta.tenant`` the organisation the data came from, by name (ADR-0014), and
 ``meta.request`` holds ``org`` plus the query parameters sent, under upstream's names.
 CashCtrl publishes no release time or identifier, so ``published_at`` and ``vintage``
 stay empty. Every list task sets ``meta.total`` to upstream's ``total``, its count of the
@@ -47,9 +50,10 @@ from xippios.core import (
     paginate_offset,
     sync,
 )
+from xippios.core.tenants import list_task
 
 from xippios.cashctrl import api
-from xippios.cashctrl._client import SOURCE
+from xippios.cashctrl._client import SOURCE, TENANTS
 from xippios.cashctrl.models import (
     Account,
     AccountDetail,
@@ -79,6 +83,7 @@ __all__ = [
     "list_fiscal_periods",
     "list_journal_entries",
     "list_orders",
+    "list_organisations",
     "list_persons",
     "list_tax_codes",
 ]
@@ -97,8 +102,17 @@ Upstream's documented default for ``limit`` on the journal, person and order lis
 """
 
 
-def _meta(endpoint: str, request: dict[str, Any], *, total: int | None = None) -> ResultMeta:
-    return ResultMeta(source=SOURCE, endpoint=endpoint, request=request, total=total)
+def _meta(
+    org: str, endpoint: str, params: dict[str, Any], *, total: int | None = None
+) -> ResultMeta:
+    """``meta`` of a task's result: ``org`` as the tenant and first in ``request``."""
+    return ResultMeta(
+        source=SOURCE,
+        endpoint=endpoint,
+        request={"org": org, **params},
+        total=total,
+        tenant=org,
+    )
 
 
 async def _offset_pages[T](
@@ -243,7 +257,7 @@ async def list_fiscal_periods_async(org: str) -> Result[list[FiscalPeriod]]:
         org: A declared organisation name, e.g. ``demo``.
     """
     response = await api.fiscalperiod_list(org)
-    meta = _meta("fiscalperiod/list.json", {"org": org}, total=response.total)
+    meta = _meta(org, "fiscalperiod/list.json", {}, total=response.total)
     return Result(data=response.data, meta=meta)
 
 
@@ -260,7 +274,7 @@ async def list_currencies_async(org: str) -> Result[list[Currency]]:
         org: A declared organisation name, e.g. ``demo``.
     """
     response = await api.currency_list(org)
-    meta = _meta("currency/list.json", {"org": org}, total=response.total)
+    meta = _meta(org, "currency/list.json", {}, total=response.total)
     return Result(data=response.data, meta=meta)
 
 
@@ -278,9 +292,7 @@ async def list_tax_codes_async(org: str) -> Result[list[TaxCode]]:
         org: A declared organisation name, e.g. ``demo``.
     """
     response = await api.tax_list(org)
-    return Result(
-        data=response.data, meta=_meta("tax/list.json", {"org": org}, total=response.total)
-    )
+    return Result(data=response.data, meta=_meta(org, "tax/list.json", {}, total=response.total))
 
 
 async def list_accounts_async(
@@ -340,7 +352,7 @@ async def list_accounts_async(
     }
     sent = api.account_list_params(**arguments)
     response = await api.account_list(org, **arguments)
-    meta = _meta("account/list.json", {"org": org, **sent}, total=response.total)
+    meta = _meta(org, "account/list.json", sent, total=response.total)
     return Result(data=response.data, meta=meta)
 
 
@@ -359,7 +371,7 @@ async def get_account_async(org: str, id: int) -> Result[AccountDetail]:
             account number.
     """
     account = await api.account_read(org, id)
-    return Result(data=account, meta=_meta("account/read.json", {"org": org, "id": id}))
+    return Result(data=account, meta=_meta(org, "account/read.json", {"id": id}))
 
 
 async def list_journal_entries_async(
@@ -466,7 +478,7 @@ async def list_journal_entries_async(
 
     entries, total = await _offset_pages(page, start=start, limit=limit)
     sent = api.journal_list_params(**arguments, start=start, limit=limit)
-    meta = _meta("journal/list.json", {"org": org, **sent}, total=total)
+    meta = _meta(org, "journal/list.json", sent, total=total)
     return Result(data=entries, meta=meta)
 
 
@@ -486,7 +498,7 @@ async def get_journal_entry_async(org: str, id: int) -> Result[JournalEntryDetai
         id: The entry's ``id`` as ``list_journal_entries`` gives it, e.g. ``11``.
     """
     entry = await api.journal_read(org, id)
-    return Result(data=entry, meta=_meta("journal/read.json", {"org": org, "id": id}))
+    return Result(data=entry, meta=_meta(org, "journal/read.json", {"id": id}))
 
 
 async def list_persons_async(
@@ -583,7 +595,7 @@ async def list_persons_async(
 
     persons, total = await _offset_pages(page, start=start, limit=limit)
     sent = api.person_list_params(**arguments, start=start, limit=limit)
-    meta = _meta("person/list.json", {"org": org, **sent}, total=total)
+    meta = _meta(org, "person/list.json", sent, total=total)
     return Result(data=persons, meta=meta)
 
 
@@ -605,7 +617,7 @@ async def get_person_async(org: str, id: int) -> Result[PersonDetail]:
             number ``nr``.
     """
     person = await api.person_read(org, id)
-    return Result(data=person, meta=_meta("person/read.json", {"org": org, "id": id}))
+    return Result(data=person, meta=_meta(org, "person/read.json", {"id": id}))
 
 
 async def list_orders_async(
@@ -710,7 +722,7 @@ async def list_orders_async(
 
     orders, total = await _offset_pages(page, start=start, limit=limit)
     sent = api.order_list_params(**arguments, start=start, limit=limit)
-    meta = _meta("order/list.json", {"org": org, **sent}, total=total)
+    meta = _meta(org, "order/list.json", sent, total=total)
     return Result(data=orders, meta=meta)
 
 
@@ -731,8 +743,19 @@ async def get_order_async(org: str, id: int) -> Result[OrderDetail]:
             ``nr``.
     """
     order = await api.order_read(org, id)
-    return Result(data=order, meta=_meta("order/read.json", {"org": org, "id": id}))
+    return Result(data=order, meta=_meta(org, "order/read.json", {"id": id}))
 
+
+LIST_ORGANISATIONS_DOC = """List the organisations this server can reach, by name.
+
+Every other tool takes one of these names as ``org`` to choose the organisation it works
+on, e.g. ``demo`` or ``acme``. Only names come back, never a subdomain, a key or another
+value. On a server locked to one organisation (``--org``) only that one is listed; an
+empty list means that no organisation is declared where the server runs.
+"""
+
+list_organisations = list_task(TENANTS, name="list_organisations", doc=LIST_ORGANISATIONS_DOC)
+"""The declared organisations' names (ADR-0014); ``meta.tenant`` is ``None``."""
 
 list_fiscal_periods = sync(list_fiscal_periods_async)
 list_currencies = sync(list_currencies_async)
