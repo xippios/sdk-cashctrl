@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-10-24T08:46:52.834263Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/journal/read.json?id=51"
+  },
+  "response": {
+    "body": "{\"success\":true,\"data\":{\"id\":51,\"created\":\"2026-10-24 10:46:34.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-24 10:46:34.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"creditId\":42,\"debitId\":3,\"associateId\":null,\"taxId\":9,\"orderId\":null,\"orderBookEntryId\":null,\"statementId\":null,\"salaryBookEntryId\":null,\"inventoryId\":null,\"currencyId\":null,\"importEntryId\":null,\"recurrenceId\":null,\"items\":[],\"attachments\":[],\"allocations\":[],\"type\":\"MANUAL\",\"dateAdded\":\"2026-10-24 00:00:00.0\",\"title\":\"xippios-live fixture\",\"custom\":null,\"notes\":null,\"reference\":null,\"amount\":100,\"currencyRate\":1,\"accountIds\":\"[\\\"33\\\",\\\"3\\\",\\\"42\\\"]\",\"itemsIndex\":\"\",\"itemsCount\":0,\"taxed\":true,\"taxRate\":8.1,\"attachmentCount\":0,\"allocationCount\":0,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"currencyCode\":null,\"associateName\":null,\"associates\":[],\"taxCode\":\"UN1\",\"taxedItems\":[],\"defaultCurrencyAmount\":100,\"rows\":[{\"fcDebit\":100,\"fcCredit\":0,\"acDebit\":100,\"acCredit\":0,\"dcDebit\":100,\"dcCredit\":0,\"fcTax\":0,\"acTax\":0,\"dcTax\":0,\"taxPercentage\":null,\"accountName\":\"1020 <values><de>Bank</de><en>Bank account</en><fr>Compte courant</fr><it>Conto corrente</it></values>\",\"accountId\":3,\"isTaxed\":false,\"isTax\":false},{\"fcDebit\":0,\"fcCredit\":92.51,\"acDebit\":0,\"acCredit\":92.51,\"dcDebit\":0,\"dcCredit\":92.51,\"fcTax\":7.49,\"acTax\":7.49,\"dcTax\":7.49,\"taxPercentage\":8.1,\"accountName\":\"3200 <values><de>Handelsertrag</de><en>Trading revenue</en><fr>Produits de marchandises</fr><it>Ricavi merci di rivendita</it></values>\",\"accountId\":42,\"isTaxed\":true,\"isTax\":false},{\"fcDebit\":0,\"fcCredit\":7.49,\"acDebit\":0,\"acCredit\":7.49,\"dcDebit\":0,\"dcCredit\":7.49,\"fcTax\":0,\"acTax\":0,\"dcTax\":0,\"taxPercentage\":8.1,\"accountName\":\"2200 <values><de>Umsatzsteuer</de><en>Sales tax payable</en><fr>TVA due</fr><it>IVA dovuta</it></values>\",\"accountId\":33,\"isTaxed\":false,\"isTax\":true}],\"startDate\":null,\"recurrence\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"nr\":null,\"notifyEmail\":null}}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Sat, 24 Oct 2026 08:46:50 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

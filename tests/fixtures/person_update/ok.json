@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-10-24T08:50:28.443960Z",
+  "request": {
+    "body": "id=14&company=xippios-live+Fixture+AG&addresses=%5B%7B%22type%22%3A%22MAIN%22%2C%22address%22%3A%22Musterstrasse+1%22%2C%22canton%22%3A%22ZH%22%2C%22city%22%3A%22Z%C3%BCrich%22%2C%22country%22%3A%22CHE%22%2C%22isHideCompany%22%3Afalse%2C%22isHideName%22%3Afalse%2C%22zip%22%3A%228001%22%7D%5D&contacts=%5B%7B%22address%22%3A%22user%40example.com%22%2C%22type%22%3A%22EMAIL_WORK%22%7D%5D&isAutoFillResponsiblePerson=false&isCustomer=true&isEmployee=false&isFamily=false&isInactive=false&isInsurance=false&isVendor=false&language=DE&nr=xippios-live",
+    "body_base64": false,
+    "content_type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "method": "POST",
+    "url": "https://demo.cashctrl.com/api/v1/person/update.json"
+  },
+  "response": {
+    "body": "{\"success\":true,\"message\":\"Person saved\",\"insertId\":14}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Sat, 24 Oct 2026 08:50:27 GMT"
+      ],
+      [
+        "etag",
+        "\"1792306289900\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}
