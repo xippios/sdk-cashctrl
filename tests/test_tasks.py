@@ -14,12 +14,12 @@ from pathlib import Path
 import httpx
 import pytest
 import respx
-from mcp.server.mcpserver.exceptions import ToolError
 from xippios.core import InvalidRequestError, NotFoundError, sync
+from xippios.core.mcp import tool_name
 from xippios.core.testing import fixture_path, load_fixture, mcp_call
 
 from xippios.cashctrl import __version__, api, tasks, tasks_write
-from xippios.cashctrl._client import DEMO, api_key_env, client_for
+from xippios.cashctrl._client import DEMO, SOURCE, TENANTS, client_for
 from xippios.cashctrl.mcp import server
 from xippios.cashctrl.models import (
     Account,
@@ -30,16 +30,19 @@ from xippios.cashctrl.models import (
     PersonDetail,
 )
 
-SHELL_KEY = os.environ.get(api_key_env(DEMO))
+SHELL_KEY = os.environ.get(TENANTS.var(DEMO, "API_KEY"))
 """The demo key the shell held when the tests were collected, before any fixture; never printed."""
-CONFTEST = Path(__file__).with_name("conftest.py")
 LIST_URL = "https://demo.cashctrl.com/api/v1/fiscalperiod/list.json"
 
-TASKS = [getattr(tasks, name) for name in tasks.__all__]
+TENANT_LIST = "list_organisations"
+"""Core's tenant list (ADR-0014): no ``org``, no async twin; tested on its own below."""
+TASKS = [getattr(tasks, name) for name in tasks.__all__ if name != TENANT_LIST]
+ORG_TASK_NAMES = [name for name in tasks.__all__ if name != TENANT_LIST]
 EVERY_TASK: dict[str, Callable[..., object]] = {
     f"{module.__name__.rsplit('.', 1)[-1]}.{name}": getattr(module, name)
     for module in (tasks, tasks_write)
     for name in module.__all__
+    if (module, name) != (tasks, TENANT_LIST)
 }
 
 
@@ -67,93 +70,28 @@ def carries(request: httpx.Request, key: str) -> bool:
 
 @pytest.mark.anyio
 async def test_replay_tests_send_the_placeholder_key(
-    demo_only: str | None, respx_mock: respx.MockRouter
+    placeholder_api_key: str | None, respx_mock: respx.MockRouter
 ) -> None:
     """A request through the registry outside a live test carries the placeholder only.
 
-    The demo client is ``client_for("demo")``; the shell's ``CASHCTRL_DEMO_API_KEY``, if
-    direnv loaded one, appears nowhere in the request, neither plain nor as the basic auth
+    Core's plugin pins the key (ADR-0013); this checks it through the registry. The demo
+    client is ``client_for("demo")``; the shell's ``CASHCTRL_DEMO_API_KEY``, if direnv
+    loaded one, appears nowhere in the request, neither plain nor as the basic auth
     token. Every assertion is on a boolean, so a failure says where the key went, never
     the key.
     """
-    assert demo_only is not None
-    variable = api_key_env(DEMO)
-    env_holds_placeholder = os.environ[variable] == demo_only
+    assert placeholder_api_key is not None
+    variable = TENANTS.var(DEMO, "API_KEY")
+    env_holds_placeholder = os.environ[variable] == placeholder_api_key
     assert env_holds_placeholder, f"{variable} does not hold the placeholder"
     route = respx_mock.get(LIST_URL).respond(200, json={"total": 0, "data": []})
     await client_for(DEMO).get_json("/fiscalperiod/list.json")
     sent = route.calls.last.request
-    sends_placeholder = basic_user(sent) == demo_only
+    sends_placeholder = basic_user(sent) == placeholder_api_key
     assert sends_placeholder, "the basic auth user name does not carry the placeholder"
-    if SHELL_KEY and demo_only != SHELL_KEY:
+    if SHELL_KEY and placeholder_api_key != SHELL_KEY:
         leaked = carries(sent, SHELL_KEY)
         assert not leaked, f"the key in {variable} went out with the request"
-
-
-# Run by pytester in a subprocess, with this repository's conftest: a live test caches a
-# key in the demo client's auth, then an offline test sends a request. The live run uses
-# the replay host too, so a client the live test left in the cache would be handed to the
-# offline test as it is: only the conftest's reset_clients() keeps the key away.
-LIVE_THEN_OFFLINE = f"""
-import base64
-
-import httpx
-import pytest
-import respx
-
-from xippios.cashctrl._client import DEMO, client_for
-
-LIVE_KEY = "key-a-live-test-cached"  # pragma: allowlist secret
-URL = "{LIST_URL}"
-
-
-def user(request: httpx.Request) -> str:
-    encoded = request.headers["Authorization"].removeprefix("Basic ")
-    return base64.b64decode(encoded).decode().partition(":")[0]
-
-
-@pytest.mark.live
-@pytest.mark.anyio
-async def test_1_live(respx_mock: respx.MockRouter) -> None:
-    route = respx_mock.get(URL).respond(200, json={{"total": 0, "data": []}})
-    await client_for(DEMO).get_json("/fiscalperiod/list.json")
-    assert user(route.calls.last.request) == LIVE_KEY
-
-
-@pytest.mark.anyio
-async def test_2_offline(respx_mock: respx.MockRouter, demo_only: str | None) -> None:
-    route = respx_mock.get(URL).respond(200, json={{"total": 0, "data": []}})
-    await client_for(DEMO).get_json("/fiscalperiod/list.json")
-    sent = route.calls.last.request
-    assert user(sent) == demo_only == "placeholder-for-fixture-replay"
-    assert LIVE_KEY not in str(sent.headers)
-"""
-
-
-@pytest.mark.parametrize("reset", [True, False], ids=["conftest", "without-reset"])
-def test_a_key_a_live_test_cached_never_reaches_the_next(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, reset: bool
-) -> None:
-    """The cached auth of a live test's client cannot carry its key into an offline test.
-
-    ``conftest.py`` drops every cached client before and after each test; with those
-    calls removed, the same two tests fail, so the check is not vacuous. No network: the
-    inner tests are respx-mocked, and the live gate is opened with a made-up demo pair.
-    """
-    conftest = CONFTEST.read_text(encoding="utf-8")
-    if not reset:
-        assert conftest.count("    reset_clients()\n") == 2
-        conftest = conftest.replace("    reset_clients()\n", "    pass\n")
-    pytester.makeconftest(conftest)
-    pytester.makepyfile(test_live_then_offline=LIVE_THEN_OFFLINE)
-    monkeypatch.setenv("XIPPIOS_LIVE_TESTS", "1")
-    monkeypatch.setenv(api_key_env(DEMO), "key-a-live-test-cached")  # pragma: allowlist secret
-    outcome = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-q")
-    if reset:
-        outcome.assert_outcomes(passed=2)
-    else:
-        outcome.assert_outcomes(passed=1, failed=1)
-        outcome.stdout.fnmatch_lines(["FAILED test_live_then_offline.py::test_2_offline - *"])
 
 
 def org_comes_first(fn: Callable[..., object]) -> bool:
@@ -190,7 +128,7 @@ def test_every_task_takes_org_first(task: Callable[..., object]) -> None:
     assert org_comes_first(task), "org: str is the first, required parameter of every task"
 
 
-@pytest.mark.parametrize("task", TASKS, ids=tasks.__all__)
+@pytest.mark.parametrize("task", TASKS, ids=ORG_TASK_NAMES)
 def test_task_is_a_sync_facade_with_an_agent_docstring(task: object) -> None:
     assert callable(task)
     assert hasattr(task, "async_fn"), "write the async function and derive the sync one with sync()"
@@ -199,6 +137,37 @@ def test_task_is_a_sync_facade_with_an_agent_docstring(task: object) -> None:
     assert doc.splitlines()[0].endswith("."), "the first line is one sentence"
     if inspect.signature(task).parameters:
         assert "Args:" in doc, "explain every parameter under Args: with valid-value examples"
+
+
+def test_list_organisations_lists_the_declared_names_only(
+    monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter
+) -> None:
+    """Core's tenant list over ``TENANTS``: names, in declared order, demo last; no request."""
+    assert tasks.list_organisations.__name__ == TENANT_LIST
+    assert tool_name(SOURCE, tasks.list_organisations) == "cashctrl_list_organisations"
+    assert list(inspect.signature(tasks.list_organisations).parameters) == []
+    assert tasks.list_organisations().data == [DEMO]
+    monkeypatch.setenv(TENANTS.list_var, "xb,xa")
+    monkeypatch.setenv(TENANTS.var("xa", "SUBDOMAIN"), "xa-hidden-subdomain")
+    result = tasks.list_organisations()
+    assert result.data == ["xb", "xa", DEMO]
+    assert (result.meta.source, result.meta.endpoint) == ("cashctrl", TENANT_LIST)
+    assert (result.meta.tenant, result.meta.request) == (None, {})
+    assert "hidden" not in result.model_dump_json()
+    assert not respx_mock.calls
+
+
+def test_list_organisations_has_an_agent_docstring() -> None:
+    doc = inspect.getdoc(tasks.list_organisations) or ""
+    assert doc.splitlines()[0] == "List the organisations this server can reach, by name."
+    assert "org" in doc
+
+
+@pytest.mark.anyio
+async def test_list_organisations_as_a_tool() -> None:
+    payload = await mcp_call(server, "cashctrl_list_organisations", {})
+    assert payload["data"] == [DEMO]
+    assert payload["meta"]["tenant"] is None
 
 
 # Per-task tests. Every fixture was recorded on 2026-10-23 from the demo organisation, whose
@@ -513,13 +482,14 @@ async def test_list_accounts_as_a_tool(
     assert payload["meta"]["request"]["filter"] == (
         '[{"comparison":"eq","field":"number","value":"1020"}]'
     )
-    # Refused by the tool's schema, before the task runs: the MCP SDK's tool error.
+    # Refused by the tool's schema, before the task runs: an MCP error, which core's
+    # mcp_call reports as a failed assertion.
     bad = {"org": DEMO, "filter": [{**item, "comparison": "equals"}]}
-    with pytest.raises(ToolError, match=r"filter\.0\.comparison[\s\S]*literal_error"):
+    with pytest.raises(AssertionError, match=r"filter\.0\.comparison[\s\S]*literal_error"):
         await mcp_call(server, "cashctrl_list_accounts", bad)
-    with pytest.raises(ToolError, match=r"dir[\s\S]*literal_error"):
+    with pytest.raises(AssertionError, match=r"dir[\s\S]*literal_error"):
         await mcp_call(server, "cashctrl_list_accounts", {"org": DEMO, "dir": "up"})
-    with pytest.raises(ToolError, match="extra_forbidden"):  # Filter refuses unknown keys
+    with pytest.raises(AssertionError, match="extra_forbidden"):  # Filter refuses unknown keys
         await mcp_call(server, "cashctrl_list_accounts", {"org": DEMO, "filter": [{"op": "eq"}]})
 
 
@@ -832,7 +802,7 @@ async def test_list_journal_entries_as_a_tool(
     }
     first = payload["data"][0]
     assert (first["id"], first["date_added"], first["amount"]) == (48, "2026-09-30", 45)
-    with pytest.raises(ToolError, match=r"limit[\s\S]*int_parsing"):
+    with pytest.raises(AssertionError, match=r"limit[\s\S]*int_parsing"):
         await mcp_call(server, "cashctrl_list_journal_entries", {"org": DEMO, "limit": "many"})
 
 
@@ -1084,7 +1054,7 @@ async def test_list_orders_as_a_tool(
     payload = await mcp_call(server, "cashctrl_list_orders", arguments)
     assert payload["meta"]["total"] == 4
     assert (payload["data"][0]["nr"], payload["data"][0]["sub_total"]) == ("RE-2026-104", 832.56)
-    with pytest.raises(ToolError, match=r"type[\s\S]*literal_error"):
+    with pytest.raises(AssertionError, match=r"type[\s\S]*literal_error"):
         await mcp_call(server, "cashctrl_list_orders", {"org": DEMO, "type": "sales"})
 
 
@@ -1299,6 +1269,10 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
 }
 
 
+def test_every_task_has_a_tool_case() -> None:
+    assert set(TOOL_CASES) == {tool_name(SOURCE, getattr(tasks, n)) for n in ORG_TASK_NAMES}
+
+
 def tool_arguments(
     tool: str, case: tuple[str, dict[str, typing.Any]], fixtures_dir: Path
 ) -> dict[str, typing.Any]:
@@ -1365,3 +1339,32 @@ def test_route_results_carry_snake_case_keys(
         response = client.get(path, params=arguments)
     assert response.status_code == 200, response.text
     assert snake_case_violations(response.json()["data"]) == []
+
+
+@pytest.mark.parametrize(("tool", "case"), TOOL_CASES.items(), ids=TOOL_CASES.keys())
+def test_every_task_names_its_organisation_as_the_tenant(
+    replay_fixture: Callable[[str, str], respx.Route],
+    fixtures_dir: Path,
+    tool: str,
+    case: tuple[str, dict[str, typing.Any]],
+) -> None:
+    """``meta.tenant`` is ``org``, by name (ADR-0014); ``org`` stays in ``meta.request``."""
+    replay_fixture(*case[0].split("/"))
+    task = getattr(tasks, tool.removeprefix("cashctrl_"))
+    result = task(DEMO, **tool_arguments(tool, case, fixtures_dir))
+    assert result.meta.tenant == DEMO
+    assert result.meta.request["org"] == DEMO
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("tool", "case"), TOOL_CASES.items(), ids=TOOL_CASES.keys())
+async def test_every_tool_names_its_organisation_as_the_tenant(
+    replay_fixture: Callable[[str, str], respx.Route],
+    fixtures_dir: Path,
+    tool: str,
+    case: tuple[str, dict[str, typing.Any]],
+) -> None:
+    replay_fixture(*case[0].split("/"))
+    arguments = tool_arguments(tool, case, fixtures_dir)
+    payload = await mcp_call(server, tool, {"org": DEMO, **arguments})
+    assert payload["meta"]["tenant"] == DEMO

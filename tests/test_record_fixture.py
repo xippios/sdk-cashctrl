@@ -1,7 +1,8 @@
 """The fixture recorder records the demo organisation only and never writes its host or key.
 
 It also holds to its policies: GET only, .json only, no e-mail address. The demo
-organisation is synthetic, so every module and every amount may be recorded.
+organisation is synthetic, so every module and every amount may be recorded. The host,
+the key and binary bodies are core's ``Scrub``; the rest is the recorder's own.
 """
 
 import base64
@@ -15,11 +16,22 @@ import httpx
 import pytest
 import respx
 
-from xippios.cashctrl._client import DEMO, ORGS_ENV, api_key_env, subdomain_env
+from xippios.cashctrl._client import DEMO, TENANTS
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "record_fixture.py"
 REAL = "realsub"
 KEY = "Qz7k-key-for-the-test"  # pragma: allowlist secret
+TOKEN_OF_KEY = base64.b64encode(f"{KEY}:".encode()).decode()
+
+
+@pytest.fixture
+def placeholder_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keys are resolved as the recorder resolves them: core's pin is lifted (ADR-0013).
+
+    ``--wrong-key`` must send its own key, and the scrub must see the one in the
+    environment. The shell's demo key is removed; ``recorder`` sets a made-up one.
+    """
+    monkeypatch.delenv(TENANTS.var(DEMO, "API_KEY"), raising=False)
 
 
 def load_recorder() -> ModuleType:
@@ -36,8 +48,8 @@ def recorder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ModuleType:
     module = load_recorder()
     monkeypatch.setattr(module, "FIXTURES", tmp_path / "tests" / "fixtures")
     monkeypatch.setattr(module, "ROOT", tmp_path)
-    monkeypatch.setenv(subdomain_env(DEMO), REAL)
-    monkeypatch.setenv(api_key_env(DEMO), KEY)
+    monkeypatch.setenv(TENANTS.var(DEMO, "SUBDOMAIN"), REAL)
+    monkeypatch.setenv(TENANTS.var(DEMO, "API_KEY"), KEY)
     return module
 
 
@@ -54,7 +66,7 @@ def test_the_demo_host_becomes_the_replay_host(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv(ORGS_ENV, "xa")  # ignored: the recorder sees demo only
+    monkeypatch.setenv(TENANTS.list_var, "xa")  # ignored: the recorder sees demo only
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/read.json")
     route.mock(
         return_value=httpx.Response(
@@ -86,21 +98,60 @@ def test_wrong_key_never_sends_the_real_key(
     assert route.calls.last.request.headers["Authorization"] == f"Basic {token}"
 
 
-@pytest.mark.parametrize("leak", [REAL, KEY, base64.b64encode(f"{KEY}:".encode()).decode()])
-def test_a_leak_is_never_written(
+@pytest.mark.parametrize("leak", [REAL, REAL.upper()])
+def test_the_bare_subdomain_is_never_written(
     recorder: ModuleType,
     tmp_path: Path,
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
     leak: str,
 ) -> None:
+    """The subdomain without ``.cashctrl.com`` is no host to core: the final check refuses it."""
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(return_value=httpx.Response(200, json={"name": f"{leak} ltd"}))
     assert recorder.main(["account/list.json", "leaky"]) == 1
     assert not (tmp_path / "tests" / "fixtures" / "account_list").exists()
     out = capsys.readouterr().out
     assert "not written" in out
-    assert leak not in out
+    assert "CASHCTRL_DEMO_SUBDOMAIN" in out
+    assert REAL not in out.lower()
+
+
+@pytest.mark.parametrize("leak", [KEY, TOKEN_OF_KEY], ids=["key", "basic-auth-token"])
+def test_the_key_is_never_written(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    leak: str,
+) -> None:
+    """Core's ``Scrub`` redacts the key and its token wherever they appear."""
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
+    route.mock(return_value=httpx.Response(200, json={"name": f"{leak} ltd"}))
+    assert recorder.main(["account/list.json", "leaky"]) == 0
+    text = (tmp_path / "tests" / "fixtures" / "account_list" / "leaky.json").read_text()
+    assert KEY not in text
+    assert TOKEN_OF_KEY not in text
+    assert json.loads(json.loads(text)["response"]["body"]) == {"name": "REDACTED ltd"}
+    assert leak not in capsys.readouterr().out
+
+
+def test_a_key_the_scrub_cannot_reach_is_never_written(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Behind a JSON escape the key escapes the scrub; core's verify decodes and refuses it."""
+    escaped = "\\u" + f"{ord(KEY[0]):04x}" + KEY[1:]
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
+    route.mock(return_value=httpx.Response(200, content=f'{{"name": "{escaped}"}}'.encode()))
+    assert recorder.main(["account/list.json", "escaped_key"]) == 1
+    assert not (tmp_path / "tests" / "fixtures" / "account_list").exists()
+    out = capsys.readouterr().out
+    assert out.startswith("not written tests/fixtures/account_list/escaped_key.json: ")
+    assert "secret value" in out
+    assert KEY[1:] not in out
 
 
 def test_nothing_unscrubbed_touches_disk(
@@ -144,8 +195,8 @@ def test_a_binary_body_is_refused(
     assert recorder.main(["account/list.json", "export"]) == 1
     assert not (tmp_path / "tests" / "fixtures").exists()
     out = capsys.readouterr().out
-    assert "not UTF-8 text" in out
-    assert "exports are out of scope" in out
+    assert out.startswith("not written tests/fixtures/account_list/export.json: ")
+    assert "binary body cannot be scrubbed" in out, "core's refusal"
     assert REAL not in out
 
 

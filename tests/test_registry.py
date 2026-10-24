@@ -1,4 +1,9 @@
-"""The organisation registry: declaration, lookup and one isolated client per organisation."""
+"""The organisation registry: declaration, lookup and one isolated client per organisation.
+
+The registry is core's ``Tenants`` (ADR-0014); these tests pin the semantics this package
+relies on. Where core's wording differs from the local registry's, a test asserts the
+behaviour and the variable names, not the text.
+"""
 
 import os
 
@@ -7,22 +12,26 @@ import pytest
 import respx
 from xippios.core import ConfigError, InvalidRequestError
 
-from xippios.cashctrl._client import (
-    DEMO,
-    ORGS_ENV,
-    RATE_LIMIT,
-    api_key_env,
-    client_for,
-    orgs,
-    require_org,
-    subdomain_env,
-)
+from xippios.cashctrl._client import DEMO, RATE_LIMIT, TENANTS, check_subdomain, client_for
 
 pytestmark = pytest.mark.anyio
 
 # Values that must never appear in a message.
 HIDDEN_SUBDOMAIN = "xa-hidden-subdomain"
 HIDDEN_KEY = "xa-hidden-key-value"  # pragma: allowlist secret
+ORGS_ENV = TENANTS.list_var
+
+
+def subdomain_env(org: str) -> str:
+    return TENANTS.var(org, "SUBDOMAIN")
+
+
+def api_key_env(org: str) -> str:
+    return TENANTS.var(org, "API_KEY")
+
+
+def orgs() -> tuple[str, ...]:
+    return TENANTS.names()
 
 
 @pytest.fixture
@@ -47,6 +56,13 @@ def declare(monkeypatch: pytest.MonkeyPatch, org: str, *, key: bool = True) -> N
     monkeypatch.setenv(subdomain_env(org), f"{org}-{HIDDEN_SUBDOMAIN}")
     if key:
         monkeypatch.setenv(api_key_env(org), f"{org}-{HIDDEN_KEY}")
+
+
+def test_the_registry_is_cashctrls_scheme() -> None:
+    assert TENANTS.source == "cashctrl"
+    assert TENANTS.list_var == "CASHCTRL_ORGS"
+    assert TENANTS.fields == ("SUBDOMAIN", "API_KEY")
+    assert TENANTS.reserved == (DEMO,)
 
 
 def test_variable_names_follow_the_scheme() -> None:
@@ -95,8 +111,10 @@ def test_demo_cannot_be_listed(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize("name", ["Xa", "a-b", "a b", "ä"])
 def test_malformed_names_are_refused(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     monkeypatch.setenv(ORGS_ENV, f"xa,{name}")
-    with pytest.raises(ConfigError, match="lower-case"):
+    with pytest.raises(ConfigError, match="lower-case") as info:
         orgs()
+    assert ORGS_ENV in str(info.value)
+    assert name not in str(info.value), "named by position: it may be a value pasted by mistake"
 
 
 def test_duplicate_names_are_refused(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -105,15 +123,15 @@ def test_duplicate_names_are_refused(monkeypatch: pytest.MonkeyPatch) -> None:
         orgs()
 
 
-def test_require_org_lists_the_declared_names_and_no_value(
+def test_require_lists_the_declared_names_and_no_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(ORGS_ENV, "xa,xb")
     declare(monkeypatch, "xa")
     declare(monkeypatch, "xb")
-    assert require_org("xa") == "xa"
+    assert TENANTS.require("xa") == "xa"
     with pytest.raises(InvalidRequestError) as info:
-        require_org("nope")
+        TENANTS.require("nope")
     message = str(info.value)
     assert "'nope'" in message
     assert "xa, xb, demo" in message
@@ -123,11 +141,12 @@ def test_require_org_lists_the_declared_names_and_no_value(
 
 
 @pytest.mark.usefixtures("no_demo")
-def test_require_org_without_any_declaration_names_the_variables() -> None:
+def test_require_without_any_declaration_names_the_variables() -> None:
     with pytest.raises(InvalidRequestError) as info:
-        require_org("demo")
-    assert "no organisation is declared" in str(info.value)
-    assert ORGS_ENV in str(info.value)
+        TENANTS.require("demo")
+    message = str(info.value)
+    for variable in (ORGS_ENV, subdomain_env(DEMO), api_key_env(DEMO)):
+        assert variable in message
 
 
 def test_client_for_refuses_an_undeclared_org() -> None:
@@ -160,6 +179,35 @@ def test_a_changed_subdomain_builds_a_new_client(monkeypatch: pytest.MonkeyPatch
     assert second.config.base_url == "https://other.cashctrl.com/api/v1"
 
 
+def test_a_changed_key_builds_a_new_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Core keys the cache by every variable of the organisation, the key included."""
+    first = client_for(DEMO)
+    monkeypatch.setenv(api_key_env(DEMO), "another-placeholder")  # pragma: allowlist secret
+    assert client_for(DEMO) is not first
+
+
+def test_reset_drops_every_cached_client() -> None:
+    first = client_for(DEMO)
+    TENANTS.reset()
+    assert client_for(DEMO) is not first
+
+
+def test_the_subdomain_is_lower_cased(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(subdomain_env(DEMO), "  Muster-AG ")
+    assert client_for(DEMO).config.base_url == "https://muster-ag.cashctrl.com/api/v1"
+
+
+@pytest.mark.parametrize("value", ["a", "a-b", "a1", "x" * 63])
+def test_one_dns_label_is_a_subdomain(value: str) -> None:
+    assert check_subdomain(value.upper()) == value
+
+
+@pytest.mark.parametrize("value", ["", "a_b", "-a", "a-", "a.b", "x" * 64, "evil.com/x?"])
+def test_anything_else_is_refused_without_the_value(value: str) -> None:
+    with pytest.raises(ValueError, match=r"^not one DNS label$"):
+        check_subdomain(value)
+
+
 @pytest.mark.parametrize("value", ["", "   ", "evil.com/x?", "a_b", "-a"])
 def test_a_missing_or_malformed_subdomain_is_a_config_error(
     monkeypatch: pytest.MonkeyPatch, value: str
@@ -173,14 +221,22 @@ def test_a_missing_or_malformed_subdomain_is_a_config_error(
         assert value not in str(info.value)
 
 
-async def test_a_declared_org_without_its_key_fails_on_the_first_request(
-    monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter
-) -> None:
-    monkeypatch.setenv(ORGS_ENV, "xa")
-    declare(monkeypatch, "xa", key=False)
-    route = respx_mock.get(url__startswith=f"https://xa-{HIDDEN_SUBDOMAIN}.cashctrl.com/")
-    route.mock(return_value=httpx.Response(200, json={}))
-    client = client_for("xa")
-    with pytest.raises(ConfigError, match="CASHCTRL_XA_API_KEY"):
-        await client.get("/fiscalperiod/list.json")
-    assert not route.called
+class TestKeyResolution:
+    """Keys resolved as in production: core's placeholder pin is lifted for these tests."""
+
+    @pytest.fixture
+    def placeholder_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pins nothing (ADR-0013); the shell's demo key is removed instead."""
+        monkeypatch.delenv(api_key_env(DEMO), raising=False)
+
+    async def test_a_declared_org_without_its_key_fails_on_the_first_request(
+        self, monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter
+    ) -> None:
+        monkeypatch.setenv(ORGS_ENV, "xa")
+        declare(monkeypatch, "xa", key=False)
+        route = respx_mock.get(url__startswith=f"https://xa-{HIDDEN_SUBDOMAIN}.cashctrl.com/")
+        route.mock(return_value=httpx.Response(200, json={}))
+        client = client_for("xa")
+        with pytest.raises(ConfigError, match="CASHCTRL_XA_API_KEY"):
+            await client.get("/fiscalperiod/list.json")
+        assert not route.called

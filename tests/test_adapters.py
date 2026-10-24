@@ -12,8 +12,9 @@ import pytest
 from fastapi.routing import APIRoute
 from xippios.core.http import is_scalar
 from xippios.core.mcp import tool_name
+from xippios.core.testing import assert_write_tools
 
-from xippios.cashctrl import tasks
+from xippios.cashctrl import mcp_write, tasks, tasks_write
 from xippios.cashctrl._client import SOURCE
 from xippios.cashctrl.http import router
 from xippios.cashctrl.mcp import server
@@ -44,3 +45,18 @@ async def test_http_routes_are_the_tasks_with_the_right_methods() -> None:
     for name, fn in TASKS.items():
         scalar_only = all(is_scalar(annotation) for annotation in _parameters(fn).values())
         assert routes[f"/{SOURCE}/{name}"].methods == ({"GET"} if scalar_only else {"POST"}), name
+
+
+async def test_the_organisation_list_is_on_the_read_server() -> None:
+    assert "cashctrl_list_organisations" in {tool.name for tool in await server.list_tools()}
+
+
+def test_the_write_server_serves_write_tasks_only() -> None:
+    """Core's check (conventions §8): a write server, its tools exactly the write tasks.
+
+    So the organisation list, a reference tool, stays on the read server (ADR-0014).
+    """
+    write_tasks = [getattr(tasks_write, name) for name in tasks_write.__all__]
+    assert_write_tools(
+        mcp_write.server, write_tasks, source=SOURCE, read_server=server, router=router
+    )

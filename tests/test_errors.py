@@ -22,7 +22,7 @@ from xippios.core.http import status_for
 from xippios.core.mcp import error_to_text
 from xippios.core.testing import fixture_path, load_fixture
 
-from xippios.cashctrl._client import DEMO, classify, client_for, subdomain_env
+from xippios.cashctrl._client import DEMO, TENANTS, classify, client_for
 from xippios.cashctrl.errors import FieldError, RequestRejected
 
 pytestmark = pytest.mark.anyio
@@ -212,7 +212,7 @@ def test_core_keeps_mapping_status_retry_after_and_body() -> None:
 @pytest.fixture
 def tenant(monkeypatch: pytest.MonkeyPatch) -> str:
     """The demo organisation served from a distinctive subdomain, for the leak tests."""
-    monkeypatch.setenv(subdomain_env(DEMO), TENANT)
+    monkeypatch.setenv(TENANTS.var(DEMO, "SUBDOMAIN"), TENANT)
     return f"https://{TENANT}.cashctrl.com/api/v1"
 
 

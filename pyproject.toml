@@ -102,3 +102,5 @@ warn_unreachable = true
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers --import-mode=importlib"
 testpaths = ["tests"]
+# Core's plugin sets these to its placeholder key in every test not marked live (ADR-0013).
+xippios_placeholder_key_envs = ["CASHCTRL_DEMO_API_KEY"]
