@@ -6,23 +6,26 @@ there is no single client here: every task takes ``org``, the name of an organis
 declared in the environment, and ``client_for(org)`` returns that organisation's own
 client, with its own base URL, its own key, its own token bucket and no shared cache.
 
-Declaring organisations (the environment is the contract, conventions §7):
+The registry is core's ``xippios.core.Tenants`` (ADR-0014), ``TENANTS`` below; the
+environment is the contract (conventions §7):
 
 - ``CASHCTRL_ORGS``: comma-separated names matching ``^[a-z0-9_]+$``, e.g. ``acme,acme_test``;
 - per name, ``CASHCTRL_<NAME>_SUBDOMAIN`` and ``CASHCTRL_<NAME>_API_KEY``, the name
-  upper-cased (``CASHCTRL_ACME_TEST_SUBDOMAIN``);
+  upper-cased (``CASHCTRL_ACME_TEST_SUBDOMAIN``); ``TENANTS.var(name, field)`` names them;
 - the reserved organisation ``demo`` is never listed in ``CASHCTRL_ORGS``: it exists when
   both ``CASHCTRL_DEMO_SUBDOMAIN`` and ``CASHCTRL_DEMO_API_KEY`` are set. Fixtures, live
   tests and the fixture recorder use ``demo`` and nothing else.
 
-Isolation is by configuration: a deployment reaches exactly the organisations its
-environment declares, and a deployment that does not set the demo pair has no ``demo``.
-Nothing here spans organisations: ``orgs()`` returns names only, never values.
+``TENANTS.names()`` lists the declared organisations, ``TENANTS.require(org)`` refuses an
+undeclared one with ``InvalidRequestError`` (the caller's mistake), and a malformed list
+or a missing or malformed subdomain is a ``ConfigError`` naming the variable, never its
+value (the operator's). Isolation is by configuration: a deployment reaches exactly the
+organisations its environment declares, and a deployment that does not set the demo pair
+has no ``demo``. Nothing here spans organisations: ``TENANTS.names()`` returns names
+only, never values.
 """
 
-import os
 import re
-import threading
 from typing import Any
 
 import httpx
@@ -30,10 +33,9 @@ from xippios.core import (
     AsyncClient,
     BasicKeyAuth,
     ClientConfig,
-    ConfigError,
-    InvalidRequestError,
     NotFoundError,
     RateLimit,
+    Tenants,
     UpstreamError,
     XippiosError,
 )
@@ -46,16 +48,12 @@ __all__ = [
     "BASE_URL_TEMPLATE",
     "DEMO",
     "NEUTRAL_HOST",
-    "ORGS_ENV",
     "RATE_LIMIT",
     "SOURCE",
-    "api_key_env",
+    "TENANTS",
+    "check_subdomain",
     "classify",
     "client_for",
-    "orgs",
-    "require_org",
-    "reset_clients",
-    "subdomain_env",
 ]
 
 SOURCE = "cashctrl"
@@ -67,93 +65,37 @@ RATE_LIMIT = RateLimit(per_minute=60)
 Every response carries ``x-cashctrl-requests-left`` (299 observed on 2026-10-23, a 401
 included); its window and scope are not documented, so nothing here reads it.
 """
-ORGS_ENV = "CASHCTRL_ORGS"
 DEMO = "demo"
 """The reserved organisation, declared by its own two variables and never listed."""
 
-_ORG_NAME = re.compile(r"[a-z0-9_]+")
 _SUBDOMAIN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 
 
-def subdomain_env(org: str) -> str:
-    """``CASHCTRL_<NAME>_SUBDOMAIN``, the variable holding ``org``'s subdomain."""
-    return f"CASHCTRL_{org.upper()}_SUBDOMAIN"
+def check_subdomain(value: str) -> str:
+    """The subdomain in ``value``, lower-cased, when it is one DNS label.
 
-
-def api_key_env(org: str) -> str:
-    """``CASHCTRL_<NAME>_API_KEY``, the variable holding ``org``'s API key."""
-    return f"CASHCTRL_{org.upper()}_API_KEY"
-
-
-def _is_set(name: str) -> bool:
-    return bool(os.environ.get(name, "").strip())
-
-
-def orgs() -> tuple[str, ...]:
-    """The declared organisations: ``CASHCTRL_ORGS`` in order, then ``demo`` if declared.
-
-    Read from the environment on every call; nothing is cached.
+    The label before ``.cashctrl.com``: letters, digits and inner hyphens, at most 63
+    characters. CashCtrl's hosts are lower-case, so the value is lower-cased first, as
+    the upstream would read it (ADR-0014).
 
     Raises:
-        ConfigError: A listed name is malformed, listed twice, or is the reserved ``demo``.
+        ValueError: ``value`` is not one label; the message never quotes it, and core's
+            ``ConfigError`` names the variable instead.
     """
-    listed = [part.strip() for part in os.environ.get(ORGS_ENV, "").split(",")]
-    names: list[str] = []
-    for name in filter(None, listed):
-        if name == DEMO:
-            raise ConfigError(
-                f"{ORGS_ENV} lists {DEMO!r}, which is reserved: the demo organisation is "
-                f"declared by {subdomain_env(DEMO)} and {api_key_env(DEMO)} alone",
-                source=SOURCE,
-            )
-        if not _ORG_NAME.fullmatch(name):
-            raise ConfigError(
-                f"{ORGS_ENV} lists {name!r}; organisation names use only lower-case "
-                "letters, digits and underscores",
-                source=SOURCE,
-            )
-        if name in names:
-            raise ConfigError(f"{ORGS_ENV} lists {name!r} twice", source=SOURCE)
-        names.append(name)
-    if _is_set(subdomain_env(DEMO)) and _is_set(api_key_env(DEMO)):
-        names.append(DEMO)
-    return tuple(names)
-
-
-def require_org(org: str) -> str:
-    """Return ``org`` when it is declared.
-
-    Raises:
-        InvalidRequestError: ``org`` is not declared; the message names the declared
-            organisations, or the variables to set when there are none.
-        ConfigError: ``CASHCTRL_ORGS`` is malformed.
-    """
-    declared = orgs()
-    if org in declared:
-        return org
-    if declared:
-        hint = "declared organisations: " + ", ".join(declared)
-    else:
-        hint = (
-            f"no organisation is declared; set {ORGS_ENV} and, per name, "
-            "CASHCTRL_<NAME>_SUBDOMAIN and CASHCTRL_<NAME>_API_KEY"
-        )
-    raise InvalidRequestError(f"unknown organisation {org!r}; {hint}", source=SOURCE)
-
-
-def _subdomain(org: str) -> str:
-    variable = subdomain_env(org)
-    subdomain = os.environ.get(variable, "").strip().lower()
-    if not subdomain:
-        raise ConfigError(
-            f"{variable} is not set; export the organisation's subdomain", source=SOURCE
-        )
+    subdomain = value.lower()
     if not _SUBDOMAIN.fullmatch(subdomain):
-        raise ConfigError(
-            f"{variable} is not a subdomain: give the one label before .cashctrl.com",
-            source=SOURCE,
-        )
+        raise ValueError("not one DNS label")
     return subdomain
+
+
+TENANTS = Tenants(
+    SOURCE,
+    list_var="CASHCTRL_ORGS",
+    fields=("SUBDOMAIN", "API_KEY"),
+    reserved=(DEMO,),
+    validate={"SUBDOMAIN": check_subdomain},
+)
+"""CashCtrl's organisations, declared in the environment (ADR-0014)."""
 
 
 NEUTRAL_HOST = "cashctrl.com"
@@ -326,8 +268,23 @@ def classify(response: httpx.Response) -> XippiosError | None:
     return RequestRejected(errors, upstream_message=message, source=SOURCE)
 
 
-_clients: dict[str, tuple[str, AsyncClient]] = {}
-_clients_lock = threading.Lock()
+def _build(org: str) -> AsyncClient:
+    """A new client for organisation ``org``: its base URL, its key, its own token bucket.
+
+    Called by ``TENANTS.client_for`` on first use and whenever one of the organisation's
+    variables changed. The subdomain is read and checked here (``ConfigError`` when it is
+    missing or malformed); the key is read on the first request.
+    """
+    subdomain = TENANTS.field(org, "SUBDOMAIN")
+    config = ClientConfig(
+        source=SOURCE,
+        version=__version__,
+        base_url=BASE_URL_TEMPLATE.format(subdomain=subdomain),
+        rate_limit=RATE_LIMIT,
+        cache=None,
+        classify=classify,
+    )
+    return AsyncClient(config, auth=BasicKeyAuth(TENANTS.var(org, "API_KEY"), source=SOURCE))
 
 
 def client_for(org: str) -> AsyncClient:
@@ -335,35 +292,14 @@ def client_for(org: str) -> AsyncClient:
 
     Each organisation has its own client: its own base URL, key, token bucket and no
     response cache. The key is read from ``CASHCTRL_<NAME>_API_KEY`` on the first request,
-    so a declared organisation without a key fails then, with ``ConfigError``. The cache
-    entry remembers the subdomain it was built for: when the environment changes the
-    subdomain, the next call builds a new client. A changed key alone is picked up after
-    ``reset_clients()`` or a restart.
+    so a declared organisation without a key fails then, with ``ConfigError``. Core keeps
+    the client under a digest of the organisation's variables: when the environment
+    changes the subdomain or the key, the next call builds a new client.
+    ``TENANTS.reset()`` drops every cached client.
 
     Raises:
         InvalidRequestError: ``org`` is not declared.
-        ConfigError: The organisation's subdomain variable is missing or malformed.
+        ConfigError: ``CASHCTRL_ORGS`` is malformed, or the organisation's subdomain
+            variable is missing or malformed.
     """
-    require_org(org)
-    subdomain = _subdomain(org)
-    with _clients_lock:
-        cached = _clients.get(org)
-        if cached is not None and cached[0] == subdomain:
-            return cached[1]
-        config = ClientConfig(
-            source=SOURCE,
-            version=__version__,
-            base_url=BASE_URL_TEMPLATE.format(subdomain=subdomain),
-            rate_limit=RATE_LIMIT,
-            cache=None,
-            classify=classify,
-        )
-        client = AsyncClient(config, auth=BasicKeyAuth(api_key_env(org), source=SOURCE))
-        _clients[org] = (subdomain, client)
-        return client
-
-
-def reset_clients() -> None:
-    """Forget every cached client; the next ``client_for`` builds afresh. For tests."""
-    with _clients_lock:
-        _clients.clear()
+    return TENANTS.client_for(org, _build)
