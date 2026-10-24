@@ -356,6 +356,11 @@ def test_update_journal_entry_clears_the_parameters_named_in_clear(
         ({"clear": ["id"]}, "clear: 'id' is not an update.json parameter here"),
         ({"clear": ["taxId"]}, "clear: 'taxId' is not an update.json parameter here"),
         ({"clear": "notes"}, "clear takes a list of parameter names, not str"),
+        (
+            {"clear": ["sequence_number_id"]},
+            "clear: 'sequence_number_id' is not stored, and an update sends it only when "
+            "it is given",
+        ),
         ({"title": "x", "clear": ["title"]}, "clear: 'title' is both changed and cleared"),
         (
             {"custom": {"customField1": "x"}, "clear": ["custom"]},
@@ -629,6 +634,81 @@ def test_update_person_clears_and_validates_clear(
     assert "nr" not in preview.payload
     assert "contacts" not in preview.payload
     assert preview.changes == {"nr": "", "contacts": "[]"}
+
+
+def test_clearing_a_flag_sends_false(
+    respx_mock: respx.MockRouter, replay_fixture: ReplayFixture
+) -> None:
+    """Clearing a yes/no value means ``false``: the payload sends it, ``changes`` shows it.
+
+    The recorded person is a customer (``isCustomer`` true) and not inactive; the
+    confirmed call is answered by a mocked success, not a fixture, to show the form sent.
+    """
+    replay_fixture("person_read", "for_update")
+    preview = preview_of(
+        tasks_write.update_person(DEMO, PERSON, clear=["is_customer", "is_inactive"])
+    )
+    assert (preview.payload["isCustomer"], preview.payload["isInactive"]) == ("false", "false")
+    assert preview.changes == {"isCustomer": "false", "isInactive": "false"}
+    assert preview.payload["isVendor"] == "false", "a flag not cleared is carried over"
+    write = respx_mock.post(f"{BASE}/person/update.json").respond(
+        200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
+    )
+    tasks_write.update_person(DEMO, PERSON, clear=["is_customer"], confirm=True)
+    assert ("isCustomer", "false") in sent_body(write)
+    assert sent_body(write) == list(
+        preview_of(tasks_write.update_person(DEMO, PERSON, clear=["is_customer"])).payload.items()
+    )
+
+
+@pytest.mark.parametrize(
+    "task", [tasks_write.update_journal_entry, tasks_write.update_person], ids=lambda t: t.__name__
+)
+def test_clearing_a_parameter_that_is_never_sent_is_refused(
+    respx_mock: respx.MockRouter, task: Callable[..., Any]
+) -> None:
+    """``sequence_number_id`` is sent only when given; a clear of it would be a no-op."""
+    with pytest.raises(InvalidRequestError) as raised:
+        task(DEMO, 1, clear=["sequence_number_id"])
+    assert str(raised.value).endswith("clearing it would change nothing: drop it from clear"), (
+        "the refusal says what to do"
+    )
+    assert not respx_mock.calls
+
+
+@pytest.mark.parametrize(
+    "task", [tasks_write.update_journal_entry, tasks_write.update_person], ids=lambda t: t.__name__
+)
+def test_every_boolean_update_parameter_is_a_flag(task: Callable[..., Any]) -> None:
+    """``_FLAGS`` holds every ``bool | None`` parameter of an update task, ``confirm`` aside."""
+    facade: Any = task
+    hints = typing.get_type_hints(facade.async_fn)
+    booleans = {name for name, hint in hints.items() if hint == bool | None}
+    assert booleans <= tasks_write._FLAGS
+    table = (
+        tasks_write.JOURNAL_UPDATE
+        if task is tasks_write.update_journal_entry
+        else tasks_write.PERSON_UPDATE
+    )
+    assert tasks_write._FLAGS & set(table) == booleans
+
+
+def test_the_update_takes_every_documented_parameter_but_the_unsent_from_the_record(
+    fixtures_dir: Path,
+) -> None:
+    """``_UNSENT`` is exactly what an update neither derives nor blocks on, per resource."""
+    entry = JournalEntryDetail.model_validate(
+        recorded_read(fixtures_dir, "journal_read", "for_update")["data"]
+    )
+    values, stored = tasks_write._journal_values(entry)
+    assert set(tasks_write.JOURNAL_UPDATE) - set(values) - set(stored) == set(tasks_write._UNSENT)
+    person = PersonDetail.model_validate(
+        recorded_read(fixtures_dir, "person_read", "for_update")["data"]
+    )
+    person_values, person_stored, _ = tasks_write._person_values(person)
+    assert set(tasks_write.PERSON_UPDATE) - set(person_values) - set(person_stored) == set(
+        tasks_write._UNSENT
+    )
 
 
 def test_update_person_refuses_an_address_it_cannot_carry(

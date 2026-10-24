@@ -204,7 +204,9 @@ def _clear_names(
     """The parameters ``clear`` names, checked against ``update.json``; problems collected.
 
     Every name must be a documented update parameter of the resource, by its task name
-    (``tax_id``, ``notes``), and must not be changed by the same call.
+    (``tax_id``, ``notes``), not one in ``_UNSENT`` (``sequence_number_id``, sent only
+    when given, so clearing it would change nothing), and must not be changed by the
+    same call.
     """
     if clear is None:
         return []
@@ -218,6 +220,8 @@ def _clear_names(
                 f"clear: {name!r} is not an update.json parameter here; one of "
                 + ", ".join(documented)
             )
+        elif name in _UNSENT:
+            problems.append(f"clear: {name!r} {_UNSENT[name]}")
         elif name in given or (name == "custom" and custom):
             problems.append(f"clear: {name!r} is both changed and cleared")
         elif name not in names:
@@ -236,15 +240,27 @@ def _changes(
 
     The values given, encoded as sent; a list or map given empty as ``[]`` or ``{}``,
     which the payload leaves out (upstream empties what is left out); a cleared
-    parameter as ``""``, ``[]`` or ``{}``, by its kind.
+    parameter as ``""``, ``[]`` or ``{}``, by its kind, and a cleared flag as ``false``,
+    the value the payload sends for it.
     """
     changes: dict[str, str] = encode(**given, custom=api.custom_xml(custom) if custom else None)
     for name, value in given.items():
         if isinstance(value, list | tuple | Mapping) and not value:
             changes[documented[name]] = "{}" if isinstance(value, Mapping) else "[]"
     for name in cleared:
-        changes[documented[name]] = _EMPTY.get(name, "")
+        changes[documented[name]] = "false" if name in _FLAGS else _EMPTY.get(name, "")
     return changes
+
+
+def _cleared(cleared: Sequence[str]) -> dict[str, Any]:
+    """The values the cleared parameters are sent with: ``False`` for a flag, else ``None``.
+
+    ``None`` and an empty list are left out of the form, which upstream reads as empty
+    ("omitted parameters are treated as empty values"). A flag has no empty value:
+    clearing it means ``false``, so it is sent as ``false`` (decided by Johannes on
+    2026-10-24, after the wave 2 review).
+    """
+    return {name: False if name in _FLAGS else None for name in cleared}
 
 
 _EMPTY = {
@@ -259,7 +275,36 @@ _EMPTY = {
     "service_periods": "[]",
     "certificate_values": "{}",
 }
-"""How ``changes`` shows a cleared list or map parameter; every other one is ``""``."""
+"""How ``changes`` shows a cleared list or map parameter; a flag is ``false``, others ``""``."""
+
+_FLAGS = frozenset(
+    {
+        "is_auto_fill_responsible_person",
+        "is_customer",
+        "is_employee",
+        "is_family",
+        "is_inactive",
+        "is_insurance",
+        "is_vendor",
+    }
+)
+"""The boolean update parameters ("Possible values: true, false"), every one a person's.
+
+``journal/update.json`` documents none. A flag named in ``clear`` is sent as ``false``.
+"""
+
+_UNSENT = {
+    "sequence_number_id": (
+        "is not stored, and an update sends it only when it is given; left out, upstream "
+        "already reads it as empty, so clearing it would change nothing: drop it from clear"
+    ),
+}
+"""Update parameters an update never takes from the record, and why ``clear`` refuses them.
+
+``sequenceNumberId`` is not stored ("If this is empty, the sequence number will not
+update when ``reference`` is set"; for a person, ``nr``): the update leaves it out unless
+the call gives it, so a cleared one would be sent exactly as an omitted one.
+"""
 
 
 def _blocked(stored: Mapping[str, str | None], decided: Iterable[str]) -> dict[str, str]:
@@ -604,7 +649,8 @@ async def update_journal_entry_async(
             ``{"customField1": "Projekt B"}``; the other stored values are kept.
         clear: Parameters to send empty, by these names, e.g. ``["tax_id", "notes"]``;
             ``["custom"]`` empties every custom field. A parameter cannot be both given
-            and cleared.
+            and cleared, and ``sequence_number_id``, not stored and sent only when
+            given, cannot be cleared.
         confirm: ``true`` writes the change; ``false`` (the default) only previews it.
     """
     _check_id(id)
@@ -651,7 +697,7 @@ async def update_journal_entry_async(
     if blocked:
         raise _cannot_carry("journal entry", blocked)
     merged = {**values, **given, "custom": api.merge_custom(entry.custom, custom or {})}
-    merged.update(dict.fromkeys(cleared))
+    merged.update(_cleared(cleared))
     if not merged["items"]:
         absent = [
             upstream
@@ -1130,7 +1176,8 @@ async def update_person_async(
     The person is read first (``person/read.json``), the parameters given are applied,
     and every parameter ``person/update.json`` documents is sent, taken from the person
     where not given: upstream empties every parameter an update leaves out. A parameter
-    left out here keeps its stored value; one named in ``clear`` is sent empty;
+    left out here keeps its stored value; one named in ``clear`` is sent empty, a flag
+    (``is_customer``, ``is_inactive``, ...) as ``false``;
     ``addresses`` and ``contacts`` given replace the stored lists whole. Without
     ``confirm`` nothing is written: the preview (``performed`` false) shows the
     ``payload`` that would be sent, the person as it is (``before``) and the
@@ -1199,8 +1246,10 @@ async def update_person_async(
         custom: Custom field values to set by upstream's name, e.g.
             ``{"customField2": "Silber"}``; the other stored values are kept.
         clear: Parameters to send empty, by these names, e.g. ``["department", "notes"]``
-            or ``["user_id"]``; ``["custom"]`` empties every custom field. A parameter
-            cannot be both given and cleared.
+            or ``["user_id"]``; ``["custom"]`` empties every custom field, and a flag
+            such as ``["is_vendor"]`` is sent ``false``. A parameter cannot be both
+            given and cleared, and ``sequence_number_id``, not stored and sent only
+            when given, cannot be cleared.
         confirm: ``true`` writes the change; ``false`` (the default) only previews it.
     """
     _check_id(id)
@@ -1272,7 +1321,7 @@ async def update_person_async(
             source=SOURCE,
         )
     merged = {**values, **given, "custom": api.merge_custom(person.custom, custom or {})}
-    merged.update(dict.fromkeys(cleared))
+    merged.update(_cleared(cleared))
     if not any(merged[name] for name in ("company", "first_name", "last_name")):
         raise _missing(
             "person",
