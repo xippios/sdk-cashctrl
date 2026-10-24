@@ -29,15 +29,21 @@ nothing is read from files.
 | `CASHCTRL_DEMO_SUBDOMAIN`, `CASHCTRL_DEMO_API_KEY` | the reserved organisation `demo`, used by this repository's tests; never listed in `CASHCTRL_ORGS` |
 
 Every task and tool takes `org`, the name of one declared organisation, as its first
-parameter. Each organisation gets its own client, key and rate limit (60 requests per
-minute, self-imposed); nothing spans organisations. A deployment reaches exactly the
-organisations its environment declares.
+parameter, and every result names it as `meta.tenant`. `list_organisations()` (the tool
+`cashctrl_list_organisations`) returns the declared names, nothing else. Each
+organisation gets its own client, key and rate limit (60 requests per minute,
+self-imposed); nothing spans organisations. A deployment reaches exactly the
+organisations its environment declares. An unknown name is refused with the declared
+ones; a malformed `CASHCTRL_ORGS` or a missing or malformed subdomain is a configuration
+error naming the variable, never its value.
 
 ## 30-second example
 
 ```python
 from xippios.cashctrl import tasks
 from xippios.cashctrl.models import Filter
+
+print(tasks.list_organisations().data)  # the declared organisations, e.g. ["acme", "demo"]
 
 # "demo" stands for any declared organisation; the first argument is always org.
 periods = tasks.list_fiscal_periods("demo")
@@ -62,8 +68,8 @@ invoices = tasks.list_orders("demo", type="SALES", fiscal_period_id=current.id)
 Every task returns `Result[T]`: `data` holds models that mirror CashCtrl's payloads
 under upstream's names in snake_case (`is_current`, `end_amount`), in Python and in every
 tool and route result alike, `meta` the upstream operation, the parameters as sent under
-upstream's names (`onlyActive`), when they were fetched and, for a list, `total`,
-upstream's count of the matching records. Async twins are named `<task>_async`. The
+upstream's names (`onlyActive`), the organisation as `tenant`, when they were fetched
+and, for a list, `total`, upstream's count of the matching records. Async twins are named `<task>_async`. The
 tasks are listed in the status table below.
 
 ## MCP
@@ -86,13 +92,18 @@ tasks are listed in the status table below.
 
 `--org acme` locks the server to one organisation: it stops at startup unless `acme` is
 declared with a well-formed subdomain, its instructions name the organisation, and a
-tool call naming another is refused before it reaches CashCtrl. Without `--org`, a
-server serves every declared organisation and the agent picks one per call. Tools are
-read-only and named `cashctrl_<verb>_<noun>`. Results are capped at 200 rows or 64 KB
-with a note on how to narrow the query. `--http` serves streamable HTTP instead of stdio.
+tool call that names another organisation or leaves `org` out is refused before it
+reaches CashCtrl; `cashctrl_list_organisations` then lists `acme` only. Without
+`--org`, a server serves every declared organisation and the agent picks one per call,
+after `cashctrl_list_organisations` has named them. Tools are read-only and named
+`cashctrl_<verb>_<noun>`. Results are capped at 200 rows or 64 KB with a note on how to
+narrow the query. `--http` serves streamable HTTP instead of stdio.
 
 Write tools run in a separate server, `xippios-cashctrl-mcp-write`; every write
-tool previews its change unless called with `confirm=true`. It takes `--org` too.
+tool previews its change unless called with `confirm=true`. It takes `--org` too. It
+carries no authentication, so `--http` serves it on a loopback `--host` (`127.0.0.1`,
+`localhost`, `::1`) only; `--allow-remote` serves it beyond, behind a gateway that
+authenticates.
 
 ## HTTP
 
@@ -110,6 +121,7 @@ subdomain): set the `httpx` logger to WARNING.
 
 | Upstream operation | Task function | MCP tool | Status |
 | --- | --- | --- | --- |
+| none: the declared organisations | `list_organisations` | `cashctrl_list_organisations` | available; names only, no request |
 | `GET fiscalperiod/list.json` (List fiscal periods) | `list_fiscal_periods` | `cashctrl_list_fiscal_periods` | available |
 | `GET currency/list.json` (List currencies) | `list_currencies` | `cashctrl_list_currencies` | available |
 | `GET tax/list.json` (List tax codes) | `list_tax_codes` | `cashctrl_list_tax_codes` | available |

@@ -28,8 +28,8 @@ Work on a branch `feature/<operation>`. Follow the three layers (ADR-0001) exact
    like what a person or agent wants (`get_<thing>(org, ...)`; `org` is always the first,
    required parameter, never defaulted, never a list of organisations), composing wrappers,
    resolving pagination with `xippios.core.paginate_*` and reference lookups, and returning
-   `Result[T]` with full `ResultMeta` (`source`, `endpoint`, `request`, and `published_at`
-   / `vintage` when upstream provides them). Then:
+   `Result[T]` with full `ResultMeta` through `_meta(org, ...)` (`source`, `endpoint`,
+   `tenant=org`, `request`, and `published_at` / `vintage` when upstream provides them). Then:
    `get_<thing> = sync(get_<thing>_async)`, add `"get_<thing>"` to `__all__`, and
    re-export it from `__init__.py`.
 
@@ -41,7 +41,8 @@ Work on a branch `feature/<operation>`. Follow the three layers (ADR-0001) exact
 
 6. **Tests.** Run `/record-fixture <operation> <case> <parameters>` for at least one
    realistic case (it records from the demo organisation only), add a replay test in
-   `tests/test_tasks.py` using the `replay_fixture` fixture and `org="demo"`, and a
+   `tests/test_tasks.py` using the `replay_fixture` fixture and `org="demo"`, a case in
+   its `TOOL_CASES` (checked for `meta.tenant` and snake_case keys), and a
    `@pytest.mark.live` smoke test in `tests/test_live.py` that takes the `demo_org`
    fixture. Grep the fixture for key patterns before committing.
 
