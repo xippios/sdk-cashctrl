@@ -371,9 +371,14 @@ def test_only_get_and_post_are_recorded(
         "person/categorize.json",
         "journal/create",
         "order/document/mail.json",
+        "order/update.json",
+        "account/create.json",
+        "fiscalperiod/delete.json",
+        "person/category/create.json",
+        "order/category/delete.json",
     ],
 )
-def test_a_post_is_recorded_for_create_update_and_delete_only(
+def test_a_post_is_recorded_for_the_eight_write_paths_only(
     recorder: ModuleType,
     tmp_path: Path,
     respx_mock: respx.MockRouter,
@@ -384,18 +389,45 @@ def test_a_post_is_recorded_for_create_update_and_delete_only(
     assert not respx_mock.calls, "refused before any request"
     assert not (tmp_path / "tests" / "fixtures").exists()
     out = capsys.readouterr().out
-    assert out.startswith(
-        f"not recorded: a POST is recorded only for a create.json, update.json or "
-        f"delete.json, not {endpoint}"
-    )
+    assert out.startswith("not recorded: a POST is recorded only for one of the eight write paths")
+    assert out.rstrip().endswith(f"not {endpoint}")
 
 
-@pytest.mark.parametrize(
-    "endpoint", ["journal/create.json", "person/update.json", "order/delete.json"]
-)
-def test_the_write_operations_may_be_posted(recorder: ModuleType, endpoint: str) -> None:
+EIGHT = [
+    "journal/create.json",
+    "journal/update.json",
+    "journal/delete.json",
+    "person/create.json",
+    "person/update.json",
+    "person/delete.json",
+    "order/create.json",
+    "order/delete.json",
+]
+
+
+@pytest.mark.parametrize("endpoint", EIGHT)
+def test_the_eight_write_paths_may_be_posted(recorder: ModuleType, endpoint: str) -> None:
+    assert frozenset(EIGHT) == recorder.WRITE_PATHS
     assert recorder.refusal("POST", endpoint) is None
     assert recorder.refusal("post", endpoint) is None
+
+
+@pytest.mark.parametrize("endpoint", ["journal/create.json", "person/create.json"])
+def test_a_create_without_the_marker_is_refused(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+) -> None:
+    assert recorder.main([endpoint, "ok", "--method", "POST", "title=Barverkauf"]) == 1
+    assert not respx_mock.calls, "refused before any request"
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    assert capsys.readouterr().out.startswith(
+        "not recorded: a create.json is recorded only for a record marked xippios-live"
+    )
+    assert recorder.unmarked("POST", endpoint, {"company": "xippios-live AG"}) is None
+    assert recorder.unmarked("POST", "journal/update.json", {"id": "51"}) is None
 
 
 def test_a_write_is_recorded_with_its_form_body(

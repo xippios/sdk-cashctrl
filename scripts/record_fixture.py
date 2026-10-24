@@ -25,16 +25,20 @@ described in ``docs/demo-org.md``: invented companies on placeholder streets,
 recorded. These policies stand all the same; every refusal writes nothing, says why,
 never shows a value, and exits with status 1:
 
-- GET, and POST for writes only. ``--method POST`` is allowed for a path ending in
-  ``/create.json``, ``/update.json`` or ``/delete.json``, the operations the write tools
-  call, and sends the ``key=value`` pairs as a form body, as the write tools do
-  (``api/_form.py``: ``application/x-www-form-urlencoded; charset=UTF-8``). Every other
-  POST (``update_status.json``, ``switch.json``, a POST to a list) and every other
-  method is refused before a request is sent. A recorded write changes the demo
-  organisation: the recorder says so after the request and asks for the matching delete,
-  recorded or run, so that no created record stays behind. The demo organisation is
-  synthetic; still, a write records a marked record (``xippios-live`` in its title,
-  description or company), updates it or deletes it, and nothing else.
+- GET, and POST for the eight write paths only. ``--method POST`` is allowed for
+  exactly the operations this package's write tools call (``WRITE_PATHS``):
+  ``journal/create.json``, ``journal/update.json``, ``journal/delete.json``,
+  ``person/create.json``, ``person/update.json``, ``person/delete.json``,
+  ``order/create.json`` and ``order/delete.json``. It sends the ``key=value`` pairs as a
+  form body, as the write tools do (``api/_form.py``:
+  ``application/x-www-form-urlencoded; charset=UTF-8``). Every other POST
+  (``order/update.json``, ``account/create.json``, ``update_status.json``, a POST to a
+  list) and every other method is refused before a request is sent, and so is a
+  ``create.json`` whose pairs do not carry the marker ``xippios-live`` (``MARK``) in a
+  value: a write records a marked record, updates it or deletes it, and nothing else. A
+  recorded write changes the demo organisation: the recorder says so after the request
+  and asks for the matching delete, recorded or run, so that no created record stays
+  behind.
 - ``.json`` only. An endpoint without the extension answers a bare number or a document
   (``account/balance``, ``account/costcenter/balance``, ``fiscalperiod/result``,
   ``setting/get``) and an export (``.pdf``, ``.xlsx``, ``.csv``, ``.zip``) a file; both
@@ -119,8 +123,21 @@ REPLAY_HOST = "demo.cashctrl.com"
 WRONG_KEY = "not-a-valid-key"  # pragma: allowlist secret (a deliberately invalid key)
 KEY_LIKE = re.compile(r"api[_-]?key|token|secret|authorization|password|hash", re.IGNORECASE)
 _ENDPOINT = re.compile(r"[a-z][a-z0-9_]*(?:/[a-z][a-z0-9_]*)*(?:\.[a-z]+)?")
-WRITE_OPERATIONS = ("/create.json", "/update.json", "/delete.json")
-"""The path endings a POST may be recorded for: the operations the write tools call."""
+WRITE_PATHS = frozenset(
+    {
+        "journal/create.json",
+        "journal/update.json",
+        "journal/delete.json",
+        "person/create.json",
+        "person/update.json",
+        "person/delete.json",
+        "order/create.json",
+        "order/delete.json",
+    }
+)
+"""The endpoints a POST may be recorded for: exactly those the write tools call."""
+MARK = "xippios-live"
+"""The marker a recorded create must carry in one of its values (title, company, ...)."""
 _CASE = re.compile(r"[a-z0-9][a-z0-9_]*")
 
 SCRUBBED_EMAIL = "user@example.com"
@@ -193,7 +210,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--method",
         default="GET",
-        help="HTTP method: GET, or POST for a create.json, update.json or delete.json",
+        help="HTTP method: GET, or POST for one of the eight write paths the write tools call",
     )
     parser.add_argument(
         "--wrong-key", action="store_true", help=f"send {WRONG_KEY!r} instead of the key"
@@ -215,6 +232,17 @@ def fixture_endpoint(endpoint: str) -> str:
     return endpoint.rsplit(".", 1)[0].replace("/", "_")
 
 
+def unmarked(method: str, endpoint: str, params: dict[str, str]) -> str | None:
+    """Why a create must not be sent: none of its values carries ``MARK``; else ``None``."""
+    creates = is_write(method) and endpoint.endswith("/create.json")
+    if creates and not any(MARK in value for value in params.values()):
+        return (
+            f"a create.json is recorded only for a record marked {MARK} (in its title, "
+            "company or description): none of the pairs carries the marker"
+        )
+    return None
+
+
 def is_write(method: str) -> bool:
     """Whether ``method`` records a write, a POST, in any case."""
     return method.upper() == "POST"
@@ -223,17 +251,17 @@ def is_write(method: str) -> bool:
 def refusal(method: str, endpoint: str) -> str | None:
     """Why the request must not be sent at all, else ``None``.
 
-    Refused: a method other than GET and POST; a POST to anything but a path ending in
-    ``/create.json``, ``/update.json`` or ``/delete.json``; an endpoint without ``.json``.
+    Refused: a method other than GET and POST; a POST to anything but ``WRITE_PATHS``;
+    an endpoint without ``.json``.
     """
     if method.upper() not in ("GET", "POST"):
         return (
             f"only GET, and POST for the write tools' operations, is recorded, not {method.upper()}"
         )
-    if is_write(method) and not endpoint.endswith(WRITE_OPERATIONS):
+    if is_write(method) and endpoint not in WRITE_PATHS:
         return (
-            f"a POST is recorded only for a create.json, update.json or delete.json, not "
-            f"{endpoint}: those are the operations the write tools call"
+            f"a POST is recorded only for one of the eight write paths the write tools "
+            f"call ({', '.join(sorted(WRITE_PATHS))}), not {endpoint}"
         )
     if not endpoint.endswith(".json"):
         return (
@@ -544,7 +572,9 @@ def changed_reminder(endpoint: str, response: httpx.Response) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     """Refuse or record, scrub in memory, check, write; return the exit status."""
     args = parse_args(argv)
-    refused = refusal(args.method, args.endpoint)
+    refused = refusal(args.method, args.endpoint) or unmarked(
+        args.method, args.endpoint, args.params
+    )
     if refused:
         print(f"not recorded: {refused}")  # noqa: T201
         return 1
