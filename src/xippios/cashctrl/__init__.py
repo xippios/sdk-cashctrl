@@ -26,14 +26,19 @@ from xippios.cashctrl.tasks import (
 )
 from xippios.cashctrl.tasks_write import (
     create_journal_entry,
+    create_person,
     delete_journal_entry,
+    delete_person,
     update_journal_entry,
+    update_person,
 )
 
 __all__ = [
     "__version__",
     "create_journal_entry",
+    "create_person",
     "delete_journal_entry",
+    "delete_person",
     "get_account",
     "get_journal_entry",
     "get_order",
@@ -47,4 +52,5 @@ __all__ = [
     "list_persons",
     "list_tax_codes",
     "update_journal_entry",
+    "update_person",
 ]

@@ -41,7 +41,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any, TypeGuard, get_args
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, JsonValue, ValidationError
 from xippios.core import InvalidRequestError, Result, sync
 
 from xippios.cashctrl import api
@@ -49,10 +49,19 @@ from xippios.cashctrl._client import SOURCE
 from xippios.cashctrl.models import (
     AllocationInput,
     AttachmentInput,
+    BankAccountInput,
+    ChildInput,
+    Color,
+    InsuranceContractInput,
     JournalEntryDetail,
     JournalItemInput,
+    Language,
     NotifyType,
+    PersonAddressInput,
+    PersonContactInput,
+    PersonDetail,
     Recurrence,
+    ServicePeriodInput,
     WriteAnswer,
     WritePreview,
     WriteResult,
@@ -61,15 +70,22 @@ from xippios.cashctrl.tasks import _meta
 
 __all__ = [
     "create_journal_entry",
+    "create_person",
     "delete_journal_entry",
+    "delete_person",
     "update_journal_entry",
+    "update_person",
 ]
 
 JournalOutcome = WritePreview[JournalEntryDetail] | WriteResult
 """A journal write's result: a preview (``performed`` false) or what was written (true)."""
+PersonOutcome = WritePreview[PersonDetail] | WriteResult
+"""A person write's result: a preview (``performed`` false) or what was written (true)."""
 
 NOTIFY_TYPES: tuple[str, ...] = get_args(NotifyType)
 RECURRENCES: tuple[str, ...] = get_args(Recurrence)
+LANGUAGES: tuple[str, ...] = get_args(Language)
+COLORS: tuple[str, ...] = get_args(Color)
 
 
 def _preview[T](
@@ -537,6 +553,523 @@ async def delete_journal_entry_async(
     return _performed(org, endpoint, fields, answer)
 
 
+# Persons -----------------------------------------------------------------------------
+
+
+def _addresses(person: PersonDetail) -> list[PersonAddressInput]:
+    """The record's addresses under the keys the ``addresses`` table documents."""
+    return [
+        PersonAddressInput.model_validate(
+            {
+                "type": address.type,
+                "address": address.address,
+                "canton": address.canton,
+                "city": address.city,
+                "company": address.company,
+                "country": address.country,
+                "first_name": address.first_name,
+                "is_hide_company": address.is_hide_company,
+                "is_hide_name": address.is_hide_name,
+                "last_name": address.last_name,
+                "zip": address.zip,
+            }
+        )
+        for address in person.addresses
+    ]
+
+
+def _contacts(person: PersonDetail) -> list[PersonContactInput]:
+    """The record's contacts under the keys the ``contacts`` table documents."""
+    return [
+        PersonContactInput.model_validate(
+            {"address": contact.address, "type": contact.type, "notes": contact.notes}
+        )
+        for contact in person.contacts
+    ]
+
+
+def _person_values(person: PersonDetail) -> tuple[dict[str, Any], dict[str, object]]:
+    """Every ``update.json`` parameter of ``person`` by task name, and what it cannot carry.
+
+    ``sequenceNumberId`` is not stored: an update leaves it out, so ``nr`` stays as it
+    is. ``attachments``, ``bankAccounts``, ``children``, ``insuranceContracts``,
+    ``servicePeriods`` and ``certificateValues`` were only ever seen empty; a record
+    holding one of them cannot be carried over. Addresses and contacts are carried with
+    the keys their tables document; one whose stored value upstream's value sets do not
+    hold cannot be carried either.
+    """
+    stored: dict[str, object] = {
+        "attachments": person.attachments,
+        "bank_accounts": person.bank_accounts,
+        "children": person.children,
+        "insurance_contracts": person.insurance_contracts,
+        "service_periods": person.service_periods,
+        "certificate_values": person.certificate_values or person.certificate_values_map,
+    }
+    addresses: list[PersonAddressInput] | None = None
+    contacts: list[PersonContactInput] | None = None
+    try:
+        addresses = _addresses(person)
+    except ValidationError:
+        stored["addresses"] = True
+    try:
+        contacts = _contacts(person)
+    except ValidationError:
+        stored["contacts"] = True
+    values: dict[str, Any] = {
+        "company": person.company,
+        "first_name": person.first_name,
+        "last_name": person.last_name,
+        "addresses": addresses,
+        "alt_name": person.alt_name,
+        "bank_data": person.bank_data,
+        "category_id": person.category_id,
+        "certificate_template_id": person.certificate_template_id,
+        "color": person.color,
+        "contacts": contacts,
+        "custom": person.custom,
+        "date_birth": person.date_birth,
+        "department": person.department,
+        "discount_percentage": person.discount_percentage,
+        "industry": person.industry,
+        "insurance_member_nr": person.insurance_member_nr,
+        "insurance_nr": person.insurance_nr,
+        "is_auto_fill_responsible_person": person.is_auto_fill_responsible_person,
+        "is_customer": person.is_customer,
+        "is_employee": person.is_employee,
+        "is_family": person.is_family,
+        "is_inactive": person.is_inactive,
+        "is_insurance": person.is_insurance,
+        "is_vendor": person.is_vendor,
+        "language": person.language,
+        "location_id": person.location_id,
+        "notes": person.notes,
+        "nr": person.nr,
+        "position": person.position,
+        "ssn": person.ssn,
+        "superior_id": person.superior_id,
+        "title_id": person.title_id,
+        "user_id": person.user_id,
+        "vat_uid": person.vat_uid,
+    }
+    return values, stored
+
+
+def _person_inputs(
+    problems: list[str],
+    *,
+    addresses: Sequence[Any] | None,
+    attachments: Sequence[Any] | None,
+    bank_accounts: Sequence[Any] | None,
+    children: Sequence[Any] | None,
+    contacts: Sequence[Any] | None,
+    insurance_contracts: Sequence[Any] | None,
+    service_periods: Sequence[Any] | None,
+) -> dict[str, Any]:
+    return {
+        "addresses": _inputs("addresses", addresses, PersonAddressInput, problems),
+        "attachments": _inputs("attachments", attachments, AttachmentInput, problems),
+        "bank_accounts": _inputs("bank_accounts", bank_accounts, BankAccountInput, problems),
+        "children": _inputs("children", children, ChildInput, problems),
+        "contacts": _inputs("contacts", contacts, PersonContactInput, problems),
+        "insurance_contracts": _inputs(
+            "insurance_contracts", insurance_contracts, InsuranceContractInput, problems
+        ),
+        "service_periods": _inputs(
+            "service_periods", service_periods, ServicePeriodInput, problems
+        ),
+    }
+
+
+async def create_person_async(
+    org: str,
+    *,
+    company: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    addresses: list[PersonAddressInput] | None = None,
+    contacts: list[PersonContactInput] | None = None,
+    category_id: int | None = None,
+    is_customer: bool | None = None,
+    is_vendor: bool | None = None,
+    is_employee: bool | None = None,
+    is_insurance: bool | None = None,
+    is_family: bool | None = None,
+    is_inactive: bool | None = None,
+    nr: str | None = None,
+    sequence_number_id: int | None = None,
+    language: Language | None = None,
+    title_id: int | None = None,
+    alt_name: str | None = None,
+    position: str | None = None,
+    department: str | None = None,
+    industry: str | None = None,
+    vat_uid: str | None = None,
+    bank_data: str | None = None,
+    bank_accounts: list[BankAccountInput] | None = None,
+    discount_percentage: Decimal | None = None,
+    date_birth: date | None = None,
+    color: Color | None = None,
+    superior_id: int | None = None,
+    notes: str | None = None,
+    attachments: list[AttachmentInput] | None = None,
+    user_id: int | None = None,
+    is_auto_fill_responsible_person: bool | None = None,
+    location_id: int | None = None,
+    ssn: str | None = None,
+    children: list[ChildInput] | None = None,
+    service_periods: list[ServicePeriodInput] | None = None,
+    certificate_template_id: int | None = None,
+    certificate_values: dict[str, JsonValue] | None = None,
+    insurance_nr: str | None = None,
+    insurance_member_nr: str | None = None,
+    insurance_contracts: list[InsuranceContractInput] | None = None,
+    custom: Mapping[str, str] | None = None,
+    confirm: bool = False,
+) -> Result[PersonOutcome]:
+    """Create a person (customer, vendor, employee, ...); without confirm=true only a preview.
+
+    Without ``confirm`` nothing is written and no request is sent: the result is a
+    preview, ``performed`` false, whose ``payload`` holds the exact form fields CashCtrl
+    would receive. Call again with ``confirm=true`` to create; the result is then
+    ``performed`` true with ``insert_id``, the new person's id. Upstream needs at least
+    one of ``company``, ``first_name`` or ``last_name`` and refuses a person without,
+    naming the fields. The roles are flags (``is_customer``, ``is_vendor``, ...); a flag
+    left out is not sent, so upstream applies its default. Without ``nr`` and
+    ``sequence_number_id`` upstream may number the person from a sequence itself.
+    Person categories are ids from CashCtrl's person categories.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        company: The company name, at most 100 characters, e.g. ``"Muster AG"``.
+        first_name: The first name, at most 50 characters, e.g. ``"Anna"``.
+        last_name: The last name, at most 50 characters, e.g. ``"Muster"``.
+        addresses: Addresses, each with ``type`` (``MAIN``, ``INVOICE``, ``DELIVERY``,
+            ``SALARY``, ``HISTORICAL``, ``OTHER``) and optionally ``address``, ``zip``,
+            ``city``, ``canton`` (``ZH``), ``country`` (ISO 3166 alpha-3, ``CHE``),
+            ``company``, ``first_name``, ``last_name``, ``is_hide_company``,
+            ``is_hide_name``, e.g. ``[{"type": "MAIN", "address": "Musterstrasse 1",
+            "zip": "8001", "city": "Zürich", "country": "CHE"}]``.
+        contacts: Contact information, each with ``type`` (``EMAIL_WORK``,
+            ``EMAIL_INVOICE``, ``PHONE_WORK``, ``MOBILE_WORK``, ``WEBSITE``, ...) and
+            ``address``, optionally ``notes``, e.g.
+            ``[{"type": "EMAIL_WORK", "address": "info@muster.example"}]``.
+        category_id: A person category's id, e.g. ``1``.
+        is_customer: ``true`` for a customer.
+        is_vendor: ``true`` for a vendor.
+        is_employee: ``true`` for an employee.
+        is_insurance: ``true`` for an insurance company.
+        is_family: ``true`` for a family.
+        is_inactive: ``true`` marks the person inactive; upstream's default is false.
+        nr: The person number, at most 50 characters, e.g. ``"K-1001"``.
+        sequence_number_id: The sequence number that generates ``nr``, e.g. ``3``.
+        language: ``DE``, ``EN``, ``FR`` or ``IT``, e.g. for documents.
+        title_id: A person title's id (Mr., Mrs., Dr.), e.g. ``1``.
+        alt_name: An alternative name for the organisational chart.
+        position: The job title, at most 100 characters.
+        department: The department, at most 100 characters.
+        industry: The industry or trade, at most 100 characters.
+        vat_uid: The VAT number (UID), at most 32 characters, e.g. ``"CHE-123.456.789"``.
+        bank_data: Unstructured bank information when no IBAN is known.
+        bank_accounts: Bank accounts, each with ``iban`` and ``type`` (``DEFAULT``,
+            ``ORDER``, ``SALARY``, ``HISTORICAL``, ``OTHER``), optionally ``bic``,
+            ``notes``.
+        discount_percentage: A discount for orders, 0 to 100, e.g. ``5``.
+        date_birth: The date of birth, e.g. ``1980-05-17``.
+        color: The colour in the organisational chart: ``BLUE``, ``GREEN``, ``RED``,
+            ``YELLOW``, ``ORANGE``, ``BLACK``, ``GRAY``, ``BROWN``, ``VIOLET``, ``PINK``.
+        superior_id: The superior, a person's id.
+        notes: Notes, limited HTML allowed.
+        attachments: Files to attach, e.g. ``[{"file_id": 24}]``.
+        user_id: The CashCtrl user linked to an employee.
+        is_auto_fill_responsible_person: ``true`` fills this person in as responsible
+            person on order documents (with ``user_id``).
+        location_id: The employee's workplace, a location's id.
+        ssn: The employee's social security number.
+        children: Children of an employee or family, each with ``name``.
+        service_periods: Service periods of an employee, each with ``date_entry``.
+        certificate_template_id: The salary certificate template of an employee.
+        certificate_values: Values printed on the salary certificate, e.g.
+            ``{"F": true, "2.3a": "Bonus"}``.
+        insurance_nr: The insurance number of an insurance.
+        insurance_member_nr: The member number at an insurance.
+        insurance_contracts: Insurance contracts, each with ``type_id``.
+        custom: Custom field values by upstream's name, e.g. ``{"customField2": "Gold"}``.
+        confirm: ``true`` creates the person; ``false`` (the default) only previews it.
+    """
+    problems: list[str] = []
+    lists = _person_inputs(
+        problems,
+        addresses=addresses,
+        attachments=attachments,
+        bank_accounts=bank_accounts,
+        children=children,
+        contacts=contacts,
+        insurance_contracts=insurance_contracts,
+        service_periods=service_periods,
+    )
+    _choices(problems, language=(language, LANGUAGES), color=(color, COLORS))
+    _refuse(problems)
+    fields = api.person_fields(
+        company=company,
+        first_name=first_name,
+        last_name=last_name,
+        alt_name=alt_name,
+        bank_data=bank_data,
+        category_id=category_id,
+        certificate_template_id=certificate_template_id,
+        certificate_values=certificate_values,
+        color=color,
+        custom=_custom(custom),
+        date_birth=date_birth,
+        department=department,
+        discount_percentage=discount_percentage,
+        industry=industry,
+        insurance_member_nr=insurance_member_nr,
+        insurance_nr=insurance_nr,
+        is_auto_fill_responsible_person=is_auto_fill_responsible_person,
+        is_customer=is_customer,
+        is_employee=is_employee,
+        is_family=is_family,
+        is_inactive=is_inactive,
+        is_insurance=is_insurance,
+        is_vendor=is_vendor,
+        language=language,
+        location_id=location_id,
+        notes=notes,
+        nr=nr,
+        position=position,
+        sequence_number_id=sequence_number_id,
+        ssn=ssn,
+        superior_id=superior_id,
+        title_id=title_id,
+        user_id=user_id,
+        vat_uid=vat_uid,
+        **lists,
+    )
+    endpoint = "person/create.json"
+    if not confirm:
+        return _preview(org, endpoint, fields)
+    answer = await api.person_create(org, fields)
+    return _performed(org, endpoint, fields, answer)
+
+
+async def update_person_async(
+    org: str,
+    id: int,
+    *,
+    company: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    addresses: list[PersonAddressInput] | None = None,
+    contacts: list[PersonContactInput] | None = None,
+    category_id: int | None = None,
+    is_customer: bool | None = None,
+    is_vendor: bool | None = None,
+    is_employee: bool | None = None,
+    is_insurance: bool | None = None,
+    is_family: bool | None = None,
+    is_inactive: bool | None = None,
+    nr: str | None = None,
+    sequence_number_id: int | None = None,
+    language: Language | None = None,
+    title_id: int | None = None,
+    alt_name: str | None = None,
+    position: str | None = None,
+    department: str | None = None,
+    industry: str | None = None,
+    vat_uid: str | None = None,
+    bank_data: str | None = None,
+    bank_accounts: list[BankAccountInput] | None = None,
+    discount_percentage: Decimal | None = None,
+    date_birth: date | None = None,
+    color: Color | None = None,
+    superior_id: int | None = None,
+    notes: str | None = None,
+    attachments: list[AttachmentInput] | None = None,
+    user_id: int | None = None,
+    is_auto_fill_responsible_person: bool | None = None,
+    location_id: int | None = None,
+    ssn: str | None = None,
+    children: list[ChildInput] | None = None,
+    service_periods: list[ServicePeriodInput] | None = None,
+    certificate_template_id: int | None = None,
+    certificate_values: dict[str, JsonValue] | None = None,
+    insurance_nr: str | None = None,
+    insurance_member_nr: str | None = None,
+    insurance_contracts: list[InsuranceContractInput] | None = None,
+    custom: Mapping[str, str] | None = None,
+    confirm: bool = False,
+) -> Result[PersonOutcome]:
+    """Change a person; without confirm=true it only previews the change.
+
+    The person is read first (``person/read.json``), the parameters given are applied,
+    and every parameter ``person/update.json`` documents is sent, taken from the person
+    where not given: upstream empties every parameter an update leaves out. A parameter
+    left out here keeps its stored value; an empty text (``""``) empties a text field;
+    ``addresses`` and ``contacts`` given replace the stored lists whole. Without
+    ``confirm`` nothing is written: the preview (``performed`` false) shows the
+    ``payload`` that would be sent, the person as it is (``before``) and the
+    ``changes``, at the cost of that one read. ``confirm=true`` reads and writes. A
+    person with neither company nor name, or holding attachments, bank accounts,
+    children, service periods, insurance contracts or certificate values, which cannot
+    be carried over, is refused before anything is written, unless the call gives them.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        id: The person's ``id`` from ``list_persons``, e.g. ``13``; not its number ``nr``.
+        company: The company name, at most 100 characters, e.g. ``"Muster AG"``.
+        first_name: The first name, at most 50 characters, e.g. ``"Anna"``.
+        last_name: The last name, at most 50 characters, e.g. ``"Muster"``.
+        addresses: Addresses replacing the stored ones, each with ``type`` (``MAIN``,
+            ``INVOICE``, ...) and optionally ``address``, ``zip``, ``city``, ``canton``,
+            ``country`` (``CHE``), e.g. ``[{"type": "MAIN", "city": "Bern"}]``.
+        contacts: Contact information replacing the stored ones, each with ``type``
+            (``EMAIL_WORK``, ``PHONE_WORK``, ...) and ``address``.
+        category_id: A person category's id, e.g. ``1``.
+        is_customer: ``true`` for a customer, ``false`` to drop the role.
+        is_vendor: ``true`` for a vendor, ``false`` to drop the role.
+        is_employee: ``true`` for an employee.
+        is_insurance: ``true`` for an insurance company.
+        is_family: ``true`` for a family.
+        is_inactive: ``true`` marks the person inactive.
+        nr: The person number, at most 50 characters, e.g. ``"K-1001"``.
+        sequence_number_id: The sequence number that generates ``nr``, e.g. ``3``.
+        language: ``DE``, ``EN``, ``FR`` or ``IT``.
+        title_id: A person title's id (Mr., Mrs., Dr.), e.g. ``1``.
+        alt_name: An alternative name for the organisational chart.
+        position: The job title, at most 100 characters.
+        department: The department, at most 100 characters.
+        industry: The industry or trade, at most 100 characters.
+        vat_uid: The VAT number (UID), e.g. ``"CHE-123.456.789"``.
+        bank_data: Unstructured bank information when no IBAN is known.
+        bank_accounts: Bank accounts replacing the stored ones, each with ``iban`` and
+            ``type``.
+        discount_percentage: A discount for orders, 0 to 100, e.g. ``5``.
+        date_birth: The date of birth, e.g. ``1980-05-17``.
+        color: ``BLUE``, ``GREEN``, ``RED``, ``YELLOW``, ``ORANGE``, ``BLACK``, ``GRAY``,
+            ``BROWN``, ``VIOLET`` or ``PINK``.
+        superior_id: The superior, a person's id.
+        notes: Notes, limited HTML allowed.
+        attachments: Files to attach, replacing the stored ones, e.g. ``[{"file_id": 24}]``.
+        user_id: The CashCtrl user linked to an employee.
+        is_auto_fill_responsible_person: ``true`` fills this person in as responsible
+            person on order documents.
+        location_id: The employee's workplace, a location's id.
+        ssn: The employee's social security number.
+        children: Children replacing the stored ones, each with ``name``.
+        service_periods: Service periods replacing the stored ones, each with
+            ``date_entry``.
+        certificate_template_id: The salary certificate template of an employee.
+        certificate_values: Values printed on the salary certificate, replacing the
+            stored ones, e.g. ``{"F": true}``.
+        insurance_nr: The insurance number of an insurance.
+        insurance_member_nr: The member number at an insurance.
+        insurance_contracts: Insurance contracts replacing the stored ones, each with
+            ``type_id``.
+        custom: Custom field values to set by upstream's name, e.g.
+            ``{"customField2": "Silber"}``; the other stored values are kept.
+        confirm: ``true`` writes the change; ``false`` (the default) only previews it.
+    """
+    _check_id(id)
+    problems: list[str] = []
+    lists = _person_inputs(
+        problems,
+        addresses=addresses,
+        attachments=attachments,
+        bank_accounts=bank_accounts,
+        children=children,
+        contacts=contacts,
+        insurance_contracts=insurance_contracts,
+        service_periods=service_periods,
+    )
+    given = _given(
+        company=company,
+        first_name=first_name,
+        last_name=last_name,
+        alt_name=alt_name,
+        bank_data=bank_data,
+        category_id=category_id,
+        certificate_template_id=certificate_template_id,
+        certificate_values=certificate_values,
+        color=color,
+        date_birth=date_birth,
+        department=department,
+        discount_percentage=discount_percentage,
+        industry=industry,
+        insurance_member_nr=insurance_member_nr,
+        insurance_nr=insurance_nr,
+        is_auto_fill_responsible_person=is_auto_fill_responsible_person,
+        is_customer=is_customer,
+        is_employee=is_employee,
+        is_family=is_family,
+        is_inactive=is_inactive,
+        is_insurance=is_insurance,
+        is_vendor=is_vendor,
+        language=language,
+        location_id=location_id,
+        notes=notes,
+        nr=nr,
+        position=position,
+        sequence_number_id=sequence_number_id,
+        ssn=ssn,
+        superior_id=superior_id,
+        title_id=title_id,
+        user_id=user_id,
+        vat_uid=vat_uid,
+        **lists,
+    )
+    _choices(problems, language=(language, LANGUAGES), color=(color, COLORS))
+    _refuse(problems)
+    if custom:
+        api.custom_xml(custom)  # refuse a wrong name before the read
+    person = await api.person_read(org, id)
+    values, stored = _person_values(person)
+    blocked = _blocked(stored, given)
+    if blocked:
+        raise _cannot_carry("person", blocked)
+    merged = {**values, **given, "custom": api.merge_custom(person.custom, custom or {})}
+    if not any(merged[name] for name in ("company", "first_name", "last_name")):
+        raise _missing(
+            "person",
+            ["company", "firstName", "lastName"],
+            "upstream needs one of them; pass company, first_name or last_name",
+        )
+    fields = api.person_fields(id=person.id, **merged)
+    changes = api.person_fields(**given, custom=api.custom_xml(custom) if custom else None)
+    endpoint = "person/update.json"
+    if not confirm:
+        return _preview(org, endpoint, fields, before=person, changes=changes)
+    answer = await api.person_update(org, fields)
+    return _performed(org, endpoint, fields, answer)
+
+
+async def delete_person_async(org: str, id: int, *, confirm: bool = False) -> Result[PersonOutcome]:
+    """Delete one person; without confirm=true it only shows the person.
+
+    Without ``confirm`` nothing is deleted: the preview (``performed`` false) shows the
+    person that would be deleted (``before``, read with ``person/read.json``) and the
+    ``payload``, ``ids`` with this one id. ``confirm=true`` deletes the person, without
+    reading it first; upstream decides whether a person with bookings or orders may go.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        id: The person's ``id`` from ``list_persons``, e.g. ``13``; not its number ``nr``.
+        confirm: ``true`` deletes the person; ``false`` (the default) only shows it.
+    """
+    _check_id(id)
+    fields = api.delete_fields([id])
+    endpoint = "person/delete.json"
+    if not confirm:
+        person = await api.person_read(org, id)
+        return _preview(org, endpoint, fields, before=person)
+    answer = await api.person_delete(org, [id])
+    return _performed(org, endpoint, fields, answer)
+
+
 create_journal_entry = sync(create_journal_entry_async)
 update_journal_entry = sync(update_journal_entry_async)
 delete_journal_entry = sync(delete_journal_entry_async)
+create_person = sync(create_person_async)
+update_person = sync(update_person_async)
+delete_person = sync(delete_person_async)
