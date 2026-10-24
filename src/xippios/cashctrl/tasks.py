@@ -66,6 +66,7 @@ from xippios.cashctrl.models import (
     JournalEntryDetail,
     ListResponse,
     Order,
+    OrderCategory,
     OrderDetail,
     OrderType,
     Person,
@@ -82,6 +83,7 @@ __all__ = [
     "list_currencies",
     "list_fiscal_periods",
     "list_journal_entries",
+    "list_order_categories",
     "list_orders",
     "list_organisations",
     "list_persons",
@@ -93,7 +95,7 @@ DIRECTIONS: tuple[str, ...] = get_args(Direction)
 COMPARISONS: tuple[str, ...] = get_args(Comparison)
 """The values of ``comparison`` in a ``filter`` item: ``eq``, ``like``, ``gt``, ``lt``."""
 ORDER_TYPES: tuple[str, ...] = get_args(OrderType)
-"""The values of ``type`` on ``order/list.json``: ``SALES``, ``PURCHASE``."""
+"""The values of ``type`` on ``order/list.json`` and ``order/category/list.json``."""
 PAGE_SIZE = 100
 """Records per request when a list task collects every page.
 
@@ -746,6 +748,36 @@ async def get_order_async(org: str, id: int) -> Result[OrderDetail]:
     return Result(data=order, meta=_meta(org, "order/read.json", {"id": id}))
 
 
+async def list_order_categories_async(
+    org: str, *, type: OrderType | None = None, fiscal_period_id: int | None = None
+) -> Result[list[OrderCategory]]:
+    """List an organisation's order categories of one type, with their statuses.
+
+    An order category is a kind of document (offer, order confirmation, delivery note,
+    invoice, reminder, credit note, purchase order) with its own statuses and settings.
+    Every category comes back with its ``id`` (the ``category_id`` of ``create_order``),
+    ``name_singular`` and ``name_plural`` (localised, ``<values><de>Rechnung</de>
+    <en>Invoice</en>...</values>``), ``type``, ``account_id`` (the debtors or creditors
+    account its orders book to), ``sequence_nr_id`` (the sequence that numbers its
+    orders; without one, ``create_order`` needs ``nr``), ``due_days``, ``is_inactive``,
+    and ``status``: each status's ``id`` (the ``status_id`` of ``create_order``),
+    ``name`` (Draft, Open, Paid, ...), ``is_book`` (whether orders in it book journal
+    entries) and ``is_closed``. Upstream lists ``SALES`` when ``type`` is left out.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        type: ``SALES`` (upstream's default) or ``PURCHASE``.
+        fiscal_period_id: The fiscal period upstream counts the orders in, an ``id`` from
+            ``list_fiscal_periods``, e.g. ``1``; the current period when left out.
+    """
+    _check_list_arguments(choices={"type": (type, ORDER_TYPES)})
+    arguments: dict[str, Any] = {"fiscal_period_id": fiscal_period_id, "type": type}
+    sent = api.order_category_list_params(**arguments)
+    response = await api.order_category_list(org, **arguments)
+    meta = _meta(org, "order/category/list.json", sent, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
 LIST_ORGANISATIONS_DOC = """List the organisations this server can reach, by name.
 
 Every other tool takes one of these names as ``org`` to choose the organisation it works
@@ -768,3 +800,4 @@ list_persons = sync(list_persons_async)
 get_person = sync(get_person_async)
 list_orders = sync(list_orders_async)
 get_order = sync(get_order_async)
+list_order_categories = sync(list_order_categories_async)

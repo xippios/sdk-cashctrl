@@ -19,6 +19,7 @@ from xippios.cashctrl.tasks import (
     list_currencies,
     list_fiscal_periods,
     list_journal_entries,
+    list_order_categories,
     list_orders,
     list_organisations,
     list_persons,
@@ -26,8 +27,10 @@ from xippios.cashctrl.tasks import (
 )
 from xippios.cashctrl.tasks_write import (
     create_journal_entry,
+    create_order,
     create_person,
     delete_journal_entry,
+    delete_order,
     delete_person,
     update_journal_entry,
     update_person,
@@ -36,8 +39,10 @@ from xippios.cashctrl.tasks_write import (
 __all__ = [
     "__version__",
     "create_journal_entry",
+    "create_order",
     "create_person",
     "delete_journal_entry",
+    "delete_order",
     "delete_person",
     "get_account",
     "get_journal_entry",
@@ -47,6 +52,7 @@ __all__ = [
     "list_currencies",
     "list_fiscal_periods",
     "list_journal_entries",
+    "list_order_categories",
     "list_orders",
     "list_organisations",
     "list_persons",

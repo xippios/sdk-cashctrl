@@ -24,6 +24,12 @@ from xippios.cashctrl.api.journal_delete import journal_delete
 from xippios.cashctrl.api.journal_list import journal_list, journal_list_params
 from xippios.cashctrl.api.journal_read import journal_read
 from xippios.cashctrl.api.journal_update import journal_update
+from xippios.cashctrl.api.order_category_list import (
+    order_category_list,
+    order_category_list_params,
+)
+from xippios.cashctrl.api.order_create import order_create, order_fields
+from xippios.cashctrl.api.order_delete import order_delete
 from xippios.cashctrl.api.order_list import order_list, order_list_params
 from xippios.cashctrl.api.order_read import order_read
 from xippios.cashctrl.api.person_create import person_create, person_fields
@@ -50,6 +56,11 @@ __all__ = [
     "journal_read",
     "journal_update",
     "merge_custom",
+    "order_category_list",
+    "order_category_list_params",
+    "order_create",
+    "order_delete",
+    "order_fields",
     "order_list",
     "order_list_params",
     "order_read",

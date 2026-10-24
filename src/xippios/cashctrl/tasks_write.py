@@ -57,6 +57,8 @@ from xippios.cashctrl.models import (
     JournalItemInput,
     Language,
     NotifyType,
+    OrderDetail,
+    OrderItemInput,
     PersonAddressInput,
     PersonContactInput,
     PersonDetail,
@@ -70,8 +72,10 @@ from xippios.cashctrl.tasks import _meta
 
 __all__ = [
     "create_journal_entry",
+    "create_order",
     "create_person",
     "delete_journal_entry",
+    "delete_order",
     "delete_person",
     "update_journal_entry",
     "update_person",
@@ -81,6 +85,8 @@ JournalOutcome = WritePreview[JournalEntryDetail] | WriteResult
 """A journal write's result: a preview (``performed`` false) or what was written (true)."""
 PersonOutcome = WritePreview[PersonDetail] | WriteResult
 """A person write's result: a preview (``performed`` false) or what was written (true)."""
+OrderOutcome = WritePreview[OrderDetail] | WriteResult
+"""An order write's result: a preview (``performed`` false) or what was written (true)."""
 
 NOTIFY_TYPES: tuple[str, ...] = get_args(NotifyType)
 RECURRENCES: tuple[str, ...] = get_args(Recurrence)
@@ -1067,9 +1073,185 @@ async def delete_person_async(org: str, id: int, *, confirm: bool = False) -> Re
     return _performed(org, endpoint, fields, answer)
 
 
+# Orders ------------------------------------------------------------------------------
+
+
+async def create_order_async(
+    org: str,
+    *,
+    associate_id: int | list[int],
+    category_id: int,
+    date: date,
+    items: list[OrderItemInput] | None = None,
+    nr: str | None = None,
+    description: str | None = None,
+    status_id: int | None = None,
+    account_id: int | None = None,
+    language: Language | None = None,
+    due_days: int | None = None,
+    discount_percentage: Decimal | None = None,
+    is_display_item_gross: bool | None = None,
+    currency_id: int | None = None,
+    currency_rate: Decimal | None = None,
+    sequence_number_id: int | None = None,
+    group_id: int | None = None,
+    previous_id: int | None = None,
+    responsible_person_id: int | None = None,
+    rounding_id: int | None = None,
+    notes: str | None = None,
+    attachments: list[AttachmentInput] | None = None,
+    recurrence: Recurrence | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    days_before: int | None = None,
+    notify_type: NotifyType | None = None,
+    notify_email: str | None = None,
+    notify_person_id: int | None = None,
+    notify_user_id: int | None = None,
+    custom: Mapping[str, str] | None = None,
+    confirm: bool = False,
+) -> Result[OrderOutcome]:
+    """Create an order (offer, invoice, purchase order, ...); without confirm=true a preview.
+
+    Without ``confirm`` nothing is written and no request is sent: the result is a
+    preview, ``performed`` false, whose ``payload`` holds the exact form fields CashCtrl
+    would receive. Call again with ``confirm=true`` to create; the result is then
+    ``performed`` true with ``insert_id``, the new order's id. The category decides the
+    kind of document and its statuses: take ``category_id`` and ``status_id`` from
+    ``list_order_categories`` (``type`` ``SALES`` or ``PURCHASE``); without
+    ``status_id`` the order gets the category's first status (Draft for the default
+    invoice category, which books nothing). The partner comes from ``list_persons``,
+    accounts from ``list_accounts``, tax codes from ``list_tax_codes``. The items'
+    ``unit_price`` was read as gross, VAT included, on the demo organisation. Without
+    ``nr`` upstream numbers the order from the category's sequence, if it has one, and
+    refuses it otherwise.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        associate_id: The business partner, an ``id`` from ``list_persons``, e.g. ``7``;
+            several ids, e.g. ``[7, 8]``, create one document per partner.
+        category_id: The order category, an ``id`` from ``list_order_categories``,
+            e.g. ``4`` (the default invoice category).
+        date: The date of the order, e.g. ``2026-10-24``.
+        items: The items, each with ``account_id`` (revenue account for sales, expense
+            account for purchase), ``name`` and ``unit_price``, optionally ``quantity``
+            (default 1), ``tax_id``, ``description``, ``article_nr``,
+            ``discount_percentage``, ``unit_id``, ``inventory_id``, ``type`` (``ARTICLE``,
+            ``TEXT``, ``PAGEBREAK``, ``SUBTOTAL``, ``TITLE``, ``OPTIONTOTAL``) and
+            ``allocations``, e.g. ``[{"account_id": 42, "name": "Beratung",
+            "unit_price": 150, "quantity": 2, "tax_id": 9}]``.
+        nr: The order number, at most 50 characters, e.g. ``"RE-2026-201"``.
+        description: A description of the document, at most 200 characters.
+        status_id: A status of the category, an id from its ``status`` in
+            ``list_order_categories``, e.g. ``12``.
+        account_id: The account, e.g. the debtors account; the category's when left out.
+        language: The document's language: ``DE``, ``EN``, ``FR`` or ``IT``.
+        due_days: Days until payment is due, e.g. ``30``.
+        discount_percentage: A discount on the whole order, 0 to 100, e.g. ``2``.
+        is_display_item_gross: ``true`` shows item totals gross; upstream's default is net.
+        currency_id: A currency, an ``id`` from ``list_currencies``.
+        currency_rate: The exchange rate into the default currency, e.g. ``0.92``.
+        sequence_number_id: The sequence number that generates ``nr``; the category's
+            when left out.
+        group_id: The order group (dossier) to put the order in, e.g. ``3``.
+        previous_id: The order this one continues (offer to invoice), e.g. ``2``.
+        responsible_person_id: The responsible person, a person's id.
+        rounding_id: The rounding of the grand total, e.g. ``1``.
+        notes: Notes, limited HTML allowed.
+        attachments: Files to attach, e.g. ``[{"file_id": 24}]``.
+        recurrence: How often the order repeats: ``MONTHLY``, ``WEEKLY``, ``DAILY``,
+            ``YEARLY``, ``SEMESTRAL``, ``QUARTERLY``, ``BI_MONTHLY`` or ``BI_WEEKLY``.
+        start_date: The next date the order repeats on, e.g. ``2026-11-01``.
+        end_date: The date the recurrence stops, e.g. ``2027-12-31``.
+        days_before: Create the next order this many days before ``start_date``.
+        notify_type: ``NONE``, ``USER``, ``PERSON``, ``RESPONSIBLE_PERSON`` or ``EMAIL``.
+        notify_email: The address notified with ``notify_type`` ``EMAIL``.
+        notify_person_id: The person notified with ``notify_type`` ``PERSON``.
+        notify_user_id: The user notified with ``notify_type`` ``USER``.
+        custom: Custom field values by upstream's name, e.g. ``{"customField3": "A-17"}``.
+        confirm: ``true`` creates the order; ``false`` (the default) only previews it.
+    """
+    problems: list[str] = []
+    associates = [associate_id] if _whole(associate_id) else associate_id
+    if not isinstance(associates, list) or not associates or not all(map(_whole, associates)):
+        problems.append(f"associate_id takes a person's id or a list of them, not {associate_id!r}")
+    item_inputs = _inputs("items", items, OrderItemInput, problems)
+    attachment_inputs = _inputs("attachments", attachments, AttachmentInput, problems)
+    _choices(
+        problems,
+        language=(language, LANGUAGES),
+        notify_type=(notify_type, NOTIFY_TYPES),
+        recurrence=(recurrence, RECURRENCES),
+    )
+    _refuse(problems)
+    fields = api.order_fields(
+        associate_id=associate_id,
+        category_id=category_id,
+        date=date,
+        account_id=account_id,
+        attachments=attachment_inputs,
+        currency_id=currency_id,
+        currency_rate=currency_rate,
+        custom=_custom(custom),
+        days_before=days_before,
+        description=description,
+        discount_percentage=discount_percentage,
+        due_days=due_days,
+        end_date=end_date,
+        group_id=group_id,
+        is_display_item_gross=is_display_item_gross,
+        items=item_inputs,
+        language=language,
+        notes=notes,
+        notify_email=notify_email,
+        notify_person_id=notify_person_id,
+        notify_type=notify_type,
+        notify_user_id=notify_user_id,
+        nr=nr,
+        previous_id=previous_id,
+        recurrence=recurrence,
+        responsible_person_id=responsible_person_id,
+        rounding_id=rounding_id,
+        sequence_number_id=sequence_number_id,
+        start_date=start_date,
+        status_id=status_id,
+    )
+    endpoint = "order/create.json"
+    if not confirm:
+        return _preview(org, endpoint, fields)
+    answer = await api.order_create(org, fields)
+    return _performed(org, endpoint, fields, answer)
+
+
+async def delete_order_async(org: str, id: int, *, confirm: bool = False) -> Result[OrderOutcome]:
+    """Delete one order; without confirm=true it only shows the order.
+
+    Without ``confirm`` nothing is deleted: the preview (``performed`` false) shows the
+    order that would be deleted (``before``, read with ``order/read.json``, items
+    included) and the ``payload``, ``ids`` with this one id. ``confirm=true`` deletes
+    the order, without reading it first; upstream decides what happens to the journal
+    entries a booked order made.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        id: The order's ``id`` from ``list_orders``, e.g. ``7``; not its number ``nr``.
+        confirm: ``true`` deletes the order; ``false`` (the default) only shows it.
+    """
+    _check_id(id)
+    fields = api.delete_fields([id])
+    endpoint = "order/delete.json"
+    if not confirm:
+        order = await api.order_read(org, id)
+        return _preview(org, endpoint, fields, before=order)
+    answer = await api.order_delete(org, [id])
+    return _performed(org, endpoint, fields, answer)
+
+
 create_journal_entry = sync(create_journal_entry_async)
 update_journal_entry = sync(update_journal_entry_async)
 delete_journal_entry = sync(delete_journal_entry_async)
 create_person = sync(create_person_async)
 update_person = sync(update_person_async)
 delete_person = sync(delete_person_async)
+create_order = sync(create_order_async)
+delete_order = sync(delete_order_async)
