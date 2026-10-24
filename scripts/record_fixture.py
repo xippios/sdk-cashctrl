@@ -5,11 +5,13 @@ Run from the repository root with the demo pair (``CASHCTRL_DEMO_SUBDOMAIN``,
 
     uv run scripts/record_fixture.py account/read.json unknown_id id=999999999
     uv run scripts/record_fixture.py account/list.json wrong_key --wrong-key
+    uv run scripts/record_fixture.py journal/delete.json ok --method POST ids=52
 
 ``<endpoint>`` is the upstream path after ``/api/v1/`` as ``docs/upstream/`` writes it;
 the fixture lands at ``tests/fixtures/<endpoint>/<case>.json`` with the endpoint's slashes
 as underscores and without its extension: ``tests/fixtures/account_read/unknown_id.json``.
-``key=value`` arguments are query parameters, named as upstream names them.
+``key=value`` arguments are query parameters of a GET and form fields of a POST, named
+as upstream names them, sent in the order given.
 
 The organisation is not a parameter. The recorder removes ``CASHCTRL_ORGS`` from its own
 environment and always records through ``client_for("demo")``, so it cannot reach a
@@ -23,19 +25,27 @@ described in ``docs/demo-org.md``: invented companies on placeholder streets,
 recorded. These policies stand all the same; every refusal writes nothing, says why,
 never shows a value, and exits with status 1:
 
-- GET only. Any other ``--method`` is refused before a request is sent; the recorder
-  for the write tools will add writes deliberately.
+- GET, and POST for writes only. ``--method POST`` is allowed for a path ending in
+  ``/create.json``, ``/update.json`` or ``/delete.json``, the operations the write tools
+  call, and sends the ``key=value`` pairs as a form body, as the write tools do
+  (``api/_form.py``: ``application/x-www-form-urlencoded; charset=UTF-8``). Every other
+  POST (``update_status.json``, ``switch.json``, a POST to a list) and every other
+  method is refused before a request is sent. A recorded write changes the demo
+  organisation: the recorder says so after the request and asks for the matching delete,
+  recorded or run, so that no created record stays behind. The demo organisation is
+  synthetic; still, a write records a marked record (``xippios-live`` in its title,
+  description or company), updates it or deletes it, and nothing else.
 - ``.json`` only. An endpoint without the extension answers a bare number or a document
   (``account/balance``, ``account/costcenter/balance``, ``fiscalperiod/result``,
   ``setting/get``) and an export (``.pdf``, ``.xlsx``, ``.csv``, ``.zip``) a file; both
   are refused before a request is sent.
-- No e-mail addresses. Every e-mail-shaped string in the request URL, the response
-  header values and the body becomes ``user@example.com``, with ``@`` written plainly, as
-  ``%40`` or as the HTML entities ``&#64;``, ``&#x40;`` and ``&commat;`` (``notes`` and
-  footers are HTML upstream); ``SYSTEM`` in ``createdBy`` is not an address and stays.
-  The synthetic books use reserved ``.example`` addresses, but ``createdBy`` and
-  ``lastUpdatedBy`` may carry the address of the user who wrote a record, a real person,
-  so the scrub stays.
+- No e-mail addresses. Every e-mail-shaped string in the request URL, the request
+  body, the response header values and the response body becomes ``user@example.com``,
+  with ``@`` written plainly, as ``%40`` or as the HTML entities ``&#64;``, ``&#x40;``
+  and ``&commat;`` (``notes`` and footers are HTML upstream); ``SYSTEM`` in
+  ``createdBy`` is not an address and stays. The synthetic books use reserved
+  ``.example`` addresses, but ``createdBy`` and ``lastUpdatedBy`` may carry the address
+  of the user who wrote a record, a real person, so the scrub stays.
 - No API user tags. CashCtrl names an API user in ``createdBy`` and ``lastUpdatedBy`` as
   ``API:`` and the first four characters of its key (observed on 2026-10-23 on the
   records ``scripts/seed_demo.py`` wrote). Every such tag becomes ``API:REDACTED``,
@@ -68,8 +78,10 @@ refusal by core prints its reason, never a value. A response in which core redac
 key or its basic-auth token is written, since nothing of either is left, but goes to
 review with exit status 1: upstream should never send them back.
 
-The fixture is then checked last, before the one write, in its serialised text and in
-every decoded string of a JSON body, for what core does not know: the subdomain on its
+The fixture is then checked last, before the one write, in its serialised text, in
+every decoded string of a JSON response body and, for a write, in the request body: its
+raw text, every form field name and value decoded, and every decoded string of a value
+that is JSON (``items``, ``addresses``). It looks for what core does not know: the subdomain on its
 own, an e-mail address other than ``user@example.com``, an API user tag other than
 ``API:REDACTED`` in any case and position (the key's own tag also with ``:`` URL-encoded,
 as an HTML entity or followed by a space), the key's first four characters on their own,
@@ -92,12 +104,14 @@ import sys
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl
 
 import httpx
 from xippios.core import AsyncClient, BasicKeyAuth, sync
 from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response, fixture_path
 
 from xippios.cashctrl._client import DEMO, SOURCE, TENANTS, client_for
+from xippios.cashctrl.api._form import FORM_CONTENT_TYPE
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -105,14 +119,27 @@ REPLAY_HOST = "demo.cashctrl.com"
 WRONG_KEY = "not-a-valid-key"  # pragma: allowlist secret (a deliberately invalid key)
 KEY_LIKE = re.compile(r"api[_-]?key|token|secret|authorization|password|hash", re.IGNORECASE)
 _ENDPOINT = re.compile(r"[a-z][a-z0-9_]*(?:/[a-z][a-z0-9_]*)*(?:\.[a-z]+)?")
+WRITE_OPERATIONS = ("/create.json", "/update.json", "/delete.json")
+"""The path endings a POST may be recorded for: the operations the write tools call."""
 _CASE = re.compile(r"[a-z0-9][a-z0-9_]*")
 
 SCRUBBED_EMAIL = "user@example.com"
-EMAIL = re.compile(r"[\w.%+-]+(?P<at>@|%40|&#0*64;?|&#[xX]0*40;?|&commat;)[\w.-]+\.[^\W\d_]{2,}")
-"""An e-mail-shaped string: ``@`` plain, as ``%40`` (a query string) or as an HTML entity."""
-# The same, but never starting inside a JSON escape (\n, \u00e9): scrubbing the raw text
-# of a JSON body then keeps it JSON.
-_EMAIL_IN_TEXT = re.compile(r"(?:(?<=\\[nrtbf])|(?<![\w.%+\\-]))" + EMAIL.pattern)
+EMAIL = re.compile(
+    r"(?:[\w.+-]|%(?![0-9A-Fa-f]{2}))+"
+    r"(?P<at>@|%40|&#0*64;?|&#[xX]0*40;?|&commat;)[\w.-]+\.[^\W\d_]{2,}"
+)
+"""An e-mail-shaped string: ``@`` plain, as ``%40`` (a query string) or as an HTML entity.
+
+The local part never takes in a percent-escape (``%22``): in a form body, the address
+inside ``%7B%22address%22%3A%22user%40example.com`` starts after ``%22``, and the escapes
+before it stay as they were sent.
+"""
+# The same, but never starting inside a JSON escape (\n, \u00e9) or a percent-escape, and
+# allowed to start right after one (a form body): scrubbing the raw text of a JSON body
+# then keeps it JSON, and the raw text of a form body keeps it the form that was sent.
+_EMAIL_IN_TEXT = re.compile(
+    r"(?:(?<=\\[nrtbf])|(?<=%[0-9A-Fa-f]{2})|(?<![\w.%+\\-]))" + EMAIL.pattern
+)
 _SCRUBBED_EMAILS = frozenset({SCRUBBED_EMAIL, SCRUBBED_EMAIL.replace("@", "%40")})
 
 TOKEN_FIELD_NAME = re.compile(r"hash|token|secret|api[_-]?key", re.IGNORECASE)
@@ -158,9 +185,16 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("endpoint", help="upstream path after /api/v1/, e.g. account/read.json")
     parser.add_argument("case", help="fixture name, e.g. unknown_id")
     parser.add_argument(
-        "params", nargs="*", metavar="key=value", help="query parameters, e.g. id=999999999"
+        "params",
+        nargs="*",
+        metavar="key=value",
+        help="query parameters of a GET or form fields of a POST, e.g. id=999999999",
     )
-    parser.add_argument("--method", default="GET", help="HTTP method; only GET is recorded")
+    parser.add_argument(
+        "--method",
+        default="GET",
+        help="HTTP method: GET, or POST for a create.json, update.json or delete.json",
+    )
     parser.add_argument(
         "--wrong-key", action="store_true", help=f"send {WRONG_KEY!r} instead of the key"
     )
@@ -171,7 +205,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     if not _CASE.fullmatch(args.case):
         parser.error(f"case {args.case!r}: use lower-case letters, digits and underscores")
     if any("=" not in item for item in args.params):
-        parser.error("query parameters are key=value")
+        parser.error("parameters are key=value")
     args.params = {key: value for key, _, value in (item.partition("=") for item in args.params)}
     return args
 
@@ -181,12 +215,25 @@ def fixture_endpoint(endpoint: str) -> str:
     return endpoint.rsplit(".", 1)[0].replace("/", "_")
 
 
+def is_write(method: str) -> bool:
+    """Whether ``method`` records a write, a POST, in any case."""
+    return method.upper() == "POST"
+
+
 def refusal(method: str, endpoint: str) -> str | None:
-    """Why the request must not be sent at all, else ``None``: not GET, or not ``.json``."""
-    if method.upper() != "GET":
+    """Why the request must not be sent at all, else ``None``.
+
+    Refused: a method other than GET and POST; a POST to anything but a path ending in
+    ``/create.json``, ``/update.json`` or ``/delete.json``; an endpoint without ``.json``.
+    """
+    if method.upper() not in ("GET", "POST"):
         return (
-            f"only GET is recorded, not {method.upper()}: recordings are read-only, and the "
-            "recorder for the write tools will add writes deliberately"
+            f"only GET, and POST for the write tools' operations, is recorded, not {method.upper()}"
+        )
+    if is_write(method) and not endpoint.endswith(WRITE_OPERATIONS):
+        return (
+            f"a POST is recorded only for a create.json, update.json or delete.json, not "
+            f"{endpoint}: those are the operations the write tools call"
         )
     if not endpoint.endswith(".json"):
         return (
@@ -199,7 +246,19 @@ def refusal(method: str, endpoint: str) -> str | None:
 async def exchange_async(
     client: AsyncClient, method: str, path: str, params: dict[str, str]
 ) -> httpx.Response:
-    """One request through the real client; an error status is returned, not raised."""
+    """One request through the real client; an error status is returned, not raised.
+
+    A GET sends ``params`` as the query; a POST sends them as the form body, as the
+    write tools send theirs (``api/_form.py``), and no query.
+    """
+    if is_write(method):
+        return await client.request(
+            "POST",
+            path,
+            data=params,
+            headers={"Content-Type": FORM_CONTENT_TYPE},
+            raise_on_error=False,
+        )
     return await client.request(method, path, params=params, raise_on_error=False)
 
 
@@ -261,20 +320,49 @@ def _strings(node: Any) -> Iterator[str]:
             yield from _strings(item)
 
 
+def _request_body(fixture: dict[str, Any]) -> str:
+    body = fixture.get("request", {}).get("body")
+    return body if isinstance(body, str) else ""
+
+
+def _form(body: str) -> list[tuple[str, str]]:
+    """The fields of a form body, names and values decoded; none for any other body."""
+    try:
+        return parse_qsl(body, keep_blank_values=True, strict_parsing=True)
+    except ValueError:
+        return []
+
+
+def _request_body_strings(fixture: dict[str, Any]) -> list[str]:
+    """A write's request body decoded; nothing for a GET.
+
+    Every form field name and value, and every string of a value that is JSON
+    (``items``, ``addresses``).
+    """
+    texts: list[str] = []
+    for name, value in _form(_request_body(fixture)):
+        texts += [name, value]
+        is_json, decoded = _decoded(value)
+        if is_json:
+            texts += list(_strings(decoded))
+    return texts
+
+
 def _holds_an_address(fixture: dict[str, Any]) -> bool:
-    """An e-mail address other than the placeholder in the URL, a header or the body.
+    """An e-mail address other than the placeholder in the URL, the bodies or a header.
 
     The raw texts are searched as they are scrubbed; the decoded strings of a JSON body
-    with the plain pattern, so an address the scrub could not reach is still found.
+    and of a form body with the plain pattern, so an address the scrub could not reach
+    is still found.
     """
     request, response = fixture.get("request", {}), fixture.get("response", {})
     body = response.get("body", "")
-    raw = [request.get("url", ""), body]
+    raw = [request.get("url", ""), _request_body(fixture), body]
     raw += [part for header in response.get("headers", []) for part in header]
     found = [match.group(0) for text in raw for match in _EMAIL_IN_TEXT.finditer(text)]
     is_json, decoded = _decoded(body)
-    if is_json:
-        found += [match.group(0) for text in _strings(decoded) for match in EMAIL.finditer(text)]
+    decoded_texts = [*(_strings(decoded) if is_json else []), *_request_body_strings(fixture)]
+    found += [match.group(0) for text in decoded_texts for match in EMAIL.finditer(text)]
     return any(address not in _SCRUBBED_EMAILS for address in found)
 
 
@@ -284,9 +372,13 @@ def scrub_api_users(text: str) -> str:
 
 
 def _searched_texts(text: str, fixture: dict[str, Any]) -> list[str]:
-    """The serialised fixture and, for a JSON body, every decoded key and string in it."""
+    """The serialised fixture and every decoded string the check searches as well.
+
+    Every key and string of a JSON response body, and a write's request body decoded
+    (``_request_body_strings``).
+    """
     is_json, decoded = _decoded(fixture.get("response", {}).get("body", ""))
-    return [text, *(_strings(decoded) if is_json else [])]
+    return [text, *(_strings(decoded) if is_json else []), *_request_body_strings(fixture)]
 
 
 def _holds_an_api_user_tag(texts: Sequence[str], key: str) -> bool:
@@ -407,6 +499,10 @@ def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
         )
     is_json, decoded = _decoded(fixture.get("response", {}).get("body", ""))
     tokens = sorted(set(_unsettled_token_fields(decoded))) if is_json else []
+    form = _form(_request_body(fixture))
+    tokens += sorted(
+        {name for name, value in form if TOKEN_FIELD_NAME.fullmatch(name) and value != REDACTED}
+    )
     if tokens:
         leaks.append(f"a value other than null or {REDACTED} under {', '.join(tokens)}")
     if _holds_an_address(fixture):
@@ -414,10 +510,35 @@ def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
     suspicions = list(_key_like_values(fixture, "fixture"))
     url = fixture.get("request", {}).get("url", "")
     suspicions += [f"request URL mentions {word!r}" for word in _body_mentions(url)]
+    sent = _request_body(fixture)
+    suspicions += [f"request body mentions {word!r}" for word in _body_mentions(sent)]
     body = fixture.get("response", {}).get("body", "")
     unsettled = _SETTLED_TOKEN_FIELD.sub("", body)
     suspicions += [f"response body mentions {word!r}" for word in _body_mentions(unsettled)]
     return leaks, suspicions
+
+
+def changed_reminder(endpoint: str, response: httpx.Response) -> str:
+    """The note after a recorded write: the organisation changed, and the delete is due.
+
+    Names the ``insertId`` when the answer carries one (an integer: the new record's id
+    for a create, the record's own for an update, observed on 2026-10-24), and nothing
+    else of the answer.
+    """
+    try:
+        answer = response.json()
+    except ValueError:
+        answer = None
+    insert_id = answer.get("insertId") if isinstance(answer, dict) else None
+    created = (
+        f" upstream answered insertId {insert_id};"
+        if isinstance(insert_id, int) and not isinstance(insert_id, bool)
+        else ""
+    )
+    return (
+        f"the demo organisation changed: POST {endpoint} was sent;{created} record or run "
+        "the matching delete.json so that no record created for a fixture stays behind"
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -435,7 +556,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         client = AsyncClient(client.config, auth=auth)
     path = fixture_path(FIXTURES, fixture_endpoint(args.endpoint), args.case)
     key = os.environ.get(key_var, "")
-    response = exchange(client, "GET", f"/{args.endpoint}", args.params)
+    method = "POST" if is_write(args.method) else "GET"
+    response = exchange(client, method, f"/{args.endpoint}", args.params)
+    if method == "POST":
+        print(changed_reminder(args.endpoint, response))  # noqa: T201
     try:
         fixture = scrub_request_url(fixture_from_response(response, scrub=scrub(key)))
     except ValueError as refusal_by_core:  # names what and where, never a value
