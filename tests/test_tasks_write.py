@@ -52,6 +52,7 @@ from xippios.cashctrl.models import (
 )
 
 BASE = "https://demo.cashctrl.com/api/v1"
+_FIXTURES = Path(__file__).parent / "fixtures"
 DAY = date(2026, 10, 24)
 JOURNAL_ENTRY = 51
 PERSON = 14
@@ -590,6 +591,77 @@ def test_delete_order_previews_the_order_then_deletes(
     assert sent_body(route) == recorded_body(fixtures_dir, "order_delete", "ok")
     assert isinstance(result.data, WriteResult)
     assert result.data.message == "1 document deleted"
+
+
+# The confirm gate --------------------------------------------------------------------
+
+NOT_TRUE: list[Any] = ["false", "no", 1, [0], "true", 1.0]
+"""Values a Python caller might pass for ``confirm`` that are not ``True``: each previews."""
+
+
+@pytest.mark.parametrize("confirm", NOT_TRUE, ids=[repr(value) for value in NOT_TRUE])
+def test_a_create_writes_only_when_confirm_is_true(
+    respx_mock: respx.MockRouter, confirm: Any
+) -> None:
+    result = create_the_recorded_journal_entry(confirm=confirm)
+    assert isinstance(result.data, WritePreview)
+    assert not respx_mock.calls, "no request at all"
+
+
+@pytest.mark.parametrize("confirm", NOT_TRUE, ids=[repr(value) for value in NOT_TRUE])
+def test_an_update_writes_only_when_confirm_is_true(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, confirm: Any
+) -> None:
+    read = replay_fixture("journal_read", "for_update")
+    write = respx_mock.post(f"{BASE}/journal/update.json")
+    result = tasks_write.update_journal_entry(DEMO, JOURNAL_ENTRY, title="x", confirm=confirm)
+    assert isinstance(result.data, WritePreview)
+    assert (read.call_count, write.called) == (1, False), "the read only, never the write"
+
+
+@pytest.mark.parametrize("confirm", NOT_TRUE, ids=[repr(value) for value in NOT_TRUE])
+def test_a_delete_writes_only_when_confirm_is_true(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, confirm: Any
+) -> None:
+    replay_fixture("person_read", "for_update")
+    write = respx_mock.post(f"{BASE}/person/delete.json")
+    result = tasks_write.delete_person(DEMO, PERSON, confirm=confirm)
+    assert isinstance(result.data, WritePreview)
+    assert not write.called
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("sent", "performed"),
+    [
+        ("false", False),
+        ("no", False),
+        ("0", False),
+        (0, False),
+        ("true", True),
+        ("yes", True),
+        (1, True),
+    ],
+)
+async def test_the_tool_schema_reads_confirm_as_a_boolean(
+    respx_mock: respx.MockRouter, sent: Any, performed: bool
+) -> None:
+    """Over MCP the schema converts confirm (pydantic's lax bool) before the task runs.
+
+    ``"true"``, ``"yes"``, ``"1"`` and ``1`` become ``True``; ``"false"``, ``"no"``,
+    ``"0"`` and ``0`` become ``False``; anything else is refused by the schema.
+    """
+    read = json.loads(load_fixture(_FIXTURES / "person_read" / "for_update.json").response.body)
+    respx_mock.get(f"{BASE}/person/read.json").respond(200, json=read)
+    write = respx_mock.post(f"{BASE}/person/delete.json").respond(
+        200, json={"success": True, "message": "1 person deleted"}
+    )
+    arguments = {"org": DEMO, "id": PERSON, "confirm": sent}
+    payload = await mcp_call(write_server, "cashctrl_delete_person", arguments)
+    assert payload["data"]["performed"] is performed
+    assert write.called is performed
+    with pytest.raises(AssertionError, match="bool"):
+        await mcp_call(write_server, "cashctrl_delete_person", {**arguments, "confirm": [0]})
 
 
 # Python callers' arguments -----------------------------------------------------------

@@ -4,7 +4,11 @@ Served only by ``xippios-cashctrl-mcp-write``, never by the read-only server and
 on the HTTP router (conventions §8). List the sync names in ``__all__``.
 
 ``org: str`` is the first, required parameter of every write task, and ``confirm: bool =
-False`` its last. The decisions taken for these tools on 2026-10-23 (the PR 6 interview):
+False`` its last. The gate is ``confirm is True``: from Python, anything but ``True``
+(``"false"``, ``1``, ``[0]``) previews; over MCP the tool schema turns ``"true"``,
+``"yes"``, ``"1"`` and ``1`` into ``True`` and ``"false"``, ``"no"``, ``"0"`` and ``0``
+into ``False``, and refuses anything else. The decisions taken for these tools on
+2026-10-23 (the wave 2 interview):
 
 1. **Preview.** While ``confirm`` is false a task writes nothing and returns a
    ``WritePreview``: the exact form ``payload`` upstream would receive (upstream names,
@@ -385,7 +389,7 @@ async def create_journal_entry_async(
         title=title,
     )
     endpoint = "journal/create.json"
-    if not confirm:
+    if confirm is not True:
         return _preview(org, endpoint, fields)
     answer = await api.journal_create(org, fields)
     return _performed(org, endpoint, fields, answer)
@@ -526,7 +530,7 @@ async def update_journal_entry_async(
     fields = api.journal_fields(id=entry.id, **merged)
     changes = api.journal_fields(**given, custom=api.custom_xml(custom) if custom else None)
     endpoint = "journal/update.json"
-    if not confirm:
+    if confirm is not True:
         return _preview(org, endpoint, fields, before=entry, changes=changes)
     answer = await api.journal_update(org, fields)
     return _performed(org, endpoint, fields, answer)
@@ -552,7 +556,7 @@ async def delete_journal_entry_async(
     _check_id(id)
     fields = api.delete_fields([id])
     endpoint = "journal/delete.json"
-    if not confirm:
+    if confirm is not True:
         entry = await api.journal_read(org, id)
         return _preview(org, endpoint, fields, before=entry)
     answer = await api.journal_delete(org, [id])
@@ -854,7 +858,7 @@ async def create_person_async(
         **lists,
     )
     endpoint = "person/create.json"
-    if not confirm:
+    if confirm is not True:
         return _preview(org, endpoint, fields)
     answer = await api.person_create(org, fields)
     return _performed(org, endpoint, fields, answer)
@@ -1044,7 +1048,7 @@ async def update_person_async(
     fields = api.person_fields(id=person.id, **merged)
     changes = api.person_fields(**given, custom=api.custom_xml(custom) if custom else None)
     endpoint = "person/update.json"
-    if not confirm:
+    if confirm is not True:
         return _preview(org, endpoint, fields, before=person, changes=changes)
     answer = await api.person_update(org, fields)
     return _performed(org, endpoint, fields, answer)
@@ -1066,7 +1070,7 @@ async def delete_person_async(org: str, id: int, *, confirm: bool = False) -> Re
     _check_id(id)
     fields = api.delete_fields([id])
     endpoint = "person/delete.json"
-    if not confirm:
+    if confirm is not True:
         person = await api.person_read(org, id)
         return _preview(org, endpoint, fields, before=person)
     answer = await api.person_delete(org, [id])
@@ -1217,7 +1221,7 @@ async def create_order_async(
         status_id=status_id,
     )
     endpoint = "order/create.json"
-    if not confirm:
+    if confirm is not True:
         return _preview(org, endpoint, fields)
     answer = await api.order_create(org, fields)
     return _performed(org, endpoint, fields, answer)
@@ -1240,7 +1244,7 @@ async def delete_order_async(org: str, id: int, *, confirm: bool = False) -> Res
     _check_id(id)
     fields = api.delete_fields([id])
     endpoint = "order/delete.json"
-    if not confirm:
+    if confirm is not True:
         order = await api.order_read(org, id)
         return _preview(org, endpoint, fields, before=order)
     answer = await api.order_delete(org, [id])
