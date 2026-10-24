@@ -2,15 +2,17 @@
 
 ``tasks_write.__all__`` as confirm-gated tools, behind a separate entry point,
 ``xippios-cashctrl-mcp-write``, so read-only clients never see write tools
-(conventions §8). ``--org <name>`` locks it to one organisation. No logic lives here
-(ADR-0001).
+(conventions §8). ``--org <name>`` locks it to one organisation (``_cli``); ``--http``
+serves it on a loopback ``--host`` only, unless ``--allow-remote`` is passed, since it
+carries no authentication. No logic lives here (ADR-0001).
 """
 
-from xippios.core.mcp import build_server
+from mcp.server.mcpserver import MCPServer
+from xippios.core.mcp import TenantLock, build_server
 
 from xippios.cashctrl import tasks_write
+from xippios.cashctrl._cli import serve
 from xippios.cashctrl._client import SOURCE
-from xippios.cashctrl._org_lock import main
 from xippios.cashctrl._version import __version__
 
 INSTRUCTIONS = (
@@ -20,16 +22,23 @@ INSTRUCTIONS = (
     "Call it once without confirm, show the preview, then confirm."
 )
 
-server = build_server(
-    SOURCE,
-    [getattr(tasks_write, name) for name in tasks_write.__all__],
-    name="xippios-cashctrl-write",
-    version=__version__,
-    instructions=INSTRUCTIONS,
-    read_only=False,
-)
+
+def build(tenant_lock: TenantLock | None = None) -> MCPServer:
+    """The write server, locked to one organisation when ``tenant_lock`` is given."""
+    return build_server(
+        SOURCE,
+        [getattr(tasks_write, name) for name in tasks_write.__all__],
+        name="xippios-cashctrl-write",
+        version=__version__,
+        instructions=INSTRUCTIONS,
+        read_only=False,
+        tenant_lock=tenant_lock,
+    )
+
+
+server = build()
 
 
 def run() -> None:
     """Run the write server: stdio by default, ``--http`` for HTTP, ``--org`` to lock it."""
-    main(server)
+    serve(server, build)
