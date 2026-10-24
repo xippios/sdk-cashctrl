@@ -201,7 +201,8 @@ All notable changes to this project are documented here. The format follows
     `purpose`, which the tables do not document, refuses the update unless the list is
     given or cleared;
   - `update_order` is left for a later wave; a delete of an unknown id stays a
-    `RequestRejected`; custom field names stay `customField<ID>`.
+    `RequestRejected` (for a journal entry the read now comes first, see Changed);
+    custom field names stay `customField<ID>`.
 - `list_order_categories` (`order/category/list.json`, with `type` and
   `fiscal_period_id`), a read tool `cashctrl_list_order_categories` and route
   `GET /cashctrl/list_order_categories`: the categories and their statuses, the ids
@@ -228,8 +229,9 @@ All notable changes to this project are documented here. The format follows
   `person/create|update|delete.json`, `order/create|delete.json`; every other POST and
   method refused before a request), and a `create.json` only when one of its values
   carries `xippios-live`; the `key=value` pairs are sent as the form body in their
-  order; it then says that the organisation changed and asks for the matching delete. Its rewrite and final check cover the request body as well (raw, each form
-  field decoded, each JSON value's strings).
+  order; it then says that the organisation changed and asks for the matching delete.
+  Its rewrite and final check cover the request body as well (raw, each form field
+  decoded, each JSON value's strings).
 - Thirteen fixtures recorded on 2026-10-24 from the synthetic demo organisation, every
   record marked `xippios-live` and deleted again: the sales order categories; a journal
   entry created (1020/3200, 100.00 with `UN1`), a create refused without `debitId`
@@ -244,6 +246,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Write tools, after the wave 2 review (decided by Johannes on 2026-10-24):
+  - `clear` on a flag (`is_customer`, `is_inactive` and the other boolean update
+    parameters of `update_person`) sends `false`, and the preview's `changes` shows
+    `"false"` instead of an empty string: clearing a yes/no value means false.
+    `clear=["sequence_number_id"]`, a parameter that is not stored and sent only when
+    given, was a silent no-op; it is refused before any request with a hint to drop it.
+  - `delete_journal_entry` reads the entry with `confirm=true` as well (one more
+    request), and both the preview and the confirmed delete refuse, with
+    `InvalidRequestError` before any write, an entry whose record carries `orderId`,
+    `orderBookEntryId` or `salaryBookEntryId`, as `update_journal_entry` does: upstream
+    documents that such entries cannot be deleted here, and its answer to such a
+    delete was never observed. A confirmed delete of an unknown id is now
+    `NotFoundError` from the read; `RequestRejected` remains for an entry deleted
+    between the read and the delete. The live journal test makes one call more (40 a
+    run).
 - The recorder's e-mail scrub no longer takes percent-escapes into an address's local
   part: in the form body `contacts=%5B%7B%22address%22%3A%22user%40example.com...` it
   read `%5B%7B%22address%22%3A%22user` as the local part and wrote a body other than
@@ -351,3 +368,10 @@ All notable changes to this project are documented here. The format follows
 - The scaffold's single client (`client`, `auth`, `config`, `BASE_URL` and `API_KEY_ENV`
   in `_client.py`) and its `CASHCTRL_API_KEY` variable, replaced by the organisation
   registry above.
+
+### Fixed
+
+- The `PersonAddress` docstring said `title_id` was only seen as `null`; an address
+  `titleId` was stored and read back in the live verification of 2026-10-24
+  (`docs/demo-org.md`, Person reads). It is in neither `addresses` table of
+  `person/create.json` or `person/update.json`, but reads return it.

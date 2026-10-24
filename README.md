@@ -157,19 +157,24 @@ by the write server only: never by the read server, never as an HTTP route.
   out. `update_journal_entry` and `update_person` therefore read the record, apply the
   parameters given, and send every parameter `update.json` documents, the rest taken
   from the record. A parameter left out keeps its value; `clear` names parameters to
-  send empty (`clear=["tax_id", "notes"]`), and a parameter both given and cleared is
-  refused. Refused with `InvalidRequestError` before anything is written, unless the
-  call gives or clears what is missing: a record that gives no value for a mandatory
-  parameter; one holding a list whose shape was never observed (attachments,
-  allocations, bank accounts, children, service periods, insurance contracts,
-  certificate values), an address with a `titleId` or a contact with a `purpose` (keys
-  the tables do not document); an insurance whose read shows no insurance numbers or an
-  employee whose read shows no `user_id` (the read leaves empty fields out, and these
-  were never seen come back); and a journal entry an order or a salary run booked. A
-  confirmed update reads the record again and recomputes the payload, so it can differ
-  from the preview if the record changed in between.
-- **Deletes** take one id; the preview shows the record that would go. An id that no
-  longer exists is refused by upstream (`RequestRejected`).
+  send empty (`clear=["tax_id", "notes"]`; a flag such as `is_vendor` is sent `false`),
+  and a parameter both given and cleared is refused, as is `sequence_number_id`, which
+  an update sends only when given. Refused with `InvalidRequestError` before anything is
+  written, unless the call gives or clears what is missing: a record that gives no value
+  for a mandatory parameter; one holding a list whose shape was never observed
+  (attachments, allocations, bank accounts, children, service periods, insurance
+  contracts, certificate values), an address with a `titleId` or a contact with a
+  `purpose` (keys the tables do not document); an insurance whose read shows no
+  insurance numbers or an employee whose read shows no `user_id` (the read leaves empty
+  fields out, and these were never seen come back); and a journal entry an order or a
+  salary run booked. A confirmed update reads the record again and recomputes the
+  payload, so it can differ from the preview if the record changed in between.
+- **Deletes** take one id; the preview shows the record that would go.
+  `delete_journal_entry` reads the entry with `confirm=true` as well and refuses, with
+  `InvalidRequestError` before anything is deleted, an entry an order or a salary run
+  booked; an unknown id is `NotFoundError` there. A person or an order that no longer
+  exists, or an entry deleted between that read and the delete, is refused by upstream
+  (`RequestRejected`).
 - **Custom fields**: `custom` maps upstream's names (`customField1`, `customField<ID>`)
   to text, sent as `<values><customField1>...</customField1></values>`, values escaped.
   An update keeps every stored value it is not given.

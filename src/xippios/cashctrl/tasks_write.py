@@ -30,7 +30,8 @@ into ``False``, and refuses anything else. The decisions taken for these tools o
 4. **Ids for orders.** ``list_order_categories`` (``tasks.py``, the read server) lists
    the categories and their statuses, the ids ``create_order`` takes.
 5. **Live tests mark, delete and sweep** (``tests/test_live.py``).
-6. **Deletes** preview the record they would delete.
+6. **Deletes** preview the record they would delete. A journal delete reads the entry,
+   confirmed or not, and refuses one an order or a salary run booked (2026-10-24).
 7. Core's form bodies (``data=``) carry the fields (``api/_form.py``).
 
 ``meta.endpoint`` is the write operation (``journal/create.json``) and ``meta.tenant``
@@ -204,7 +205,9 @@ def _clear_names(
     """The parameters ``clear`` names, checked against ``update.json``; problems collected.
 
     Every name must be a documented update parameter of the resource, by its task name
-    (``tax_id``, ``notes``), and must not be changed by the same call.
+    (``tax_id``, ``notes``), not one in ``_UNSENT`` (``sequence_number_id``, sent only
+    when given, so clearing it would change nothing), and must not be changed by the
+    same call.
     """
     if clear is None:
         return []
@@ -218,6 +221,8 @@ def _clear_names(
                 f"clear: {name!r} is not an update.json parameter here; one of "
                 + ", ".join(documented)
             )
+        elif name in _UNSENT:
+            problems.append(f"clear: {name!r} {_UNSENT[name]}")
         elif name in given or (name == "custom" and custom):
             problems.append(f"clear: {name!r} is both changed and cleared")
         elif name not in names:
@@ -236,15 +241,27 @@ def _changes(
 
     The values given, encoded as sent; a list or map given empty as ``[]`` or ``{}``,
     which the payload leaves out (upstream empties what is left out); a cleared
-    parameter as ``""``, ``[]`` or ``{}``, by its kind.
+    parameter as ``""``, ``[]`` or ``{}``, by its kind, and a cleared flag as ``false``,
+    the value the payload sends for it.
     """
     changes: dict[str, str] = encode(**given, custom=api.custom_xml(custom) if custom else None)
     for name, value in given.items():
         if isinstance(value, list | tuple | Mapping) and not value:
             changes[documented[name]] = "{}" if isinstance(value, Mapping) else "[]"
     for name in cleared:
-        changes[documented[name]] = _EMPTY.get(name, "")
+        changes[documented[name]] = "false" if name in _FLAGS else _EMPTY.get(name, "")
     return changes
+
+
+def _cleared(cleared: Sequence[str]) -> dict[str, Any]:
+    """The values the cleared parameters are sent with: ``False`` for a flag, else ``None``.
+
+    ``None`` and an empty list are left out of the form, which upstream reads as empty
+    ("omitted parameters are treated as empty values"). A flag has no empty value:
+    clearing it means ``false``, so it is sent as ``false`` (decided by Johannes on
+    2026-10-24, after the wave 2 review).
+    """
+    return {name: False if name in _FLAGS else None for name in cleared}
 
 
 _EMPTY = {
@@ -259,7 +276,36 @@ _EMPTY = {
     "service_periods": "[]",
     "certificate_values": "{}",
 }
-"""How ``changes`` shows a cleared list or map parameter; every other one is ``""``."""
+"""How ``changes`` shows a cleared list or map parameter; a flag is ``false``, others ``""``."""
+
+_FLAGS = frozenset(
+    {
+        "is_auto_fill_responsible_person",
+        "is_customer",
+        "is_employee",
+        "is_family",
+        "is_inactive",
+        "is_insurance",
+        "is_vendor",
+    }
+)
+"""The boolean update parameters ("Possible values: true, false"), every one a person's.
+
+``journal/update.json`` documents none. A flag named in ``clear`` is sent as ``false``.
+"""
+
+_UNSENT = {
+    "sequence_number_id": (
+        "is not stored, and an update sends it only when it is given; left out, upstream "
+        "already reads it as empty, so clearing it would change nothing: drop it from clear"
+    ),
+}
+"""Update parameters an update never takes from the record, and why ``clear`` refuses them.
+
+``sequenceNumberId`` is not stored ("If this is empty, the sequence number will not
+update when ``reference`` is set"; for a person, ``nr``): the update leaves it out unless
+the call gives it, so a cleared one would be sent exactly as an omitted one.
+"""
 
 
 def _blocked(stored: Mapping[str, str | None], decided: Iterable[str]) -> dict[str, str]:
@@ -387,15 +433,19 @@ _BOOKED_BY = {
 """The read fields that mark an entry an order or a salary run booked."""
 
 
-def _booked(entry: JournalEntryDetail) -> InvalidRequestError | None:
-    """A refusal for an entry another module booked, which ``update.json`` cannot change."""
+def _booked(entry: JournalEntryDetail, write: str) -> InvalidRequestError | None:
+    """A refusal for an entry another module booked, ``write`` ``updated`` or ``deleted``.
+
+    ``journal/update.json``: "you cannot update automatically created entries this way";
+    ``journal/delete.json``: "you cannot delete automatically created entries here".
+    """
     marks = [upstream for name, upstream in _BOOKED_BY.items() if getattr(entry, name) is not None]
     if not marks:
         return None
     return InvalidRequestError(
         f"journal entry {entry.id} was booked by an order or a salary run ({', '.join(marks)} "
-        "set); upstream documents that such entries cannot be updated here, change them "
-        "through that module. Nothing was sent",
+        f"set); upstream documents that such entries cannot be {write} here, only through "
+        "that module. Nothing was sent",
         source=SOURCE,
     )
 
@@ -604,7 +654,8 @@ async def update_journal_entry_async(
             ``{"customField1": "Projekt B"}``; the other stored values are kept.
         clear: Parameters to send empty, by these names, e.g. ``["tax_id", "notes"]``;
             ``["custom"]`` empties every custom field. A parameter cannot be both given
-            and cleared.
+            and cleared, and ``sequence_number_id``, not stored and sent only when
+            given, cannot be cleared.
         confirm: ``true`` writes the change; ``false`` (the default) only previews it.
     """
     _check_id(id)
@@ -643,7 +694,7 @@ async def update_journal_entry_async(
     if custom:
         api.custom_xml(custom)  # refuse a wrong name before the read
     entry = await api.journal_read(org, id)
-    booked = _booked(entry)
+    booked = _booked(entry, "updated")
     if booked is not None:
         raise booked
     values, stored = _journal_values(entry)
@@ -651,7 +702,7 @@ async def update_journal_entry_async(
     if blocked:
         raise _cannot_carry("journal entry", blocked)
     merged = {**values, **given, "custom": api.merge_custom(entry.custom, custom or {})}
-    merged.update(dict.fromkeys(cleared))
+    merged.update(_cleared(cleared))
     if not merged["items"]:
         absent = [
             upstream
@@ -680,12 +731,19 @@ async def delete_journal_entry_async(
 ) -> Result[JournalOutcome]:
     """Delete one manual journal entry; without confirm=true it only shows the entry.
 
-    Without ``confirm`` nothing is deleted: the preview (``performed`` false) shows the
-    entry that would be deleted (``before``, read with ``journal/read.json``) and the
-    ``payload``, ``ids`` with this one id. ``confirm=true`` deletes it, without reading
-    it first. Entries that orders or salary booked cannot be deleted here; upstream
-    refuses them. An unknown id raises ``NotFoundError`` in the preview, and
-    ``RequestRejected`` ("This book entry does not exist.", observed) when confirmed.
+    The entry is read first (``journal/read.json``), with ``confirm`` as well, and one
+    that an order or a salary run booked (``order_id``, ``order_book_entry_id`` or
+    ``salary_book_entry_id`` set) is refused with ``InvalidRequestError`` before
+    anything is deleted, as ``update_journal_entry`` refuses it: upstream documents that
+    such entries cannot be deleted here, but how it answers such a delete was never
+    observed, so the check is made here, and a confirmed delete reads again so that it
+    holds for the entry as it is when deleted, not as the preview saw it. Without
+    ``confirm`` nothing is deleted: the preview (``performed`` false) shows the entry
+    that would be deleted (``before``) and the ``payload``, ``ids`` with this one id.
+    ``confirm=true`` deletes it after that read. An unknown id raises
+    ``NotFoundError`` at the read; an entry deleted between the read and the delete is
+    refused by upstream with ``RequestRejected`` ("This book entry does not exist.",
+    observed).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -695,8 +753,11 @@ async def delete_journal_entry_async(
     _check_id(id)
     fields = api.delete_fields([id])
     endpoint = "journal/delete.json"
+    entry = await api.journal_read(org, id)
+    booked = _booked(entry, "deleted")
+    if booked is not None:
+        raise booked
     if confirm is not True:
-        entry = await api.journal_read(org, id)
         return _preview(org, endpoint, fields, before=entry)
     answer = await api.journal_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
@@ -1130,7 +1191,8 @@ async def update_person_async(
     The person is read first (``person/read.json``), the parameters given are applied,
     and every parameter ``person/update.json`` documents is sent, taken from the person
     where not given: upstream empties every parameter an update leaves out. A parameter
-    left out here keeps its stored value; one named in ``clear`` is sent empty;
+    left out here keeps its stored value; one named in ``clear`` is sent empty, a flag
+    (``is_customer``, ``is_inactive``, ...) as ``false``;
     ``addresses`` and ``contacts`` given replace the stored lists whole. Without
     ``confirm`` nothing is written: the preview (``performed`` false) shows the
     ``payload`` that would be sent, the person as it is (``before``) and the
@@ -1199,8 +1261,10 @@ async def update_person_async(
         custom: Custom field values to set by upstream's name, e.g.
             ``{"customField2": "Silber"}``; the other stored values are kept.
         clear: Parameters to send empty, by these names, e.g. ``["department", "notes"]``
-            or ``["user_id"]``; ``["custom"]`` empties every custom field. A parameter
-            cannot be both given and cleared.
+            or ``["user_id"]``; ``["custom"]`` empties every custom field, and a flag
+            such as ``["is_vendor"]`` is sent ``false``. A parameter cannot be both
+            given and cleared, and ``sequence_number_id``, not stored and sent only
+            when given, cannot be cleared.
         confirm: ``true`` writes the change; ``false`` (the default) only previews it.
     """
     _check_id(id)
@@ -1272,7 +1336,7 @@ async def update_person_async(
             source=SOURCE,
         )
     merged = {**values, **given, "custom": api.merge_custom(person.custom, custom or {})}
-    merged.update(dict.fromkeys(cleared))
+    merged.update(_cleared(cleared))
     if not any(merged[name] for name in ("company", "first_name", "last_name")):
         raise _missing(
             "person",

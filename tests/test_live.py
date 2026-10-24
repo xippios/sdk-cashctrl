@@ -22,13 +22,14 @@ creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10
   field the update derives is unchanged, the end-to-end proof that an update sends the
   whole record;
 - it deletes what it created by id with the delete tool, and a ``finally`` deletes it
-  through the endpoint wrapper should an assertion fail first.
+  through the endpoint wrapper should an assertion fail first. A confirmed journal
+  delete reads the entry first and refuses one an order or a salary run booked.
 
 The calls of one run: 17 for the reads, 4 lookups (accounts, tax codes, customers, the
-sales categories), 8 for the journal (sweep, create, the sweep's query seeing the new
-entry, the update's preview, the update as read and write, the read back, delete), 7
-for a person (the same without the query) and 3 for an order; 39 in all, at least one
-more per leftover swept.
+sales categories), 9 for the journal (sweep, create, the sweep's query seeing the new
+entry, the update's preview, the update as read and write, the read back, the delete as
+read and write), 7 for a person (the same without the query, the delete one call) and 3
+for an order; 40 in all, one more per leftover swept, two for a journal entry.
 """
 
 from datetime import date

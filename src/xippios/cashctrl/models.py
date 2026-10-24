@@ -567,7 +567,11 @@ class PersonAddress(UpstreamModel):
     ``hide_company`` and ``hide_name``, ``company_for_address``,
     ``first_name_for_address``, ``last_name_for_address``, ``street_name`` and
     ``street_number`` (``address`` split), ``title_name``, ``canton_code``,
-    ``country_code2`` and ``country_code3``. ``title_id`` was only seen as ``null``.
+    ``country_code2`` and ``country_code3``. ``title_id``: an address ``titleId`` sent
+    with a create was stored and read back, with ``title_name``, in the live
+    verification of 2026-10-24 (``docs/demo-org.md``, Person reads); it is in neither
+    ``addresses`` table (``person/create.json``, ``person/update.json``), but reads
+    return it, so ``update_person`` refuses to carry it over.
     """
 
     id: int

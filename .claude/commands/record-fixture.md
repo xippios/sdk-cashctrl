@@ -95,15 +95,16 @@ writes nothing and exits non-zero:
    instead of raising.
 4. The check runs on the scrubbed fixture before the write, over its text, the
    decoded strings of its response body and, for a write, the request body (the raw
-   text, every form field decoded and every string of a JSON value such as `items`): if the subdomain on its own, an e-mail address other
-   than `user@example.com`, an API user tag other than `API:REDACTED` (in any case
-   and position), the key's first four characters on their own ("possible key
-   prefix") or a value other than `null` or `REDACTED` under a token-like field name is
-   in it, nothing is written and the script exits non-zero; if a key-like name carries a
-   value other than `REDACTED`, it writes the file and exits non-zero for review. Either
-   way, stop and report what it named; never print the file to find out. A possible key
-   prefix may be a coincidence of four characters: find them in the response by other
-   means before recording again, never by printing the key.
+   text, every form field decoded and every string of a JSON value such as `items`): if
+   the subdomain on its own, an e-mail address other than `user@example.com`, an API
+   user tag other than `API:REDACTED` (in any case and position), the key's first four
+   characters on their own ("possible key prefix") or a value other than `null` or
+   `REDACTED` under a token-like field name is in it, nothing is written and the script
+   exits non-zero; if a key-like name carries a value other than `REDACTED`, it writes
+   the file and exits non-zero for review. Either way, stop and report what it named;
+   never print the file to find out. A possible key prefix may be a coincidence of four
+   characters: find them in the response by other means before recording again, never by
+   printing the key.
 5. Check again before committing, never echoing a value:
 
    ```bash
