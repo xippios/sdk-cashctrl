@@ -17,7 +17,8 @@ Work on a branch `feature/<operation>`. Follow the three layers (ADR-0001) exact
    Dates become `datetime.date`/`datetime`, numbers become `int`/`Decimal`/`float`,
    upstream enumerations become `StrEnum`. No renaming to match another source.
 
-   For a write operation (a `create.json`, `update.json` or `delete.json`), follow the
+   For a write operation (a `create.json`, `update.json` or `delete.json`; add its path
+   to the recorder's `WRITE_PATHS` deliberately), follow the
    recipe in `CLAUDE.md`, Write tools, for steps 3 to 6: a `<module>_fields` builder and
    a wrapper that posts through `api/_form.py`, a task in `tasks_write.py` with
    `confirm: bool = False` last that previews unless confirmed, an update that reads,

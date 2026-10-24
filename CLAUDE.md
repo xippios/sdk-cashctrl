@@ -79,8 +79,8 @@ in `docs/demo-org.md`, never a copy of real books. So the recorder records any m
 any amount; it still scrubs e-mail addresses to `user@example.com`, API user tags to
 `API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) to
 `REDACTED`, in the request body as well, and refuses any method but GET and POST, a POST
-to anything but a `create.json`, `update.json` or `delete.json`, and any endpoint but
-`.json`. Writes against demo create a record marked `xippios-live`, update it and delete
+to anything but the eight write paths, a create without the marker `xippios-live`, and
+any endpoint but `.json`. Writes against demo create a record marked `xippios-live`, update it and delete
 it again, nothing else (see Write tools). The demo subdomain is treated like a key: never
 in a file, a commit, a log line or a report. The repository is public.
 
@@ -218,8 +218,8 @@ raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
 `tasks_write.py` holds the write tasks (`create_*`, `update_*`, `delete_*` for journal
 entries, persons and orders), served by `xippios-cashctrl-mcp-write` only: never by the
 read server, never on the HTTP router (`tests/test_adapters.py` runs core's
-`assert_write_tools`). The decisions behind them were taken by Johannes in the PR 6
-interview on 2026-10-23; the recipe for one more:
+`assert_write_tools`). The decisions behind them were taken by Johannes in the wave 2
+interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more:
 
 1. **Layer 1.** `api/<module>_create.py` (and `_update`, `_delete`): a `<module>_fields`
    builder takes every parameter the create table documents, snake_cased, and returns
@@ -233,7 +233,11 @@ interview on 2026-10-23; the recipe for one more:
    unknown keys refused).
 2. **Layer 2.** An async task, `org` first and `confirm: bool = False` last (core
    refuses to register a write task without it), the create table's parameters as
-   keyword arguments, `custom: Mapping[str, str] | None` among them. It returns
+   keyword arguments, `custom: Mapping[str, str] | None` among them. The gate is
+   `if confirm is not True:`, never truthiness: from Python only `True` writes (over
+   MCP the schema turns `"true"`, `"yes"`, `"1"`, `1` into `True` and refuses what is
+   no boolean). Ids are ids: journal `associate_id` is an `int`, since upstream would
+   create a person from a name. It returns
    `Result[WritePreview[<record>] | WriteResult]`: while `confirm` is false a
    `WritePreview` (`performed=False`, `endpoint`, `payload` = the exact fields,
    `before` = the record for an update or a delete, `changes` for an update) with
@@ -247,8 +251,18 @@ interview on 2026-10-23; the recipe for one more:
    sends all of them. A mandatory parameter neither the record nor the call gives
    raises `InvalidRequestError` before any write; so does a stored list whose shape was
    never observed (attachments, allocations, bank accounts, children, service periods,
-   insurance contracts, certificate values) unless the call replaces it. Never send a
-   partial record.
+   insurance contracts, certificate values), a stored key the input table does not
+   document (an address's `titleId`, a contact's `purpose`), and a field whose absence
+   from the read is unknown rather than empty (an insurance's `insuranceNr` and
+   `insuranceMemberNr`, an employee's `userId`), unless the call gives or clears it.
+   `person/read.json` returns every stored documented field and leaves empty ones out
+   (verified live on 2026-10-24, `docs/demo-org.md`). `clear: list[str] | None` names
+   parameters to send empty, checked against a `<RESOURCE>_UPDATE` table of the
+   documented update parameters; one both given and cleared is refused. A journal entry
+   an order or a salary run booked (`orderId`, `orderBookEntryId`,
+   `salaryBookEntryId`) is refused. A confirmed call reads again and recomputes, so its
+   payload can differ from the preview's if the record changed. Never send a partial
+   record.
 4. **Custom fields** are `customField<ID>` to text (`api/_form.py`'s `CUSTOM_FIELD`),
    rendered as `<values><customField1>...</customField1></values>`, values escaped; an
    update merges the given values into the stored XML (`merge_custom`) and refuses XML
@@ -272,7 +286,9 @@ interview on 2026-10-23; the recipe for one more:
    and `nr` where it has one, so no sequence number advances), dated 2026-10-24; it
    first sweeps leftovers (list with `query=xippios-live`, delete each whose marked
    field holds the marker), deletes what it created by id with the delete tool, and a
-   `finally` deletes it through the wrapper if an assertion failed first.
+   `finally` deletes it through the wrapper if an assertion failed first. An update is
+   previewed, confirmed and read back: the changed field holds the new value and every
+   other derived field is unchanged.
 
 ## How to record a fixture
 
@@ -302,9 +318,11 @@ verify passes, before a source's final check could run. A compound name such as
 addresses, API user tags and token-like fields before committing. Fixtures are never
 typed in by hand.
 
-Writes: `--method POST` is accepted for a path ending in `/create.json`,
-`/update.json` or `/delete.json` only, every other POST and every other method refused
-before a request; the `key=value` pairs go as the form body, in their order, with the
+Writes: `--method POST` is accepted for the eight write paths the write tools call only
+(`journal/create|update|delete.json`, `person/create|update|delete.json`,
+`order/create|delete.json`, `WRITE_PATHS`), every other POST and every other method
+refused before a request, and a `create.json` only when one of its values carries
+`xippios-live`; the `key=value` pairs go as the form body, in their order, with the
 write tools' `Content-Type` (`application/x-www-form-urlencoded; charset=UTF-8`). Core
 records the request body, and the recorder's rewrite and final check cover it (the raw
 text, each form field decoded, each JSON value's strings): host, key, e-mail addresses,

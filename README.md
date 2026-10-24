@@ -148,16 +148,26 @@ by the write server only: never by the read server, never as an HTTP route.
   one read and never a write. With `confirm=true` the write is sent and the result is
   `performed: true` with `insert_id` (the new record's id; an update answers the
   record's own) and upstream's `message`. Call once without `confirm`, show the
-  preview, then confirm. In Python the result is `Result[WritePreview[<record>] |
-  WriteResult]`; narrow it with `isinstance` or `performed`.
+  preview, then confirm. Only `confirm=True` writes: from Python anything else
+  (`"false"`, `1`) previews; over MCP the schema turns `"true"`, `"yes"`, `"1"`, `1`
+  into true and `"false"`, `"no"`, `"0"`, `0` into false, and refuses anything else.
+  In Python the result is `Result[WritePreview[<record>] | WriteResult]`; narrow it
+  with `isinstance` or `if result.data.performed:`.
 - **Updates send the whole record.** CashCtrl empties every parameter an update leaves
   out. `update_journal_entry` and `update_person` therefore read the record, apply the
   parameters given, and send every parameter `update.json` documents, the rest taken
-  from the record. A parameter left out keeps its value; `""` empties a text field.
-  A record that gives no value for a mandatory parameter, or holds a list whose shape
-  was never observed (attachments, allocations, bank accounts, children, service
-  periods, insurance contracts, certificate values), is refused with
-  `InvalidRequestError` before anything is written, unless the call passes it.
+  from the record. A parameter left out keeps its value; `clear` names parameters to
+  send empty (`clear=["tax_id", "notes"]`), and a parameter both given and cleared is
+  refused. Refused with `InvalidRequestError` before anything is written, unless the
+  call gives or clears what is missing: a record that gives no value for a mandatory
+  parameter; one holding a list whose shape was never observed (attachments,
+  allocations, bank accounts, children, service periods, insurance contracts,
+  certificate values), an address with a `titleId` or a contact with a `purpose` (keys
+  the tables do not document); an insurance whose read shows no insurance numbers or an
+  employee whose read shows no `user_id` (the read leaves empty fields out, and these
+  were never seen come back); and a journal entry an order or a salary run booked. A
+  confirmed update reads the record again and recomputes the payload, so it can differ
+  from the preview if the record changed in between.
 - **Deletes** take one id; the preview shows the record that would go. An id that no
   longer exists is refused by upstream (`RequestRejected`).
 - **Custom fields**: `custom` maps upstream's names (`customField1`, `customField<ID>`)
@@ -169,7 +179,11 @@ by the write server only: never by the read server, never as an HTTP route.
 - **Ids** come from the read tools: account ids from `cashctrl_list_accounts` (the
   `id`, not the account number), tax codes from `cashctrl_list_tax_codes`, persons from
   `cashctrl_list_persons`, order categories and their statuses from
-  `cashctrl_list_order_categories`, currencies from `cashctrl_list_currencies`.
+  `cashctrl_list_order_categories`, currencies from `cashctrl_list_currencies`; the
+  record to update or delete from `cashctrl_list_journal_entries`,
+  `cashctrl_list_persons` or `cashctrl_list_orders` (the `id`, not the `nr`). A journal
+  `associate_id` is a person's id; create a new person with `cashctrl_create_person`
+  first (upstream would create one from a name, which the tools do not send).
 - CashCtrl checks every write and refuses with the fields it objects to, e.g.
   `error: RequestRejected: CashCtrl rejected the request: debitId: This field cannot be
   empty.`; a refused write changed nothing. A write that meets a server error or a
@@ -188,7 +202,7 @@ entry = dict(
     debit_id=3,  # account ids from list_accounts, not account numbers
     credit_id=42,
     tax_id=9,  # from list_tax_codes
-    title="Barverkauf",
+    title="xippios-live README example",  # marked, should it ever run against demo
 )
 preview = tasks_write.create_journal_entry("demo", **entry)
 assert isinstance(preview.data, WritePreview)
