@@ -389,7 +389,9 @@ def test_update_journal_entry_refuses_an_entry_another_module_booked(
     serve_read(respx_mock, "journal/read.json", body)
     write = respx_mock.post(f"{BASE}/journal/update.json")
     with pytest.raises(
-        InvalidRequestError, match=f"booked by an order or a salary run \\({field} set\\)"
+        InvalidRequestError,
+        match=f"booked by an order or a salary run \\({field} set\\); upstream documents "
+        "that such entries cannot be updated here",
     ):
         tasks_write.update_journal_entry(DEMO, JOURNAL_ENTRY, title="x", confirm=True)
     assert not write.called
@@ -724,6 +726,9 @@ def test_every_boolean_update_parameter_is_a_flag(task: Callable[..., Any]) -> N
         else tasks_write.PERSON_UPDATE
     )
     assert tasks_write._FLAGS & set(table) == booleans
+    assert tasks_write._FLAGS.issubset(
+        set(tasks_write.JOURNAL_UPDATE) | set(tasks_write.PERSON_UPDATE)
+    )
 
 
 def test_the_update_takes_every_documented_parameter_but_the_unsent_from_the_record(

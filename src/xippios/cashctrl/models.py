@@ -571,7 +571,7 @@ class PersonAddress(UpstreamModel):
     with a create was stored and read back, with ``title_name``, in the live
     verification of 2026-10-24 (``docs/demo-org.md``, Person reads); it is in neither
     ``addresses`` table (``person/create.json``, ``person/update.json``), but reads
-    return it, so ``update_person`` does not carry it over.
+    return it, so ``update_person`` refuses to carry it over.
     """
 
     id: int
