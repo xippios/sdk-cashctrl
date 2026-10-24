@@ -430,11 +430,14 @@ def test_delete_journal_entry_previews_the_entry_it_would_delete(
     assert preview.changes is None
 
 
-def test_delete_journal_entry_with_confirm_deletes_without_a_read(
+def test_delete_journal_entry_with_confirm_reads_then_deletes(
     replay_fixture: ReplayFixture, fixtures_dir: Path
 ) -> None:
+    """The read the preview makes, made again: the booked-entry check needs the record."""
+    read = replay_fixture("journal_read", "for_update")
     route = replay_fixture("journal_delete", "ok")
     result = tasks_write.delete_journal_entry(DEMO, JOURNAL_ENTRY, confirm=True)
+    assert (read.call_count, route.call_count) == (1, 1)
     assert sent_body(route) == recorded_body(fixtures_dir, "journal_delete", "ok")
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (None, "1 book entry deleted")
@@ -442,7 +445,12 @@ def test_delete_journal_entry_with_confirm_deletes_without_a_read(
 
 
 def test_deleting_a_gone_entry_is_refused(replay_fixture: ReplayFixture) -> None:
-    """Observed: ``success`` false with a top-level ``message``; a refusal, not a 404."""
+    """Observed: ``success`` false with a top-level ``message``; a refusal, not a 404.
+
+    The read recorded before the entry was deleted, the delete recorded after it: an
+    entry that goes between the confirmed call's read and its delete.
+    """
+    replay_fixture("journal_read", "for_update")
     replay_fixture("journal_delete", "already_deleted")
     with pytest.raises(RequestRejected) as raised:
         tasks_write.delete_journal_entry(DEMO, JOURNAL_ENTRY, confirm=True)
@@ -450,10 +458,35 @@ def test_deleting_a_gone_entry_is_refused(replay_fixture: ReplayFixture) -> None
     assert raised.value.upstream_message == "This book entry does not exist."
 
 
-def test_a_delete_preview_of_an_unknown_id_is_not_found(replay_fixture: ReplayFixture) -> None:
+@pytest.mark.parametrize("confirm", [False, True])
+def test_a_delete_of_an_unknown_id_is_not_found(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, confirm: bool
+) -> None:
+    """The read refuses it, previewed or confirmed: the delete is never sent."""
     replay_fixture("journal_read", "unknown_id")
+    write = respx_mock.post(f"{BASE}/journal/delete.json")
     with pytest.raises(NotFoundError):
-        tasks_write.delete_journal_entry(DEMO, 999999999)
+        tasks_write.delete_journal_entry(DEMO, 999999999, confirm=confirm)
+    assert not write.called
+
+
+@pytest.mark.parametrize("confirm", [False, True])
+@pytest.mark.parametrize("field", ["orderId", "orderBookEntryId", "salaryBookEntryId"], ids=str)
+def test_delete_journal_entry_refuses_an_entry_another_module_booked(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, field: str, confirm: bool
+) -> None:
+    """The recorded read with one of the three set, changed in memory: nothing is deleted."""
+    body = recorded_read(fixtures_dir, "journal_read", "for_update")
+    body["data"][field] = 3
+    read = serve_read(respx_mock, "journal/read.json", body)
+    write = respx_mock.post(f"{BASE}/journal/delete.json")
+    with pytest.raises(
+        InvalidRequestError,
+        match=f"booked by an order or a salary run \\({field} set\\); upstream documents "
+        "that such entries cannot be deleted here",
+    ):
+        tasks_write.delete_journal_entry(DEMO, JOURNAL_ENTRY, confirm=confirm)
+    assert (read.call_count, write.called) == (1, False)
 
 
 # Persons -----------------------------------------------------------------------------
