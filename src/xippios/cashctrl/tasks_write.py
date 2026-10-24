@@ -40,7 +40,7 @@ the payload never appears twice. ``tests/test_tasks.py`` checks every name in
 ``__all__``.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 from decimal import Decimal
 from typing import Any, TypeGuard, get_args
@@ -163,6 +163,15 @@ def _inputs[M: BaseModel](
     return parsed
 
 
+def _check_associate(associate_id: object, problems: list[str]) -> None:
+    """``associate_id`` is a person's id: upstream would create a person from a name."""
+    if associate_id is not None and not _whole(associate_id):
+        problems.append(
+            f"associate_id must be a person's id, a whole number, not {associate_id!r}; "
+            "create a new person with create_person first"
+        )
+
+
 def _choices(problems: list[str], **named: tuple[object, tuple[str, ...]]) -> None:
     """Refuse a value outside a documented value set (``notify_type``, ``language``)."""
     for name, (value, allowed) in named.items():
@@ -185,24 +194,92 @@ def _given(**values: Any) -> dict[str, Any]:
     return {name: value for name, value in values.items() if value is not None}
 
 
-def _blocked(stored: Mapping[str, object], given: Mapping[str, Any]) -> list[str]:
-    """The stored lists an update can neither carry over nor was given a replacement for."""
-    return [name for name, value in stored.items() if value and name not in given]
+def _clear_names(
+    clear: object,
+    documented: Mapping[str, str],
+    given: Mapping[str, Any],
+    custom: Mapping[str, str] | None,
+    problems: list[str],
+) -> list[str]:
+    """The parameters ``clear`` names, checked against ``update.json``; problems collected.
+
+    Every name must be a documented update parameter of the resource, by its task name
+    (``tax_id``, ``notes``), and must not be changed by the same call.
+    """
+    if clear is None:
+        return []
+    if isinstance(clear, str | bytes) or not isinstance(clear, Sequence):
+        problems.append(f"clear takes a list of parameter names, not {type(clear).__name__}")
+        return []
+    names: list[str] = []
+    for name in clear:
+        if not isinstance(name, str) or name not in documented:
+            problems.append(
+                f"clear: {name!r} is not an update.json parameter here; one of "
+                + ", ".join(documented)
+            )
+        elif name in given or (name == "custom" and custom):
+            problems.append(f"clear: {name!r} is both changed and cleared")
+        elif name not in names:
+            names.append(name)
+    return names
 
 
-_HELD = {"items": "items with allocations"}
-"""What a stored list that cannot be carried holds, where its name alone does not say."""
+def _changes(
+    encode: Any,
+    documented: Mapping[str, str],
+    given: Mapping[str, Any],
+    cleared: Sequence[str],
+    custom: Mapping[str, str] | None,
+) -> dict[str, str]:
+    """What an update changes, upstream name to encoded text, for the preview.
+
+    The values given, encoded as sent; a list or map given empty as ``[]`` or ``{}``,
+    which the payload leaves out (upstream empties what is left out); a cleared
+    parameter as ``""``, ``[]`` or ``{}``, by its kind.
+    """
+    changes: dict[str, str] = encode(**given, custom=api.custom_xml(custom) if custom else None)
+    for name, value in given.items():
+        if isinstance(value, list | tuple | Mapping) and not value:
+            changes[documented[name]] = "{}" if isinstance(value, Mapping) else "[]"
+    for name in cleared:
+        changes[documented[name]] = _EMPTY.get(name, "")
+    return changes
 
 
-def _cannot_carry(resource: str, names: Sequence[str]) -> InvalidRequestError:
-    held = ", ".join(_HELD.get(name, name) for name in names)
-    listed = ", ".join(names)
+_EMPTY = {
+    "items": "[]",
+    "allocations": "[]",
+    "attachments": "[]",
+    "addresses": "[]",
+    "contacts": "[]",
+    "bank_accounts": "[]",
+    "children": "[]",
+    "insurance_contracts": "[]",
+    "service_periods": "[]",
+    "certificate_values": "{}",
+}
+"""How ``changes`` shows a cleared list or map parameter; every other one is ``""``."""
+
+
+def _blocked(stored: Mapping[str, str | None], decided: Iterable[str]) -> dict[str, str]:
+    """What an update cannot carry over and the call neither replaced nor cleared, why."""
+    settled = set(decided)
+    return {name: why for name, why in stored.items() if why and name not in settled}
+
+
+def _cannot_carry(resource: str, blocked: Mapping[str, str]) -> InvalidRequestError:
+    listed = ", ".join(blocked)
     return InvalidRequestError(
-        f"the {resource} holds {held}, whose stored shape was never observed, so the "
-        f"update cannot send it back and upstream would empty it; pass {listed} to "
-        "replace it, or change the record in CashCtrl. Nothing was sent",
+        f"the {resource} holds {'; '.join(blocked.values())}, which the update cannot send "
+        f"back as stored, and upstream would empty it; pass {listed} to replace it, or "
+        "clear it, or change the record in CashCtrl. Nothing was sent",
         source=SOURCE,
     )
+
+
+def _never_seen(name: str, stored: object) -> str | None:
+    return f"{name}, never observed filled" if stored else None
 
 
 def _missing(resource: str, names: Sequence[str], hint: str) -> InvalidRequestError:
@@ -234,7 +311,7 @@ def _journal_items(entry: JournalEntryDetail) -> tuple[list[JournalItemInput] | 
     return lines, any(item.allocations for item in entry.items)
 
 
-def _journal_values(entry: JournalEntryDetail) -> tuple[dict[str, Any], dict[str, object]]:
+def _journal_values(entry: JournalEntryDetail) -> tuple[dict[str, Any], dict[str, str | None]]:
     """Every ``update.json`` parameter of ``entry`` by task name, and what it cannot carry.
 
     ``sequenceNumberId`` is not stored: an update leaves it out, so the reference stays
@@ -267,11 +344,60 @@ def _journal_values(entry: JournalEntryDetail) -> tuple[dict[str, Any], dict[str
         "title": entry.title,
     }
     stored = {
-        "allocations": entry.allocations,
-        "attachments": entry.attachments,
-        "items": items_blocked,
+        "allocations": _never_seen("allocations", entry.allocations),
+        "attachments": _never_seen("attachments", entry.attachments),
+        "items": "items, a line with allocations, never observed filled" if items_blocked else None,
     }
     return values, stored
+
+
+JOURNAL_UPDATE: dict[str, str] = {
+    "amount": "amount",
+    "credit_id": "creditId",
+    "debit_id": "debitId",
+    "allocations": "allocations",
+    "associate_id": "associateId",
+    "attachments": "attachments",
+    "currency_id": "currencyId",
+    "currency_rate": "currencyRate",
+    "custom": "custom",
+    "date_added": "dateAdded",
+    "days_before": "daysBefore",
+    "end_date": "endDate",
+    "items": "items",
+    "notes": "notes",
+    "notify_email": "notifyEmail",
+    "notify_person_id": "notifyPersonId",
+    "notify_type": "notifyType",
+    "notify_user_id": "notifyUserId",
+    "recurrence": "recurrence",
+    "reference": "reference",
+    "sequence_number_id": "sequenceNumberId",
+    "start_date": "startDate",
+    "tax_id": "taxId",
+    "title": "title",
+}
+"""Every parameter ``journal/update.json`` documents but ``id``: task name to upstream name."""
+
+_BOOKED_BY = {
+    "order_id": "orderId",
+    "order_book_entry_id": "orderBookEntryId",
+    "salary_book_entry_id": "salaryBookEntryId",
+}
+"""The read fields that mark an entry an order or a salary run booked."""
+
+
+def _booked(entry: JournalEntryDetail) -> InvalidRequestError | None:
+    """A refusal for an entry another module booked, which ``update.json`` cannot change."""
+    marks = [upstream for name, upstream in _BOOKED_BY.items() if getattr(entry, name) is not None]
+    if not marks:
+        return None
+    return InvalidRequestError(
+        f"journal entry {entry.id} was booked by an order or a salary run ({', '.join(marks)} "
+        "set); upstream documents that such entries cannot be updated here, change them "
+        "through that module. Nothing was sent",
+        source=SOURCE,
+    )
 
 
 async def create_journal_entry_async(
@@ -283,7 +409,7 @@ async def create_journal_entry_async(
     credit_id: int | None = None,
     title: str | None = None,
     tax_id: int | None = None,
-    associate_id: int | str | None = None,
+    associate_id: int | None = None,
     reference: str | None = None,
     notes: str | None = None,
     items: list[JournalItemInput] | None = None,
@@ -326,7 +452,7 @@ async def create_journal_entry_async(
         title: The description of the entry, at most 250 characters, e.g. ``"Miete Oktober"``.
         tax_id: A tax code, an ``id`` from ``list_tax_codes``, e.g. ``9`` (``UN1``).
         associate_id: The business partner, an ``id`` from ``list_persons``, e.g. ``7``;
-            upstream also takes a name, which creates a new person.
+            a new person is created with ``create_person`` first.
         reference: A reference or receipt number, at most 100 characters, e.g. ``"RE-1"``.
         notes: Notes, limited HTML allowed, e.g. ``"<p>paid in cash</p>"``.
         items: The lines of a collective entry, each with ``account_id`` and ``debit`` or
@@ -355,6 +481,7 @@ async def create_journal_entry_async(
         confirm: ``true`` books the entry; ``false`` (the default) only previews it.
     """
     problems: list[str] = []
+    _check_associate(associate_id, problems)
     item_inputs = _inputs("items", items, JournalItemInput, problems)
     allocation_inputs = _inputs("allocations", allocations, AllocationInput, problems)
     attachment_inputs = _inputs("attachments", attachments, AttachmentInput, problems)
@@ -405,7 +532,7 @@ async def update_journal_entry_async(
     credit_id: int | None = None,
     title: str | None = None,
     tax_id: int | None = None,
-    associate_id: int | str | None = None,
+    associate_id: int | None = None,
     reference: str | None = None,
     notes: str | None = None,
     items: list[JournalItemInput] | None = None,
@@ -423,6 +550,7 @@ async def update_journal_entry_async(
     notify_person_id: int | None = None,
     notify_user_id: int | None = None,
     custom: Mapping[str, str] | None = None,
+    clear: list[str] | None = None,
     confirm: bool = False,
 ) -> Result[JournalOutcome]:
     """Change a manual journal entry; without confirm=true it only previews the change.
@@ -430,14 +558,16 @@ async def update_journal_entry_async(
     The entry is read first (``journal/read.json``), the parameters given are applied,
     and every parameter ``journal/update.json`` documents is sent, taken from the entry
     where not given: upstream empties every parameter an update leaves out. A parameter
-    left out here keeps its stored value; an empty text (``""``) empties a text field.
-    Without ``confirm`` nothing is written: the preview (``performed`` false) shows the
+    left out here keeps its stored value; one named in ``clear`` is sent empty. Without
+    ``confirm`` nothing is written: the preview (``performed`` false) shows the
     ``payload`` that would be sent, the entry as it is (``before``) and the
-    ``changes``, at the cost of that one read. ``confirm=true`` reads and writes. An
-    entry that gives no ``amount``, ``debit_id`` or ``credit_id`` (a simple entry needs
-    all three) or holds attachments or allocations, which cannot be carried over, is
-    refused before anything is written, unless the call gives them. Entries that orders
-    or salary booked are refused by upstream. ``amount`` with a ``tax_id`` is gross.
+    ``changes``, at the cost of that one read. ``confirm=true`` reads the entry again
+    and recomputes the payload, so it can differ from the preview if the entry changed
+    in between. Refused before anything is written: an entry an order or a salary run
+    booked (``order_id``, ``order_book_entry_id`` or ``salary_book_entry_id`` set); a
+    simple entry that gives no ``amount``, ``debit_id`` or ``credit_id``; an entry
+    holding attachments or allocations, which cannot be carried over, unless the call
+    replaces or clears them. ``amount`` with a ``tax_id`` is gross.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -449,7 +579,7 @@ async def update_journal_entry_async(
         title: The description of the entry, at most 250 characters, e.g. ``"Miete Oktober"``.
         tax_id: A tax code, an ``id`` from ``list_tax_codes``, e.g. ``9`` (``UN1``).
         associate_id: The business partner, an ``id`` from ``list_persons``, e.g. ``7``;
-            upstream also takes a name, which creates a new person.
+            a new person is created with ``create_person`` first.
         reference: A reference or receipt number, at most 100 characters, e.g. ``"RE-1"``.
         notes: Notes, limited HTML allowed, e.g. ``"<p>paid in cash</p>"``.
         items: The lines of a collective entry, replacing the stored ones, each with
@@ -472,10 +602,14 @@ async def update_journal_entry_async(
         notify_user_id: The user notified with ``notify_type`` ``USER``.
         custom: Custom field values to set by upstream's name, e.g.
             ``{"customField1": "Projekt B"}``; the other stored values are kept.
+        clear: Parameters to send empty, by these names, e.g. ``["tax_id", "notes"]``;
+            ``["custom"]`` empties every custom field. A parameter cannot be both given
+            and cleared.
         confirm: ``true`` writes the change; ``false`` (the default) only previews it.
     """
     _check_id(id)
     problems: list[str] = []
+    _check_associate(associate_id, problems)
     given = _given(
         date_added=date_added,
         amount=amount,
@@ -504,15 +638,20 @@ async def update_journal_entry_async(
     _choices(
         problems, notify_type=(notify_type, NOTIFY_TYPES), recurrence=(recurrence, RECURRENCES)
     )
+    cleared = _clear_names(clear, JOURNAL_UPDATE, given, custom, problems)
     _refuse(problems)
     if custom:
         api.custom_xml(custom)  # refuse a wrong name before the read
     entry = await api.journal_read(org, id)
+    booked = _booked(entry)
+    if booked is not None:
+        raise booked
     values, stored = _journal_values(entry)
-    blocked = _blocked(stored, given)
+    blocked = _blocked(stored, [*given, *cleared])
     if blocked:
         raise _cannot_carry("journal entry", blocked)
     merged = {**values, **given, "custom": api.merge_custom(entry.custom, custom or {})}
+    merged.update(dict.fromkeys(cleared))
     if not merged["items"]:
         absent = [
             upstream
@@ -528,7 +667,7 @@ async def update_journal_entry_async(
                 "journal entry", absent, "pass them (amount, credit_id, debit_id) or items"
             )
     fields = api.journal_fields(id=entry.id, **merged)
-    changes = api.journal_fields(**given, custom=api.custom_xml(custom) if custom else None)
+    changes = _changes(api.journal_fields, JOURNAL_UPDATE, given, cleared, custom)
     endpoint = "journal/update.json"
     if confirm is not True:
         return _preview(org, endpoint, fields, before=entry, changes=changes)
@@ -598,34 +737,62 @@ def _contacts(person: PersonDetail) -> list[PersonContactInput]:
     ]
 
 
-def _person_values(person: PersonDetail) -> tuple[dict[str, Any], dict[str, object]]:
-    """Every ``update.json`` parameter of ``person`` by task name, and what it cannot carry.
+def _person_values(
+    person: PersonDetail,
+) -> tuple[dict[str, Any], dict[str, str | None], list[str]]:
+    """Every ``update.json`` parameter of ``person``, what it cannot carry or cannot know.
+
+    Observed on 2026-10-24 (a person created with every documented scalar field set, read
+    back, deleted): ``person/read.json`` returns every stored documented field under its
+    own name and leaves out the empty ones, so a field the read lacks is empty, and the
+    mapping takes each by name. Three fields were not seen come back: ``insuranceNr`` and
+    ``insuranceMemberNr`` (not stored for a person who is no insurance, as documented;
+    for an insurance, unverified) and ``userId`` (not sent: it links a CashCtrl login).
+    For an insurance or an employee, a lack of them is therefore unknown, not empty, and
+    the update needs them given or cleared.
 
     ``sequenceNumberId`` is not stored: an update leaves it out, so ``nr`` stays as it
     is. ``attachments``, ``bankAccounts``, ``children``, ``insuranceContracts``,
     ``servicePeriods`` and ``certificateValues`` were only ever seen empty; a record
     holding one of them cannot be carried over. Addresses and contacts are carried with
-    the keys their tables document; one whose stored value upstream's value sets do not
-    hold cannot be carried either.
+    the keys their tables document; one outside upstream's value sets cannot be carried,
+    nor an address with a ``titleId`` (stored and read back, observed, but not in the
+    addresses table) nor a contact with a ``purpose`` (not in the contacts table; sent,
+    it was not stored).
     """
-    stored: dict[str, object] = {
-        "attachments": person.attachments,
-        "bank_accounts": person.bank_accounts,
-        "children": person.children,
-        "insurance_contracts": person.insurance_contracts,
-        "service_periods": person.service_periods,
-        "certificate_values": person.certificate_values or person.certificate_values_map,
+    stored: dict[str, str | None] = {
+        "attachments": _never_seen("attachments", person.attachments),
+        "bank_accounts": _never_seen("bank_accounts", person.bank_accounts),
+        "children": _never_seen("children", person.children),
+        "insurance_contracts": _never_seen("insurance_contracts", person.insurance_contracts),
+        "service_periods": _never_seen("service_periods", person.service_periods),
+        "certificate_values": _never_seen(
+            "certificate_values", person.certificate_values or person.certificate_values_map
+        ),
     }
     addresses: list[PersonAddressInput] | None = None
     contacts: list[PersonContactInput] | None = None
     try:
         addresses = _addresses(person)
     except ValidationError:
-        stored["addresses"] = True
+        stored["addresses"] = "addresses, one outside the documented value sets"
+    if any(address.title_id is not None for address in person.addresses):
+        stored["addresses"] = "addresses, one with a titleId the addresses table does not document"
     try:
         contacts = _contacts(person)
     except ValidationError:
-        stored["contacts"] = True
+        stored["contacts"] = "contacts, one outside the documented value sets"
+    if any(contact.purpose is not None for contact in person.contacts):
+        stored["contacts"] = "contacts, one with a purpose the contacts table does not document"
+    unknown = [
+        name
+        for name, applies in (
+            ("insurance_nr", person.is_insurance),
+            ("insurance_member_nr", person.is_insurance),
+            ("user_id", person.is_employee),
+        )
+        if applies and getattr(person, name) is None
+    ]
     values: dict[str, Any] = {
         "company": person.company,
         "first_name": person.first_name,
@@ -662,7 +829,53 @@ def _person_values(person: PersonDetail) -> tuple[dict[str, Any], dict[str, obje
         "user_id": person.user_id,
         "vat_uid": person.vat_uid,
     }
-    return values, stored
+    return values, stored, unknown
+
+
+PERSON_UPDATE: dict[str, str] = {
+    "company": "company",
+    "first_name": "firstName",
+    "last_name": "lastName",
+    "addresses": "addresses",
+    "alt_name": "altName",
+    "attachments": "attachments",
+    "bank_accounts": "bankAccounts",
+    "bank_data": "bankData",
+    "category_id": "categoryId",
+    "certificate_template_id": "certificateTemplateId",
+    "certificate_values": "certificateValues",
+    "children": "children",
+    "color": "color",
+    "contacts": "contacts",
+    "custom": "custom",
+    "date_birth": "dateBirth",
+    "department": "department",
+    "discount_percentage": "discountPercentage",
+    "industry": "industry",
+    "insurance_contracts": "insuranceContracts",
+    "insurance_member_nr": "insuranceMemberNr",
+    "insurance_nr": "insuranceNr",
+    "is_auto_fill_responsible_person": "isAutoFillResponsiblePerson",
+    "is_customer": "isCustomer",
+    "is_employee": "isEmployee",
+    "is_family": "isFamily",
+    "is_inactive": "isInactive",
+    "is_insurance": "isInsurance",
+    "is_vendor": "isVendor",
+    "language": "language",
+    "location_id": "locationId",
+    "notes": "notes",
+    "nr": "nr",
+    "position": "position",
+    "sequence_number_id": "sequenceNumberId",
+    "service_periods": "servicePeriods",
+    "ssn": "ssn",
+    "superior_id": "superiorId",
+    "title_id": "titleId",
+    "user_id": "userId",
+    "vat_uid": "vatUid",
+}
+"""Every parameter ``person/update.json`` documents but ``id``: task name to upstream name."""
 
 
 def _person_inputs(
@@ -909,6 +1122,7 @@ async def update_person_async(
     insurance_member_nr: str | None = None,
     insurance_contracts: list[InsuranceContractInput] | None = None,
     custom: Mapping[str, str] | None = None,
+    clear: list[str] | None = None,
     confirm: bool = False,
 ) -> Result[PersonOutcome]:
     """Change a person; without confirm=true it only previews the change.
@@ -916,14 +1130,19 @@ async def update_person_async(
     The person is read first (``person/read.json``), the parameters given are applied,
     and every parameter ``person/update.json`` documents is sent, taken from the person
     where not given: upstream empties every parameter an update leaves out. A parameter
-    left out here keeps its stored value; an empty text (``""``) empties a text field;
+    left out here keeps its stored value; one named in ``clear`` is sent empty;
     ``addresses`` and ``contacts`` given replace the stored lists whole. Without
     ``confirm`` nothing is written: the preview (``performed`` false) shows the
     ``payload`` that would be sent, the person as it is (``before``) and the
-    ``changes``, at the cost of that one read. ``confirm=true`` reads and writes. A
-    person with neither company nor name, or holding attachments, bank accounts,
-    children, service periods, insurance contracts or certificate values, which cannot
-    be carried over, is refused before anything is written, unless the call gives them.
+    ``changes``, at the cost of that one read. ``confirm=true`` reads the person again
+    and recomputes the payload, so it can differ from the preview if the person changed
+    in between. Refused before anything is written, unless the call gives or clears
+    what is missing: a person with neither company nor name; one holding attachments,
+    bank accounts, children, service periods, insurance contracts, certificate values,
+    an address with a title or a contact with a purpose, which cannot be carried over;
+    an insurance whose read shows no ``insurance_nr`` or ``insurance_member_nr``, or an
+    employee whose read shows no ``user_id`` (the read leaves empty fields out, and these
+    were never seen come back, so their absence is unknown, not empty).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -979,6 +1198,9 @@ async def update_person_async(
             ``type_id``.
         custom: Custom field values to set by upstream's name, e.g.
             ``{"customField2": "Silber"}``; the other stored values are kept.
+        clear: Parameters to send empty, by these names, e.g. ``["department", "notes"]``
+            or ``["user_id"]``; ``["custom"]`` empties every custom field. A parameter
+            cannot be both given and cleared.
         confirm: ``true`` writes the change; ``false`` (the default) only previews it.
     """
     _check_id(id)
@@ -1030,15 +1252,27 @@ async def update_person_async(
         **lists,
     )
     _choices(problems, language=(language, LANGUAGES), color=(color, COLORS))
+    cleared = _clear_names(clear, PERSON_UPDATE, given, custom, problems)
     _refuse(problems)
     if custom:
         api.custom_xml(custom)  # refuse a wrong name before the read
     person = await api.person_read(org, id)
-    values, stored = _person_values(person)
-    blocked = _blocked(stored, given)
+    values, stored, unknown = _person_values(person)
+    decided = [*given, *cleared]
+    blocked = _blocked(stored, decided)
     if blocked:
         raise _cannot_carry("person", blocked)
+    undecided = [name for name in unknown if name not in decided]
+    if undecided:
+        raise InvalidRequestError(
+            f"the person's read shows no {', '.join(undecided)}; person/read.json leaves "
+            "empty fields out, and these were never seen come back, so whether one is "
+            f"stored is unknown and the update could empty it; pass {', '.join(undecided)} "
+            "or name them in clear. Nothing was sent",
+            source=SOURCE,
+        )
     merged = {**values, **given, "custom": api.merge_custom(person.custom, custom or {})}
+    merged.update(dict.fromkeys(cleared))
     if not any(merged[name] for name in ("company", "first_name", "last_name")):
         raise _missing(
             "person",
@@ -1046,7 +1280,7 @@ async def update_person_async(
             "upstream needs one of them; pass company, first_name or last_name",
         )
     fields = api.person_fields(id=person.id, **merged)
-    changes = api.person_fields(**given, custom=api.custom_xml(custom) if custom else None)
+    changes = _changes(api.person_fields, PERSON_UPDATE, given, cleared, custom)
     endpoint = "person/update.json"
     if confirm is not True:
         return _preview(org, endpoint, fields, before=person, changes=changes)

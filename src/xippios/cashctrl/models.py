@@ -1273,8 +1273,9 @@ class JournalItemInput(_Input):
     Attributes:
         account_id: ``accountId``, the account of the line (an id from ``list_accounts``).
         allocations: ``allocations``, the line's allocations to cost centers.
-        associate_id: ``associateId``, a person's id; upstream also takes a name, which
-            creates a new person.
+        associate_id: ``associateId``, a person's id from ``list_persons``. Upstream also
+            takes a name, which creates a new person; this package takes ids only, and a
+            new person is created with ``create_person``.
         credit: ``credit``, the amount on the credit side; ``debit`` or ``credit`` is set.
         debit: ``debit``, the amount on the debit side.
         description: ``description``, the text of the line.
@@ -1285,7 +1286,7 @@ class JournalItemInput(_Input):
         validation_alias=AliasChoices("account_id", "accountId"), serialization_alias="accountId"
     )
     allocations: list[AllocationInput] | None = None
-    associate_id: int | str | None = Field(
+    associate_id: int | None = Field(
         default=None,
         validation_alias=AliasChoices("associate_id", "associateId"),
         serialization_alias="associateId",

@@ -42,7 +42,7 @@ def journal_fields(
     credit_id: int | None = None,
     debit_id: int | None = None,
     allocations: Sequence[AllocationInput] | None = None,
-    associate_id: int | str | None = None,
+    associate_id: int | None = None,
     attachments: Sequence[AttachmentInput] | None = None,
     currency_id: int | None = None,
     currency_rate: Decimal | None = None,
@@ -67,7 +67,9 @@ def journal_fields(
 
     Upstream's names, in the order of its table, ``id`` first; a value left at ``None``
     or an empty list is not sent (``api/_form.py``). ``custom`` is the XML text upstream
-    stores (``<values><customField1>...</customField1></values>``).
+    stores (``<values><customField1>...</customField1></values>``). ``associate_id`` is a
+    person's id: upstream's ``associateId`` also takes a name, which would create a
+    person, and this package sends ids only.
     """
     return form_fields(
         {

@@ -283,6 +283,10 @@ def test_update_journal_entry_refuses_stored_lists_it_cannot_carry(
     assert "pass attachments to replace it" in str(raised.value)
     replaced = tasks_write.update_journal_entry(DEMO, JOURNAL_ENTRY, attachments=[])
     assert "attachments" not in preview_of(replaced).payload
+    assert preview_of(replaced).changes == {"attachments": "[]"}, "an empty list is shown"
+    cleared = tasks_write.update_journal_entry(DEMO, JOURNAL_ENTRY, clear=["attachments"])
+    assert "attachments" not in preview_of(cleared).payload
+    assert preview_of(cleared).changes == {"attachments": "[]"}
 
 
 def test_update_journal_entry_refuses_lines_with_allocations(
@@ -293,7 +297,7 @@ def test_update_journal_entry_refuses_lines_with_allocations(
     body["data"]["items"][0]["allocations"] = [{"share": 1, "toCostCenterId": 2}]
     serve_read(respx_mock, "journal/read.json", body)
     entry_id = body["data"]["id"]
-    with pytest.raises(InvalidRequestError, match="holds items with allocations,") as raised:
+    with pytest.raises(InvalidRequestError, match="holds items, a line with allocations") as raised:
         tasks_write.update_journal_entry(DEMO, entry_id, title="x")
     assert "pass items to replace it" in str(raised.value)
 
@@ -330,6 +334,73 @@ def test_update_journal_entry_keeps_the_stored_custom_values(
     assert preview_of(changed).changes == {
         "custom": "<values><customField2>&lt;D&gt;</customField2></values>"
     }
+
+
+def test_update_journal_entry_clears_the_parameters_named_in_clear(
+    replay_fixture: ReplayFixture,
+) -> None:
+    replay_fixture("journal_read", "for_update")
+    result = tasks_write.update_journal_entry(
+        DEMO, JOURNAL_ENTRY, title="x", clear=["tax_id", "notes", "items"]
+    )
+    preview = preview_of(result)
+    assert "taxId" not in preview.payload, "left out: upstream empties what is left out"
+    assert preview.payload["title"] == "x"
+    assert preview.changes == {"title": "x", "taxId": "", "notes": "", "items": "[]"}
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"clear": ["tax"]}, "clear: 'tax' is not an update.json parameter here"),
+        ({"clear": ["id"]}, "clear: 'id' is not an update.json parameter here"),
+        ({"clear": ["taxId"]}, "clear: 'taxId' is not an update.json parameter here"),
+        ({"clear": "notes"}, "clear takes a list of parameter names, not str"),
+        ({"title": "x", "clear": ["title"]}, "clear: 'title' is both changed and cleared"),
+        (
+            {"custom": {"customField1": "x"}, "clear": ["custom"]},
+            "clear: 'custom' is both changed and cleared",
+        ),
+        ({"associate_id": "Muster AG"}, "associate_id must be a person's id, a whole number"),
+        ({"associate_id": True}, "associate_id must be a person's id"),
+        ({"items": [{"account_id": 3, "associate_id": "Neu AG"}]}, "items[0].associate_id"),
+    ],
+)
+def test_an_update_refuses_its_arguments_before_any_request(
+    respx_mock: respx.MockRouter, arguments: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(InvalidRequestError, match=re.escape(message)):
+        tasks_write.update_journal_entry(DEMO, JOURNAL_ENTRY, **arguments)
+    assert not respx_mock.calls
+
+
+@pytest.mark.parametrize("field", ["orderId", "orderBookEntryId", "salaryBookEntryId"], ids=str)
+def test_update_journal_entry_refuses_an_entry_another_module_booked(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, field: str
+) -> None:
+    """The recorded read with one of the three set, changed in memory: nothing is written."""
+    body = recorded_read(fixtures_dir, "journal_read", "for_update")
+    body["data"][field] = 3
+    serve_read(respx_mock, "journal/read.json", body)
+    write = respx_mock.post(f"{BASE}/journal/update.json")
+    with pytest.raises(
+        InvalidRequestError, match=f"booked by an order or a salary run \\({field} set\\)"
+    ):
+        tasks_write.update_journal_entry(DEMO, JOURNAL_ENTRY, title="x", confirm=True)
+    assert not write.called
+
+
+def test_a_create_takes_a_persons_id_only(respx_mock: respx.MockRouter) -> None:
+    with pytest.raises(InvalidRequestError, match="create a new person with create_person"):
+        tasks_write.create_journal_entry(DEMO, associate_id="Neu AG")  # type: ignore[arg-type]
+    with pytest.raises(InvalidRequestError, match=r"items\[0\]\.associate_id"):
+        tasks_write.create_journal_entry(
+            DEMO,
+            items=[{"account_id": 3, "debit": 1, "associate_id": "Neu AG"}],  # type: ignore[list-item]
+        )
+    assert not respx_mock.calls
+    sent = tasks_write.create_journal_entry(DEMO, associate_id=7, title="t")
+    assert preview_of(sent).payload == {"associateId": "7", "title": "t"}
 
 
 def test_an_update_refuses_a_wrong_custom_name_before_the_read(
@@ -489,6 +560,75 @@ def test_update_person_refuses_stored_lists_it_cannot_carry(
     serve_read(respx_mock, "person/read.json", body)
     with pytest.raises(InvalidRequestError, match=f"holds {parameter},"):
         tasks_write.update_person(DEMO, PERSON, department="x")
+
+
+@pytest.mark.parametrize(
+    ("where", "change", "message"),
+    [
+        ("addresses", {"titleId": 1}, "addresses, one with a titleId"),
+        ("contacts", {"purpose": "INVOICE"}, "contacts, one with a purpose"),
+    ],
+)
+def test_update_person_refuses_undocumented_stored_keys(
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+    where: str,
+    change: dict[str, Any],
+    message: str,
+) -> None:
+    """Observed 2026-10-24: an address's ``titleId`` is stored and read back, a contact's
+    ``purpose`` was not stored; neither is in its table, so neither can be sent back."""
+    body = recorded_read(fixtures_dir, "person_read", "for_update")
+    body["data"][where][0].update(change)
+    serve_read(respx_mock, "person/read.json", body)
+    with pytest.raises(InvalidRequestError, match=message):
+        tasks_write.update_person(DEMO, PERSON, department="x")
+    replaced = tasks_write.update_person(DEMO, PERSON, clear=[where])
+    assert where not in preview_of(replaced).payload
+
+
+@pytest.mark.parametrize(
+    ("role", "unknown"),
+    [("isEmployee", ["user_id"]), ("isInsurance", ["insurance_nr", "insurance_member_nr"])],
+)
+def test_update_person_refuses_fields_whose_absence_is_unknown(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, role: str, unknown: list[str]
+) -> None:
+    """An employee's ``userId`` and an insurance's numbers were never seen come back."""
+    body = recorded_read(fixtures_dir, "person_read", "for_update")
+    body["data"][role] = True
+    serve_read(respx_mock, "person/read.json", body)
+    write = respx_mock.post(f"{BASE}/person/update.json")
+    with pytest.raises(InvalidRequestError, match=f"read shows no {', '.join(unknown)}"):
+        tasks_write.update_person(DEMO, PERSON, department="x", confirm=True)
+    assert not write.called
+    cleared = preview_of(tasks_write.update_person(DEMO, PERSON, department="x", clear=unknown))
+    assert cleared.changes == {"department": "x", **{PERSON_NAMES[n]: "" for n in unknown}}
+    values: dict[str, Any] = dict.fromkeys(unknown, "1")
+    given = tasks_write.update_person(DEMO, PERSON, **values)
+    assert preview_of(given).payload[PERSON_NAMES[unknown[0]]] == "1"
+
+
+PERSON_NAMES = {
+    "user_id": "userId",
+    "insurance_nr": "insuranceNr",
+    "insurance_member_nr": "insuranceMemberNr",
+}
+
+
+def test_update_person_clears_and_validates_clear(
+    respx_mock: respx.MockRouter, replay_fixture: ReplayFixture
+) -> None:
+    with pytest.raises(InvalidRequestError, match=r"clear: 'id' is not an update\.json parameter"):
+        tasks_write.update_person(DEMO, PERSON, clear=["id"])
+    with pytest.raises(InvalidRequestError, match="'nr' is both changed and cleared"):
+        tasks_write.update_person(DEMO, PERSON, nr="x", clear=["nr"])
+    assert not respx_mock.calls
+    replay_fixture("person_read", "for_update")
+    preview = preview_of(tasks_write.update_person(DEMO, PERSON, clear=["nr", "contacts"]))
+    assert "nr" not in preview.payload
+    assert "contacts" not in preview.payload
+    assert preview.changes == {"nr": "", "contacts": "[]"}
 
 
 def test_update_person_refuses_an_address_it_cannot_carry(

@@ -61,7 +61,7 @@ CUSTOM_FIELD = re.compile(r"customField[1-9][0-9]*")
 ``docs/upstream/common.md``: "the default $customField<ID> variable name"; the parameter
 tables show ``<customField1>`` inside ``<values>``.
 """
-_XML_TEXT = re.compile(r"[^\x09\x0a\x0d\x20-퟿-�\U00010000-\U0010ffff]")
+_XML_TEXT = re.compile(r"[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
 """A character XML 1.0 cannot carry at all, escaped or not (a control character)."""
 
 
