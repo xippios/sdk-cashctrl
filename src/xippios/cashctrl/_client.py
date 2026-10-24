@@ -222,7 +222,13 @@ def classify(response: httpx.Response) -> XippiosError | None:
     On 2026-10-23, observed against the demo organisation, not stated in docs/upstream/:
     that one message is a top-level ``errorMessage``, HTTP 200
     ``{"success": false, "errorMessage": "...", "data": null}``. A top-level ``message``
-    (not observed) is read when ``errorMessage`` is missing, null or empty.
+    is read when ``errorMessage`` is missing, null or empty. On 2026-10-24 the writes
+    showed both other shapes: ``journal/create.json`` without ``debitId`` answers
+    ``{"success": false, "message": null, "errors": [{"field": "debitId", "message":
+    "This field cannot be empty."}]}``, the documented list; ``journal/delete.json`` for
+    an id that no longer exists answers ``{"success": false, "message": "This book entry
+    does not exist."}``, the message under ``message``. Both raise ``RequestRejected``;
+    a delete is not a read by id, so the second is no ``NotFoundError``.
 
     - ``account/read.json`` without ``id`` answers ``"errorMessage": "ID missing."``:
       ``RequestRejected`` with that message as ``upstream_message``.

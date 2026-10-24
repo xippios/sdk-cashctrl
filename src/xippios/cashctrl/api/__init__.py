@@ -19,8 +19,11 @@ from xippios.cashctrl.api.account_list import account_list, account_list_params
 from xippios.cashctrl.api.account_read import account_read
 from xippios.cashctrl.api.currency_list import currency_list
 from xippios.cashctrl.api.fiscalperiod_list import fiscalperiod_list
+from xippios.cashctrl.api.journal_create import journal_create, journal_fields
+from xippios.cashctrl.api.journal_delete import journal_delete
 from xippios.cashctrl.api.journal_list import journal_list, journal_list_params
 from xippios.cashctrl.api.journal_read import journal_read
+from xippios.cashctrl.api.journal_update import journal_update
 from xippios.cashctrl.api.order_list import order_list, order_list_params
 from xippios.cashctrl.api.order_read import order_read
 from xippios.cashctrl.api.person_list import person_list, person_list_params
@@ -36,9 +39,13 @@ __all__ = [
     "delete_fields",
     "encode_filter",
     "fiscalperiod_list",
+    "journal_create",
+    "journal_delete",
+    "journal_fields",
     "journal_list",
     "journal_list_params",
     "journal_read",
+    "journal_update",
     "merge_custom",
     "order_list",
     "order_list_params",
