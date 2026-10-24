@@ -19,6 +19,7 @@ pytestmark = pytest.mark.anyio
 # Values that must never appear in a message.
 HIDDEN_SUBDOMAIN = "xa-hidden-subdomain"
 HIDDEN_KEY = "xa-hidden-key-value"  # pragma: allowlist secret
+# Shorthands over TENANTS, for these tests only.
 ORGS_ENV = TENANTS.list_var
 
 
