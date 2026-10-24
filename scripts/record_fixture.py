@@ -63,7 +63,10 @@ and every token-like field's value ``REDACTED``. Core does not pass the request 
 through ``scrub_text``, so the recorder applies it to the URL afterwards. Core then
 verifies the result, a JSON body also decoded, and refuses it when the demo host or the
 key is still there; it also refuses a body that is not UTF-8 text, which no scrub can
-read (exports are out of scope). A refusal by core prints its reason, never a value.
+read (exports are out of scope for fixtures, which the recorder's message says first). A
+refusal by core prints its reason, never a value. A response in which core redacted the
+key or its basic-auth token is written, since nothing of either is left, but goes to
+review with exit status 1: upstream should never send them back.
 
 The fixture is then checked last, before the one write, in its serialised text and in
 every decoded string of a JSON body, for what core does not know: the subdomain on its
@@ -347,6 +350,26 @@ def scrub_request_url(fixture: Fixture) -> Fixture:
     return fixture.model_copy(update={"request": request})
 
 
+def redacted_a_secret(response: httpx.Response, scrubbed: Fixture, key: str) -> bool:
+    """Whether core's ``Scrub`` redacted the key or its basic-auth token in the response.
+
+    The response is scrubbed once more without the secrets and compared, so core's own
+    patterns decide (plain or percent-encoded); only the answer leaves this function.
+    """
+    if not key:
+        return False
+    plain = fixture_from_response(response, scrub=Scrub(host=REPLAY_HOST, rewrite=scrub_text))
+    return plain.response != scrubbed.response
+
+
+def _is_text(content: bytes) -> bool:
+    try:
+        content.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
 def _unsettled_token_fields(node: Any) -> Iterator[str]:
     """Names of token-like fields, at any depth, whose value is not ``null`` or ``REDACTED``.
 
@@ -416,11 +439,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         fixture = scrub_request_url(fixture_from_response(response, scrub=scrub(key)))
     except ValueError as refusal_by_core:  # names what and where, never a value
-        print(f"not written {path.relative_to(ROOT)}: {refusal_by_core}")  # noqa: T201
+        reason = str(refusal_by_core)
+        if not _is_text(response.content):  # core's hint at allow_binary is not for here
+            reason = f"exports are out of scope for fixtures; {reason}"
+        print(f"not written {path.relative_to(ROOT)}: {reason}")  # noqa: T201
         return 1
     text = to_json(fixture)
 
     leaks, suspicions = check(text, TENANTS.field(DEMO, "SUBDOMAIN"), key)
+    if redacted_a_secret(response, fixture, key):
+        suspicions.append(
+            f"the response carried the value of {key_var} or its basic-auth token, "
+            "redacted by core's Scrub: find out why upstream sent it back"
+        )
     if leaks:
         print(f"not written {path.relative_to(ROOT)}: it would contain " + "; ".join(leaks))  # noqa: T201
         return 1

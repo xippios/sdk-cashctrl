@@ -1,8 +1,9 @@
 """Typed client, MCP tools and HTTP routes for CashCtrl.
 
 Distribution ``xippios-cashctrl``. Public API: ``__version__`` and the task
-functions re-exported here; every task takes ``org``, a declared organisation, first,
-but ``list_organisations``, which lists the declared organisations' names.
+functions re-exported here. Every task takes ``org``, a declared organisation, first,
+except ``list_organisations``, which takes no argument and lists the declared
+organisations' names.
 Endpoint wrappers under ``api/`` and the organisation registry in ``_client`` are
 internal.
 """

@@ -201,14 +201,14 @@ All notable changes to this project are documented here. The format follows
   that the shell's `CASHCTRL_DEMO_API_KEY` is nowhere in the request. Instead of pinning
   a module-level `auth.key`, `tests/conftest.py` drops every cached client before and
   after each test, and a `pytester` run of the conftest proves that a key a live test
-  cached never reaches the next offline test (and that it would without the reset).
+  cached never reaches the next offline test (and that it would without the reset)
+  (superseded by core's class-level pin, see Removed below).
 - Rate limit, ADR-0010 decisions 1, 2, 3 and 5 adopted (CLAUDE.md, Rate limit): 60
   requests per minute per organisation, a self-imposed pace since CashCtrl documents no
   limit; no longer-window quota to ration; a 429 is `RateLimitError` with `retry_after`
   from `Retry-After` through core's mapping in `classify`, now tested through the client;
   pauses are stated by core's adapters. `x-cashctrl-requests-left` is not read (unknown
   window and scope); decision 4 waits for core's quota helper.
-
 - Adopted from core (ADR-0014): the organisation registry is `xippios.core.Tenants`,
   `TENANTS` in `_client.py`, with the same variables (`CASHCTRL_ORGS`,
   `CASHCTRL_<NAME>_SUBDOMAIN`, `CASHCTRL_<NAME>_API_KEY`, the reserved `demo`) and the
@@ -229,9 +229,11 @@ All notable changes to this project are documented here. The format follows
 - Adopted from core (conventions §10): the recorder scrubs with
   `Scrub(host="demo.cashctrl.com", secrets=[key, its basic-auth token],
   rewrite=scrub_text, allow_binary=False)` through `fixture_from_response`. A key in a
-  response is now written as `REDACTED` instead of refusing the fixture, and core's
-  verify refuses one the scrub could not reach (behind a JSON escape); core refuses a
-  body that is not UTF-8 text with its own message. The e-mail, API user tag and
+  response is now written as `REDACTED` instead of refusing the fixture, and the fixture
+  goes to review (exit status 1, a note naming the variable); core's verify refuses a key
+  the scrub could not reach (behind a JSON escape); core refuses a body that is not UTF-8
+  text with its own message, which the recorder prefixes with "exports are out of scope
+  for fixtures;". The e-mail, API user tag and
   token-field scrubs stay local, as `scrub_text`, which the recorder also applies to the
   request URL, since core's rewrite does not reach it; the final check keeps the bare
   subdomain, e-mail addresses, API user tags, the key prefix and token-like values, and

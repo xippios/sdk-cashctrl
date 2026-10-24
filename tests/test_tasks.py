@@ -170,6 +170,20 @@ async def test_list_organisations_as_a_tool() -> None:
     assert payload["meta"]["tenant"] is None
 
 
+def test_list_organisations_as_a_route() -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from xippios.cashctrl.http import router
+
+    app = FastAPI()
+    app.include_router(router)
+    response = TestClient(app).get("/cashctrl/list_organisations")
+    assert response.status_code == 200
+    assert response.json()["data"] == [DEMO]
+    assert response.json()["meta"]["tenant"] is None
+
+
 # Per-task tests. Every fixture was recorded on 2026-10-23 from the demo organisation, whose
 # books are synthetic: CashCtrl's defaults plus what scripts/seed_demo.py wrote.
 

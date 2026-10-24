@@ -125,15 +125,35 @@ def test_the_key_is_never_written(
     capsys: pytest.CaptureFixture[str],
     leak: str,
 ) -> None:
-    """Core's ``Scrub`` redacts the key and its token wherever they appear."""
+    """Core's ``Scrub`` redacts the key and its token; the fixture goes to review.
+
+    Nothing of the key is left to refuse, but upstream should never send it back.
+    """
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
-    route.mock(return_value=httpx.Response(200, json={"name": f"{leak} ltd"}))
-    assert recorder.main(["account/list.json", "leaky"]) == 0
+    route.mock(
+        return_value=httpx.Response(200, json={"name": f"{leak} ltd"}, headers={"X-Echo": leak})
+    )
+    assert recorder.main(["account/list.json", "leaky"]) == 1, "review"
     text = (tmp_path / "tests" / "fixtures" / "account_list" / "leaky.json").read_text()
     assert KEY not in text
     assert TOKEN_OF_KEY not in text
-    assert json.loads(json.loads(text)["response"]["body"]) == {"name": "REDACTED ltd"}
-    assert leak not in capsys.readouterr().out
+    fixture = json.loads(text)
+    assert json.loads(fixture["response"]["body"]) == {"name": "REDACTED ltd"}
+    assert ["x-echo", "REDACTED"] in fixture["response"]["headers"]
+    out = capsys.readouterr().out
+    assert "review tests/fixtures/account_list/leaky.json before committing:" in out
+    assert "the response carried the value of CASHCTRL_DEMO_API_KEY" in out
+    assert leak not in out
+
+
+def test_a_response_without_the_key_needs_no_key_review(
+    recorder: ModuleType, respx_mock: respx.MockRouter, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The review note is about the response: upstream's own ``REDACTED`` does not trigger it."""
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
+    route.mock(return_value=httpx.Response(200, json={"name": "REDACTED ltd"}))
+    assert recorder.main(["account/list.json", "clean"]) == 0
+    assert "CASHCTRL_DEMO_API_KEY" not in capsys.readouterr().out
 
 
 def test_a_key_the_scrub_cannot_reach_is_never_written(
@@ -195,8 +215,10 @@ def test_a_binary_body_is_refused(
     assert recorder.main(["account/list.json", "export"]) == 1
     assert not (tmp_path / "tests" / "fixtures").exists()
     out = capsys.readouterr().out
-    assert out.startswith("not written tests/fixtures/account_list/export.json: ")
-    assert "binary body cannot be scrubbed" in out, "core's refusal"
+    assert out.startswith(
+        "not written tests/fixtures/account_list/export.json: "
+        "exports are out of scope for fixtures; binary body cannot be scrubbed"
+    ), "core's refusal, after the recorder's reason"
     assert REAL not in out
 
 

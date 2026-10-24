@@ -225,7 +225,8 @@ characters of a key, in `createdBy` and `lastUpdatedBy`) to `API:REDACTED` and t
 of every token-like body field (`hash`, `token`, `secret`, `apiKey`, by name;
 `order/read.json` sends `hash`) to `REDACTED`. Core refuses the exchange when its verify
 still finds the demo host or the key, a JSON body decoded included, and when the body is
-not UTF-8 text (exports are out of scope). The recorder's own final check then refuses,
+not UTF-8 text (exports are out of scope). A response in which core redacted the key is
+written but goes to review (exit status 1). The recorder's own final check then refuses,
 before the one write to `tests/fixtures/<endpoint>/<case>.json`, a fixture that in its
 text or in a decoded string of its body still holds the subdomain on its own, an e-mail
 address, an API user tag in any case and position, the key's first four characters on

@@ -69,8 +69,9 @@ Every task returns `Result[T]`: `data` holds models that mirror CashCtrl's paylo
 under upstream's names in snake_case (`is_current`, `end_amount`), in Python and in every
 tool and route result alike, `meta` the upstream operation, the parameters as sent under
 upstream's names (`onlyActive`), the organisation as `tenant`, when they were fetched
-and, for a list, `total`, upstream's count of the matching records. Async twins are named `<task>_async`. The
-tasks are listed in the status table below.
+and, for a list, `total`, upstream's count of the matching records. Async twins are
+named `<task>_async` (`list_organisations` has none). The tasks are listed in the status
+table below.
 
 ## MCP
 
@@ -108,8 +109,9 @@ authenticates.
 ## HTTP
 
 `xippios.cashctrl.http.router` is a FastAPI router the consumer mounts. It has no lock:
-every route takes `org` and the consumer passes it explicitly on each request. A
-deployment that must reach one organisation only declares only that one. A task whose
+every route but `GET /cashctrl/list_organisations` takes `org`, and the consumer passes
+it explicitly on each request. A deployment that must reach one organisation only
+declares only that one. A task whose
 parameters are all scalars is a `GET /cashctrl/<task>` with query parameters; the list
 tasks that take a `filter`, a list (`list_accounts`, `list_journal_entries`,
 `list_persons`, `list_orders`), are a `POST` with a JSON body keyed by parameter name.

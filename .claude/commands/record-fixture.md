@@ -26,10 +26,12 @@ writes nothing and exits non-zero:
   `account/costcenter/balance`, `fiscalperiod/result`, `setting/get`) answers a bare
   number or a document, and an export (`.pdf`, `.xlsx`, `.csv`, `.zip`) a file; both
   are refused before a request is sent.
-- **No e-mail addresses.** Every e-mail address in the URL, the headers and the body
-  (`createdBy`, `lastUpdatedBy`, HTML fields such as `notes`) becomes
-  `user@example.com`, also when `@` is written `%40`, `&#64;`, `&#x40;` or `&commat;`;
-  `SYSTEM` stays. `createdBy` may carry the address of the real user who wrote a record.
+- **No e-mail addresses.** Every e-mail address in the request URL, the request body,
+  the response body (`createdBy`, `lastUpdatedBy`, HTML fields such as `notes`) and the
+  response header values becomes `user@example.com`, also when `@` is written `%40`,
+  `&#64;`, `&#x40;` or `&commat;`; `SYSTEM` stays. A header name is not scrubbed: the
+  final check refuses one that holds an address. `createdBy` may carry the address of
+  the real user who wrote a record.
 - **No API user tags.** CashCtrl names an API user in `createdBy` and `lastUpdatedBy` as
   `API:` and the first four characters of its key (observed on the records
   `scripts/seed_demo.py` wrote). Every such tag becomes `API:REDACTED`, the marker in any
