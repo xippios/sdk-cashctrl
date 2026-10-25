@@ -56,14 +56,19 @@ never shows a value, and exits with status 1:
   whichever key it comes from, with the marker in any case, at the start of a word or
   right after a JSON escape. A tag the scrub cannot reach (glued to a word, or behind a
   Unicode escape) is refused by the final check.
-- No token-like fields. A body field named ``hash``, ``token``, ``secret`` or ``apiKey``
-  (``api_key``, ``api-key``), in any case, has its text value replaced by ``REDACTED``.
-  ``order/read.json`` sends ``hash``, an undocumented 32-character text that may be the
-  token of a public link to the order document (observed on 2026-10-23, not verified);
-  the others were never seen and are scrubbed should they appear. The final check
-  refuses any value under such a name but ``null`` or ``REDACTED``, whatever its type or
-  shape: text behind an escaped field name, a number, an array, an object. A compound
-  name (``publicHash``) is not scrubbed; it is written for review.
+- No token-like fields and no personal identifiers. A body field named ``hash``,
+  ``token``, ``secret`` or ``apiKey`` (``api_key``, ``api-key``), or ``ssn`` or ``iban``,
+  the personal identifiers this package keeps out of its projections (ADR-0017), in any
+  case, has its text value replaced by ``REDACTED``. ``order/read.json`` sends ``hash``,
+  an undocumented 32-character text that may be the token of a public link to the order
+  document (observed on 2026-10-23, not verified); ``person/list.json`` sends ``ssn``
+  and ``iban``, only ever seen ``null``; the others were never seen and are scrubbed
+  should they appear. The final check refuses any value under such a name but ``null``
+  or ``REDACTED``, whatever its type or shape: text behind an escaped field name, a
+  number, an array, an object; in a write's form body as a field (``ssn=...``) and
+  inside a JSON value (the ``iban`` of an item of ``bankAccounts``), which the raw-text
+  scrub does not reach, so such a write is not recorded. A compound name
+  (``publicHash``) is not scrubbed; it is written for review.
 
 Nothing unscrubbed touches disk. The request goes through the real client with
 ``raise_on_error=False``, and core's ``fixture_from_response`` turns the exchange into a
@@ -90,7 +95,8 @@ own, an e-mail address other than ``user@example.com``, an API user tag other th
 ``API:REDACTED`` in any case and position (the key's own tag also with ``:`` URL-encoded,
 as an HTML entity or followed by a space), the key's first four characters on their own,
 reported as a possible key prefix, or any value but ``null`` or ``REDACTED`` under a
-token-like field name; any of them means nothing is written and the exit status is 1. A
+token-like or identifier field name, also inside a JSON value of a form body; any of them
+means nothing is written and the exit status is 1. A
 key-like name whose value is not ``REDACTED`` is written for review, also with exit
 status 1. Only the status and the scrubbed URL are printed.
 
@@ -159,8 +165,12 @@ _EMAIL_IN_TEXT = re.compile(
 )
 _SCRUBBED_EMAILS = frozenset({SCRUBBED_EMAIL, SCRUBBED_EMAIL.replace("@", "%40")})
 
-TOKEN_FIELD_NAME = re.compile(r"hash|token|secret|api[_-]?key", re.IGNORECASE)
-"""Body fields whose value may grant access, matched by their whole name in any case."""
+TOKEN_FIELD_NAME = re.compile(r"hash|token|secret|api[_-]?key|ssn|iban", re.IGNORECASE)
+"""Body fields whose value may grant access or identify a person, by whole name in any case.
+
+``ssn`` and ``iban`` are the documented personal identifiers this package keeps out of
+its projections (ADR-0017): fixtures never carry their values either.
+"""
 _TOKEN_FIELD = re.compile(
     r'(?P<field>"(?:' + TOKEN_FIELD_NAME.pattern + r')"\s*:\s*)"(?:[^"\\]|\\.)*"',
     re.IGNORECASE,
@@ -443,7 +453,7 @@ def scrub_token_fields(text: str) -> str:
 
 
 def scrub_text(text: str) -> str:
-    """The recorder's own scrub: e-mail addresses, API user tags, token-like fields.
+    """The recorder's own scrub: e-mail addresses, API user tags, token-like fields, identifiers.
 
     ``Scrub.rewrite``: core applies it, after the host and the key, to the response body
     and every response header value; the recorder applies it to the request URL.
@@ -529,13 +539,15 @@ def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
             "find them in the response before recording again)"
         )
     is_json, decoded = _decoded(fixture.get("response", {}).get("body", ""))
-    tokens = sorted(set(_unsettled_token_fields(decoded))) if is_json else []
-    form = _form(_request_body(fixture))
-    tokens += sorted(
-        {name for name, value in form if TOKEN_FIELD_NAME.fullmatch(name) and value != REDACTED}
-    )
+    tokens = set(_unsettled_token_fields(decoded)) if is_json else set()
+    for name, value in _form(_request_body(fixture)):
+        if TOKEN_FIELD_NAME.fullmatch(name) and value != REDACTED:
+            tokens.add(name)
+        is_json_value, decoded_value = _decoded(value)  # bankAccounts, items, addresses
+        if is_json_value:
+            tokens.update(_unsettled_token_fields(decoded_value))
     if tokens:
-        leaks.append(f"a value other than null or {REDACTED} under {', '.join(tokens)}")
+        leaks.append(f"a value other than null or {REDACTED} under {', '.join(sorted(tokens))}")
     if _holds_an_address(fixture):
         leaks.append(f"an e-mail address other than {SCRUBBED_EMAIL}")
     suspicions = list(_key_like_values(fixture, "fixture"))

@@ -22,10 +22,15 @@ from xippios.cashctrl.mcp import server
 from xippios.cashctrl.models import (
     Account,
     Filter,
+    JournalEntryDetail,
+    JournalEntryDetailProjection,
     JournalItem,
     OrderItem,
+    Person,
     PersonAddress,
     PersonDetail,
+    PersonDetailProjection,
+    PersonProjection,
 )
 
 TENANT_LIST = "list_organisations"
@@ -807,7 +812,7 @@ def test_get_journal_entry_replays_a_taxed_entry(
     assert (vat.account_id, vat.dc_credit, vat.is_tax) == (33, Decimal("269.75"), True)
     assert vat.tax_percentage == Decimal("8.1")
     (partner,) = entry.associates
-    assert isinstance(partner, PersonDetail)
+    assert isinstance(partner, PersonDetailProjection)
     assert (partner.id, partner.company, partner.is_customer) == (8, "Beispiel Logistik AG", True)
     assert [(a.type, a.zip, a.city) for a in partner.addresses] == [("MAIN", "4051", "Basel")]
     assert [(c.type, c.address) for c in partner.contacts] == [("EMAIL_WORK", "user@example.com")]
@@ -896,7 +901,10 @@ def test_list_persons_replays_every_person(
     )
     assert (buero.email_work, buero.language, buero.first_name) == ("user@example.com", "DE", None)
     assert buero.created == datetime(2026, 10, 23, 10, 29, 12)
-    assert (buero.discount_percentage, buero.date_birth, buero.iban) == (None, None, None)
+    assert (buero.discount_percentage, buero.date_birth) == (None, None)
+    assert isinstance(buero, PersonProjection)
+    assert not hasattr(buero, "iban"), "ADR-0017: no personal identifier in a projection"
+    assert not hasattr(buero, "ssn")
 
 
 def test_list_persons_only_vendors(
@@ -952,6 +960,100 @@ def test_get_person_replays_the_recorded_read(
     # The read leaves out null fields; they come back empty.
     assert "firstName" not in recorded_body(fixtures_dir, "person_read", "by_id")["data"]
     assert (person.first_name, person.notes, person.vat_uid) == (None, None, None)
+
+
+BASE = "https://demo.cashctrl.com/api/v1"
+SSN = "756.0000.0000.00"
+"""A made-up social security number: tests only, never sent anywhere."""
+IBAN = "CH00 TEST 0000 0000 0000 0"
+"""A made-up IBAN: tests only, never sent anywhere."""
+
+
+def test_the_projections_leave_out_ssn_and_iban_and_nothing_else() -> None:
+    """ADR-0017: the read models stay faithful; the projections differ by exactly these."""
+    assert set(Person.model_fields) - set(PersonProjection.model_fields) == {"ssn", "iban"}
+    assert set(PersonProjection.model_fields) <= set(Person.model_fields)
+    assert set(PersonDetail.model_fields) - set(PersonDetailProjection.model_fields) == {"ssn"}
+    assert set(PersonDetailProjection.model_fields) == set(PersonDetail.model_fields) - {"ssn"}
+    assert set(JournalEntryDetailProjection.model_fields) == set(JournalEntryDetail.model_fields)
+    for model in (Person, PersonDetail):
+        assert {"ssn"} <= set(model.model_fields), model.__name__
+
+
+@pytest.mark.anyio
+async def test_the_person_list_wrapper_stays_faithful(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """The endpoint wrapper keeps ``ssn`` and ``iban`` (``null`` in the fixture); the task not."""
+    replay_fixture("person_list", "default")
+    listed = await api.person_list(DEMO, start=0, limit=100)
+    assert all(isinstance(person, Person) for person in listed.data)
+    assert all((person.ssn, person.iban) == (None, None) for person in listed.data)
+    result = await tasks.list_persons_async(DEMO)
+    for person in result.model_dump()["data"]:
+        assert "ssn" not in person
+        assert "iban" not in person
+
+
+def person_with_identifiers(fixtures_dir: Path) -> dict[str, typing.Any]:
+    """The recorded person read with an ``ssn`` and a bank account, changed in memory."""
+    body = recorded_body(fixtures_dir, "person_read", "by_id")
+    body["data"]["ssn"] = SSN
+    body["data"]["bankAccounts"] = [{"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"}]
+    return body
+
+
+@pytest.mark.anyio
+async def test_get_person_leaves_out_ssn_and_each_iban(
+    respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """A read changed in memory, not a fixture: no fixture carries the values (ADR-0017).
+
+    The wrapper keeps them; the task, its tool and its route show neither.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from xippios.cashctrl.http import router
+
+    respx_mock.get(f"{BASE}/person/read.json").respond(
+        200, json=person_with_identifiers(fixtures_dir)
+    )
+    read = await api.person_read(DEMO, 3)
+    assert (read.ssn, read.bank_accounts[0]) == (
+        SSN,
+        {"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"},
+    )
+    person = (await tasks.get_person_async(DEMO, 3)).data
+    assert isinstance(person, PersonDetailProjection)
+    assert not hasattr(person, "ssn")
+    assert person.bank_accounts == [{"type": "DEFAULT", "bic": "TESTCHZZ"}]
+    payload = await mcp_call(server, "cashctrl_get_person", {"org": DEMO, "id": 3})
+    app = FastAPI()
+    app.include_router(router)
+    answer = TestClient(app).get(f"/{SOURCE}/get_person", params={"org": DEMO, "id": 3})
+    for shown in (person.model_dump_json(), json.dumps(payload), answer.text):
+        assert SSN not in shown
+        assert IBAN not in shown
+        assert '"ssn"' not in shown
+        assert '"iban"' not in shown
+
+
+def test_get_journal_entry_projects_the_persons_it_names(
+    respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """A read changed in memory: an associate's ``ssn`` and ``iban`` stay out (ADR-0017)."""
+    body = recorded_body(fixtures_dir, "journal_read", "collective")
+    for associate in body["data"]["associates"]:
+        associate["ssn"] = SSN
+        associate["bankAccounts"] = [{"iban": IBAN, "type": "DEFAULT"}]
+    respx_mock.get(f"{BASE}/journal/read.json").respond(200, json=body)
+    entry = tasks.get_journal_entry(DEMO, 47).data
+    assert isinstance(entry, JournalEntryDetailProjection)
+    assert [person.id for person in entry.associates] == [3, 4]
+    assert all(person.bank_accounts == [{"type": "DEFAULT"}] for person in entry.associates)
+    assert SSN not in entry.model_dump_json()
+    assert IBAN not in entry.model_dump_json()
 
 
 @pytest.mark.anyio

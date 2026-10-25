@@ -41,12 +41,15 @@ from xippios.cashctrl.api._form import (
 from xippios.cashctrl.errors import FieldError, RequestRejected
 from xippios.cashctrl.mcp_write import server as write_server
 from xippios.cashctrl.models import (
+    BankAccountInput,
     JournalEntryDetail,
+    JournalEntryDetailProjection,
     JournalItemInput,
     OrderDetail,
     OrderItemInput,
     PersonAddressInput,
     PersonDetail,
+    PersonDetailProjection,
     WritePreview,
     WriteResult,
 )
@@ -122,8 +125,8 @@ def test_every_write_task_returns_a_preview_or_a_result(task: Callable[..., Any]
     preview, result = typing.get_args(outcome)
     assert preview.__pydantic_generic_metadata__["origin"] is WritePreview
     assert preview.__pydantic_generic_metadata__["args"][0] in (
-        JournalEntryDetail,
-        PersonDetail,
+        JournalEntryDetailProjection,
+        PersonDetailProjection,
         OrderDetail,
     )
     assert result is WriteResult
@@ -235,7 +238,7 @@ def test_update_journal_entry_previews_the_whole_record_after_one_read(
     assert isinstance(preview, WritePreview)
     assert list(preview.payload.items()) == recorded_body(fixtures_dir, "journal_update", "ok")
     assert preview.changes == {"title": "xippios-live fixture updated"}
-    assert isinstance(preview.before, JournalEntryDetail)
+    assert isinstance(preview.before, JournalEntryDetailProjection)
     assert (preview.before.id, preview.before.title) == (JOURNAL_ENTRY, "xippios-live fixture")
     assert result.meta.endpoint == "journal/update.json"
     assert result.meta.request == {"org": DEMO}
@@ -427,7 +430,7 @@ def test_delete_journal_entry_previews_the_entry_it_would_delete(
     preview = result.data
     assert isinstance(preview, WritePreview)
     assert preview.payload == {"ids": str(JOURNAL_ENTRY)}
-    assert isinstance(preview.before, JournalEntryDetail)
+    assert isinstance(preview.before, JournalEntryDetailProjection)
     assert preview.before.id == JOURNAL_ENTRY
     assert preview.changes is None
 
@@ -548,7 +551,7 @@ def test_update_person_previews_the_whole_record_after_one_read(
     assert isinstance(preview, WritePreview)
     assert list(preview.payload.items()) == recorded_body(fixtures_dir, "person_update", "ok")
     assert preview.changes == {"company": "xippios-live Fixture AG"}
-    assert isinstance(preview.before, PersonDetail)
+    assert isinstance(preview.before, PersonDetailProjection)
     assert preview.before.company == "xippios-live Fixture GmbH"
     assert preview.before.addresses[0].city == "Zürich", "the umlaut came back as sent"
 
@@ -768,13 +771,93 @@ def test_delete_person_previews_then_deletes(
     replay_fixture("person_read", "for_update")
     preview = tasks_write.delete_person(DEMO, PERSON).data
     assert isinstance(preview, WritePreview)
-    assert isinstance(preview.before, PersonDetail)
+    assert isinstance(preview.before, PersonDetailProjection)
     assert (preview.before.id, preview.payload) == (PERSON, {"ids": str(PERSON)})
     route = replay_fixture("person_delete", "ok")
     result = tasks_write.delete_person(DEMO, PERSON, confirm=True)
     assert sent_body(route) == recorded_body(fixtures_dir, "person_delete", "ok")
     assert isinstance(result.data, WriteResult)
     assert result.data.message == "1 person deleted"
+
+
+SSN = "756.0000.0000.00"
+"""A made-up social security number: tests only, never sent anywhere."""
+IBAN = "CH00 TEST 0000 0000 0000 0"
+"""A made-up IBAN: tests only, never sent anywhere."""
+
+
+def test_create_person_never_echoes_ssn_or_iban(respx_mock: respx.MockRouter) -> None:
+    """ADR-0017: the values go upstream, but neither the preview nor ``meta.request`` shows them.
+
+    The confirmed call is answered by a mocked success, not a fixture, to show what was
+    sent: a fixture never carries the values.
+    """
+    arguments: dict[str, Any] = {
+        "company": "xippios-live Fixture GmbH",
+        "ssn": SSN,
+        "bank_accounts": [BankAccountInput(iban=IBAN, type="SALARY", bic="TESTCHZZ")],
+    }
+    preview = preview_of(tasks_write.create_person(DEMO, **arguments))
+    assert preview.payload["ssn"] == "REDACTED"
+    assert json.loads(preview.payload["bankAccounts"]) == [
+        {"iban": "REDACTED", "type": "SALARY", "bic": "TESTCHZZ"}
+    ]
+    write = respx_mock.post(f"{BASE}/person/create.json").respond(
+        200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
+    )
+    result = tasks_write.create_person(DEMO, **arguments, confirm=True)
+    sent = dict(sent_body(write))
+    assert sent["ssn"] == SSN, "upstream receives the value"
+    assert json.loads(sent["bankAccounts"])[0]["iban"] == IBAN
+    assert result.meta.request["ssn"] == "REDACTED"
+    assert json.loads(result.meta.request["bankAccounts"])[0]["iban"] == "REDACTED"
+    shown = result.model_dump_json() + preview.model_dump_json()
+    assert SSN not in shown
+    assert IBAN not in shown
+
+
+def test_update_person_shows_no_stored_or_given_ssn(
+    respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """The recorded read with an ``ssn``, changed in memory: the update sends it back.
+
+    The preview's ``payload`` and ``changes`` show ``REDACTED`` and its ``before`` has no
+    ``ssn``; a cleared ``ssn`` shows as empty, which reveals nothing.
+    """
+    body = recorded_read(fixtures_dir, "person_read", "for_update")
+    body["data"]["ssn"] = SSN
+    serve_read(respx_mock, "person/read.json", body)
+    kept = preview_of(tasks_write.update_person(DEMO, PERSON, department="x"))
+    assert kept.payload["ssn"] == "REDACTED"
+    assert isinstance(kept.before, PersonDetailProjection)
+    assert not hasattr(kept.before, "ssn")
+    given = preview_of(tasks_write.update_person(DEMO, PERSON, ssn="756.1111.1111.11"))
+    assert given.changes == {"ssn": "REDACTED"}
+    assert given.payload["ssn"] == "REDACTED"
+    cleared = preview_of(tasks_write.update_person(DEMO, PERSON, clear=["ssn"]))
+    assert cleared.changes == {"ssn": ""}
+    assert "ssn" not in cleared.payload
+    write = respx_mock.post(f"{BASE}/person/update.json").respond(
+        200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
+    )
+    result = tasks_write.update_person(DEMO, PERSON, department="x", confirm=True)
+    assert dict(sent_body(write))["ssn"] == SSN, "the stored value is carried over"
+    assert result.meta.request["ssn"] == "REDACTED"
+
+
+def test_a_previewed_record_leaves_out_ssn_and_iban(
+    respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """Changed in memory: a stored ``ssn`` and bank account stay out of ``before``."""
+    body = recorded_read(fixtures_dir, "person_read", "for_update")
+    body["data"]["ssn"] = SSN
+    body["data"]["bankAccounts"] = [{"iban": IBAN, "type": "DEFAULT"}]
+    serve_read(respx_mock, "person/read.json", body)
+    preview = preview_of(tasks_write.delete_person(DEMO, PERSON))
+    assert isinstance(preview.before, PersonDetailProjection)
+    assert preview.before.bank_accounts == [{"type": "DEFAULT"}]
+    assert SSN not in preview.model_dump_json()
+    assert IBAN not in preview.model_dump_json()
 
 
 # Orders ------------------------------------------------------------------------------

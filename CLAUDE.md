@@ -77,8 +77,9 @@ Core's plugin does the rest (ADR-0013): no network outside a test marked `live` 
 organisation is synthetic: invented books seeded by `scripts/seed_demo.py` and described
 in `docs/demo-org.md`, never a copy of real books. So the recorder records any module and
 any amount; it still scrubs e-mail addresses to `user@example.com`, API user tags to
-`API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) to
-`REDACTED`, in the request body as well, and refuses any method but GET and POST, a POST
+`API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) and the
+personal identifiers `ssn` and `iban` to `REDACTED`, in the request body as well, and
+refuses any method but GET and POST, a POST
 to anything but the eight write paths, a create without the marker `xippios-live`, and
 any endpoint but `.json`. Writes against demo create a record marked `xippios-live`,
 update it and delete it again, nothing else (see Write tools). The demo subdomain is
@@ -135,7 +136,8 @@ src/xippios/cashctrl/
   _client.py       organisation registry: TENANTS (core's Tenants), client_for(org), classify
   _cli.py          --org for both MCP servers: core's TenantLock through main's option hooks
   errors.py        RequestRejected (HTTP 200 with success:false) and FieldError
-  models.py        pydantic models mirroring upstream payloads (UpstreamModel)
+  models.py        pydantic models mirroring upstream payloads (UpstreamModel), and the
+                   projections tasks return without ssn and iban (ADR-0017)
   api/             endpoint wrappers, one module per upstream operation; _form.py encodes and posts writes
   tasks.py         task functions and list_organisations; __all__ is what the adapters register,
                    MCP_CAPS any per-tool result caps (none)
@@ -255,11 +257,13 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
    create a person from a name. It returns
    `Result[WritePreview[<record>] | WriteResult]`: while `confirm` is false a
    `WritePreview` (`performed=False`, `endpoint`, `payload` = the exact fields,
-   `before` = the record for an update or a delete, `changes` for an update) with
-   `meta.request` = `{"org": org}`; with `confirm` a `WriteResult` (`performed=True`,
-   `insert_id`, `message`) with `meta.request` = `org` plus the fields as sent. The
-   payload is never in a result twice. A create's preview sends nothing; an update's
-   or a delete's sends one read, never a write.
+   `before` = the record for an update or a delete as the read task's projection,
+   `changes` for an update) with `meta.request` = `{"org": org}`; with `confirm` a
+   `WriteResult` (`performed=True`, `insert_id`, `message`) with `meta.request` = `org`
+   plus the fields as sent. `ssn` and an `iban` show as `REDACTED` in `payload`,
+   `changes` and `meta.request` (Personal identifiers below). The payload is never in a
+   result twice. A create's preview sends nothing; an update's or a delete's sends one
+   read, never a write.
 3. **Updates read, merge, send.** Upstream empties every parameter an update omits.
    `update_*` reads the record, maps every parameter `update.json` documents from it
    (`_journal_values`, `_person_values`), applies the arguments given (not `None`), and
@@ -307,6 +311,28 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
    previewed, confirmed and read back: the changed field holds the new value and every
    other derived field is unchanged.
 
+## Personal identifiers (ADR-0017)
+
+CashCtrl documents two personal identifiers, a person's `ssn` ("Social security number
+of the employee") and the `iban` of each of a person's `bankAccounts` (the list sends an
+`iban` of its own). Decided by Johannes on 2026-10-25: exactly these two.
+
+- The endpoint wrappers' read models stay faithful and carry them (`Person`,
+  `PersonDetail`, `JournalEntryDetail.associates`; ADR-0003).
+- The tasks return projections without them, built with `UpstreamModel.project` in
+  `tasks.py`: `PersonProjection` (`list_persons`), `PersonDetailProjection`
+  (`get_person`; each bank account kept without its `iban`) and
+  `JournalEntryDetailProjection` (`get_journal_entry`, its `associates` projected). A
+  write preview's `before` is the same projection.
+- `create_person` and `update_person` take `ssn` and, in `bank_accounts`, `iban`, and
+  send them as given; a preview's `payload` and `changes` and a performed write's
+  `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
+  as empty.
+- Fixtures never carry their values: the recorder rewrites both to `REDACTED` by name,
+  and its final check refuses any other value (How to record a fixture).
+- A task that fetches them deliberately may return them and says so in its docstring;
+  none does.
+
 ## How to record a fixture
 
 Run `/record-fixture <endpoint> <case> <parameters>`. It runs
@@ -320,7 +346,9 @@ made `REDACTED`, and the recorder's `scrub_text` over the body, the header value
 addresses to `user@example.com`, CashCtrl's API user tags (`API:` and the first four
 characters of a key, in `createdBy` and `lastUpdatedBy`) to `API:REDACTED` and the value
 of every token-like body field (`hash`, `token`, `secret`, `apiKey`, by name;
-`order/read.json` sends `hash`) to `REDACTED`. Core refuses the exchange when its verify
+`order/read.json` sends `hash`) and of the personal identifiers `ssn` and `iban`
+(ADR-0017; `person/list.json` sends both, only ever `null`) to `REDACTED`. Core refuses
+the exchange when its verify
 still finds the demo host or the key, a JSON body decoded included, and when the body is
 not UTF-8 text (exports are out of scope). A response in which core redacted the key is
 written but goes to review (exit status 1). The recorder's own final check then refuses,
@@ -328,12 +356,14 @@ before the one write to `tests/fixtures/<endpoint>/<case>.json`, a fixture that 
 text or in a decoded string of its body still holds the subdomain on its own, an e-mail
 address, an API user tag in any case and position, the key's first four characters on
 their own (a possible key prefix) or any value but `null` or `REDACTED` under a
-token-like name, and the recorder refuses what a policy of the demo-only rule above
+token-like or identifier name, and the recorder refuses what a policy of the demo-only
+rule above
 refuses. The write stays the recorder's: core's `record` writes as soon as its own
 verify passes, before a source's final check could run. A compound name such as
 `publicHash` is not scrubbed and goes to review. Grep the file for key patterns, e-mail
-addresses, API user tags and token-like fields before committing. Fixtures are never
-typed in by hand.
+addresses, API user tags, token-like fields and values under `ssn` and `iban` before
+committing (`/record-fixture`, `tests/fixtures/README.md`). Fixtures are never typed in
+by hand.
 
 Writes: `--method POST` is accepted for the eight write paths the write tools call only
 (`journal/create|update|delete.json`, `person/create|update|delete.json`,
@@ -343,7 +373,9 @@ refused before a request, and a `create.json` only when one of its values carrie
 write tools' `Content-Type` (`application/x-www-form-urlencoded; charset=UTF-8`). Core
 records the request body, and the recorder's rewrite and final check cover it (the raw
 text, each form field decoded, each JSON value's strings): host, key, e-mail addresses,
-API user tags, token-like fields. After the request the recorder says that the demo
+API user tags, token-like fields and identifiers, a form field `ssn` or the `iban` inside
+`bankAccounts` included, so a write that sends one is not recorded. After the request
+the recorder says that the demo
 organisation changed, names the `insertId` it answered, and asks for the matching
 delete, recorded or run. Record only a record marked `xippios-live`, its update and its
 delete; confirm afterwards with one list per resource (`query=xippios-live`, counts
@@ -406,7 +438,8 @@ hand, and both org secrets must give sdk-cashctrl access for the nightly run to 
 
 ## Never
 
-- Never hand-write a fixture, and never commit one without grepping for key patterns.
+- Never hand-write a fixture, and never commit one without grepping for key patterns
+  and for values under `ssn` and `iban`.
 - Never record a fixture, run a live test or make a live call against any organisation
   but `demo`; never set `CASHCTRL_ORGS` with real names in a session or a test.
 - Never print, log or commit `CASHCTRL_DEMO_SUBDOMAIN` or any organisation's subdomain.

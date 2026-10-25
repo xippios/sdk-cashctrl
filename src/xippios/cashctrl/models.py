@@ -7,9 +7,18 @@ named as upstream names them in snake_case. Where upstream spells a field differ
 results serialise under the snake_case names in Python, over MCP and over HTTP alike
 (``is_current``, ``end_amount``), the same names the tool arguments use. Within-source
 hygiene only: dates become ``datetime.date``/``datetime``, numbers become ``int`` or
-``Decimal`` (ADR-0008: JSON numbers on the wire). No cross-source normalisation
-(ADR-0003): an upstream concept stays an upstream concept, and nothing is renamed or
-computed.
+``Decimal`` (ADR-0008: JSON numbers on the wire). Documented value sets are ``Literal``
+types here (``Direction``, ``Language``), so the tool schemas list them; an enumeration
+generated into ``enums.py`` would be a ``StrEnum``, and one of integer ids an ``IntEnum``
+(conventions §3). No cross-source normalisation (ADR-0003): an upstream concept stays an
+upstream concept, and nothing is renamed or computed.
+
+These read models stay faithful, documented personal identifiers included: ``ssn`` and
+``iban`` (``Person``, ``PersonDetail``, and ``JournalEntryDetail.associates``). The
+projections tasks return leave those out (``PersonProjection``,
+``PersonDetailProjection``, ``JournalEntryDetailProjection``), a write task does not
+echo one in ``meta.request`` and its preview shows one as ``REDACTED``, and fixtures
+never carry their values (ADR-0017).
 
 ``docs/upstream/`` shows no response bodies. Field types come from the create and update
 parameter tables where they describe the field, and from the answers recorded against the
@@ -68,6 +77,7 @@ __all__ = [
     "InsuranceContractInput",
     "JournalEntry",
     "JournalEntryDetail",
+    "JournalEntryDetailProjection",
     "JournalItem",
     "JournalItemInput",
     "JournalRow",
@@ -89,6 +99,8 @@ __all__ = [
     "PersonContact",
     "PersonContactInput",
     "PersonDetail",
+    "PersonDetailProjection",
+    "PersonProjection",
     "ReadResponse",
     "Recurrence",
     "ServicePeriodInput",
@@ -621,10 +633,13 @@ class PersonContact(UpstreamModel):
 
 
 class _PersonFields(UpstreamModel):
-    """The fields ``person/list.json`` and ``person/read.json`` share.
+    """The fields ``person/list.json`` and ``person/read.json`` share, but ``ssn``.
 
     ``read.json`` leaves out every field whose value is ``null`` (observed on 2026-10-23;
     the list sends them as ``null``), so everything that may be empty defaults to ``None``.
+    ``ssn``, which both send, is declared on the read models (``Person``,
+    ``PersonDetail``) alone, so that the projections tasks return can leave it out
+    (ADR-0017).
     """
 
     id: int
@@ -659,7 +674,6 @@ class _PersonFields(UpstreamModel):
     certificate_template_id: int | None = Field(
         default=None, validation_alias="certificateTemplateId"
     )
-    ssn: str | None = None
     insurance_nr: str | None = Field(default=None, validation_alias="insuranceNr")
     insurance_member_nr: str | None = Field(default=None, validation_alias="insuranceMemberNr")
     custom: str | None = None
@@ -684,7 +698,34 @@ class _PersonFields(UpstreamModel):
     last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
 
 
-class Person(_PersonFields):
+class _PersonEntryFields(_PersonFields):
+    """The fields only ``person/list.json`` sends, but ``iban`` (see ``Person``)."""
+
+    category_display: str | None = Field(default=None, validation_alias="categoryDisplay")
+    country_name: str | None = Field(default=None, validation_alias="countryName")
+    children_count: int | None = Field(default=None, validation_alias="childrenCount")
+    auto_fill_responsible_person: bool = Field(validation_alias="autoFillResponsiblePerson")
+    title: JsonValue = None
+    title_sentence: JsonValue = Field(default=None, validation_alias="titleSentence")
+    gender: JsonValue = None
+    gender_name: JsonValue = Field(default=None, validation_alias="genderName")
+    thumbnail_file_id: JsonValue = Field(default=None, validation_alias="thumbnailFileId")
+    certificate_values: JsonValue = Field(default=None, validation_alias="certificateValues")
+    discount_inherited: JsonValue = Field(default=None, validation_alias="discountInherited")
+    discount_effective: JsonValue = Field(default=None, validation_alias="discountEffective")
+    bic: JsonValue = None
+    email_private: JsonValue = Field(default=None, validation_alias="emailPrivate")
+    email_invoice: JsonValue = Field(default=None, validation_alias="emailInvoice")
+    phone_work: JsonValue = Field(default=None, validation_alias="phoneWork")
+    phone_private: JsonValue = Field(default=None, validation_alias="phonePrivate")
+    mobile_work: JsonValue = Field(default=None, validation_alias="mobileWork")
+    mobile_private: JsonValue = Field(default=None, validation_alias="mobilePrivate")
+    url: JsonValue = None
+    superior_name: JsonValue = Field(default=None, validation_alias="superiorName")
+    location_name: JsonValue = Field(default=None, validation_alias="locationName")
+
+
+class Person(_PersonEntryFields):
     """One person, an entry of ``person/list.json`` (``docs/upstream/person.md``).
 
     A customer, vendor, employee, insurance or family, company or natural person. Typed
@@ -710,57 +751,32 @@ class Person(_PersonFields):
     ``bic``, ``email_private``, ``email_invoice``, ``phone_work``, ``phone_private``,
     ``mobile_work``, ``mobile_private``, ``url``, ``superior_name`` and
     ``location_name``.
+
+    The endpoint wrapper's read model, faithful to upstream (ADR-0003): it carries
+    ``ssn`` and ``iban``, which ``PersonProjection``, what ``list_persons`` returns,
+    leaves out (ADR-0017).
     """
 
-    category_display: str | None = Field(default=None, validation_alias="categoryDisplay")
-    country_name: str | None = Field(default=None, validation_alias="countryName")
-    children_count: int | None = Field(default=None, validation_alias="childrenCount")
-    auto_fill_responsible_person: bool = Field(validation_alias="autoFillResponsiblePerson")
-    title: JsonValue = None
-    title_sentence: JsonValue = Field(default=None, validation_alias="titleSentence")
-    gender: JsonValue = None
-    gender_name: JsonValue = Field(default=None, validation_alias="genderName")
-    thumbnail_file_id: JsonValue = Field(default=None, validation_alias="thumbnailFileId")
-    certificate_values: JsonValue = Field(default=None, validation_alias="certificateValues")
-    discount_inherited: JsonValue = Field(default=None, validation_alias="discountInherited")
-    discount_effective: JsonValue = Field(default=None, validation_alias="discountEffective")
+    ssn: str | None = None
     iban: JsonValue = None
-    bic: JsonValue = None
-    email_private: JsonValue = Field(default=None, validation_alias="emailPrivate")
-    email_invoice: JsonValue = Field(default=None, validation_alias="emailInvoice")
-    phone_work: JsonValue = Field(default=None, validation_alias="phoneWork")
-    phone_private: JsonValue = Field(default=None, validation_alias="phonePrivate")
-    mobile_work: JsonValue = Field(default=None, validation_alias="mobileWork")
-    mobile_private: JsonValue = Field(default=None, validation_alias="mobilePrivate")
-    url: JsonValue = None
-    superior_name: JsonValue = Field(default=None, validation_alias="superiorName")
-    location_name: JsonValue = Field(default=None, validation_alias="locationName")
 
 
-class PersonDetail(_PersonFields):
-    """One person as ``person/read.json`` returns it (``docs/upstream/person.md``).
+class PersonProjection(_PersonEntryFields):
+    """One person as ``list_persons`` returns it: ``Person`` without ``ssn`` and ``iban``.
 
-    Observed on 2026-10-23 against the demo organisation: the read leaves out every field
-    whose value is ``null``, and sends a different set than the list. It adds the
-    structured lists below and some derived names, and has no ``category_display``,
-    ``country_name``, ``children_count`` nor the list's ``null``-only fields. The fields
-    both send are typed as on ``Person``. ``journal/read.json`` embeds the same record for
-    each person an entry names (``JournalEntryDetail.associates``).
-
-    ``addresses`` and ``contacts`` are typed from the create tables (``PersonAddress``,
-    ``PersonContact``). ``bank_accounts``, ``children``, ``service_periods``,
-    ``insurance_contracts`` and ``attachments`` are documented as inputs but were only
-    seen empty, so their items are kept as sent; so is ``certificate_values_map``, only
-    seen as ``{}``, and ``certificate_values``, documented as an input and never seen in
-    a read (which leaves out ``null``), kept should it come. Typed from observation:
-    ``full_name`` (empty for a company), ``company_or_full_name``, ``abbreviated_name``,
-    ``title_name``, ``language_code`` (``de``), ``canton_code``, ``country_code2``
-    (``CH``), ``country_code3`` (``CHE``), ``number_of_children`` and ``icon_cls``.
+    Documented personal identifiers stay out of the projections tasks return (ADR-0017,
+    conventions §3): ``ssn``, "Social security number of the employee", and ``iban``, an
+    IBAN (documented for each of a person's ``bankAccounts``; on the list only seen
+    ``null``). Every other field is ``Person``'s, under the same name and type; built
+    with ``UpstreamModel.project``.
     """
+
+
+class _PersonDetailFields(_PersonFields):
+    """The fields only ``person/read.json`` sends, but ``bank_accounts`` (see ``PersonDetail``)."""
 
     addresses: list[PersonAddress] = Field(default_factory=list)
     contacts: list[PersonContact] = Field(default_factory=list)
-    bank_accounts: list[JsonValue] = Field(default_factory=list, validation_alias="bankAccounts")
     children: list[JsonValue] = Field(default_factory=list)
     service_periods: list[JsonValue] = Field(
         default_factory=list, validation_alias="servicePeriods"
@@ -783,7 +799,68 @@ class PersonDetail(_PersonFields):
     icon_cls: str | None = Field(default=None, validation_alias="iconCls")
 
 
-class JournalEntryDetail(_JournalEntryFields):
+class PersonDetail(_PersonDetailFields):
+    """One person as ``person/read.json`` returns it (``docs/upstream/person.md``).
+
+    Observed on 2026-10-23 against the demo organisation: the read leaves out every field
+    whose value is ``null``, and sends a different set than the list. It adds the
+    structured lists below and some derived names, and has no ``category_display``,
+    ``country_name``, ``children_count`` nor the list's ``null``-only fields. The fields
+    both send are typed as on ``Person``. ``journal/read.json`` embeds the same record for
+    each person an entry names (``JournalEntryDetail.associates``).
+
+    ``addresses`` and ``contacts`` are typed from the create tables (``PersonAddress``,
+    ``PersonContact``). ``bank_accounts``, ``children``, ``service_periods``,
+    ``insurance_contracts`` and ``attachments`` are documented as inputs but were only
+    seen empty, so their items are kept as sent; so is ``certificate_values_map``, only
+    seen as ``{}``, and ``certificate_values``, documented as an input and never seen in
+    a read (which leaves out ``null``), kept should it come. Typed from observation:
+    ``full_name`` (empty for a company), ``company_or_full_name``, ``abbreviated_name``,
+    ``title_name``, ``language_code`` (``de``), ``canton_code``, ``country_code2``
+    (``CH``), ``country_code3`` (``CHE``), ``number_of_children`` and ``icon_cls``.
+
+    The endpoint wrapper's read model, faithful to upstream (ADR-0003): it carries
+    ``ssn`` and, in each of ``bank_accounts``, ``iban``, which
+    ``PersonDetailProjection``, what the tasks return, leaves out (ADR-0017).
+    """
+
+    ssn: str | None = None
+    bank_accounts: list[JsonValue] = Field(default_factory=list, validation_alias="bankAccounts")
+
+
+class PersonDetailProjection(_PersonDetailFields):
+    """One person as ``get_person`` returns it: ``PersonDetail`` without ``ssn`` and ``iban``.
+
+    Documented personal identifiers stay out of the projections tasks return (ADR-0017,
+    conventions §3): ``ssn`` is left out, and so is the ``iban`` of each of
+    ``bank_accounts``, whose other keys are kept as sent. Every other field is
+    ``PersonDetail``'s, under the same name and type; built with
+    ``UpstreamModel.project``. Write previews show the record before an update or a
+    delete as this projection, and ``JournalEntryDetailProjection.associates`` holds it.
+    """
+
+    bank_accounts: list[JsonValue] = Field(default_factory=list, validation_alias="bankAccounts")
+
+
+class _JournalEntryDetailFields(_JournalEntryFields):
+    """The fields only ``journal/read.json`` sends, but ``associates`` (``JournalEntryDetail``)."""
+
+    nr: str | None = None
+    items: list[JournalItem] = Field(default_factory=list)
+    rows: list[JournalRow] = Field(default_factory=list)
+    attachments: list[JsonValue] = Field(default_factory=list)
+    allocations: list[JsonValue] = Field(default_factory=list)
+    taxed_items: list[JsonValue] = Field(default_factory=list, validation_alias="taxedItems")
+    taxed: bool
+    default_currency_amount: Decimal | None = Field(
+        default=None, validation_alias="defaultCurrencyAmount"
+    )
+    account_ids: str | None = Field(default=None, validation_alias="accountIds")
+    items_index: str | None = Field(default=None, validation_alias="itemsIndex")
+    recurrence_id: JsonValue = Field(default=None, validation_alias="recurrenceId")
+
+
+class JournalEntryDetail(_JournalEntryDetailFields):
     """One journal entry as ``journal/read.json`` returns it (``docs/upstream/journal.md``).
 
     Observed on 2026-10-23 against the demo organisation: the read sends a different set
@@ -802,22 +879,25 @@ class JournalEntryDetail(_JournalEntryFields):
     ``default_currency_amount``, ``account_ids`` (a JSON array of account ids as text,
     ``["33","4","42"]``, kept as sent) and ``items_index`` (the lines' texts as one
     search string).
+
+    The endpoint wrapper's read model, faithful to upstream (ADR-0003): ``associates``
+    are ``PersonDetail`` records, ``ssn`` and ``iban`` included; what
+    ``get_journal_entry`` returns is ``JournalEntryDetailProjection`` (ADR-0017).
     """
 
-    nr: str | None = None
-    items: list[JournalItem] = Field(default_factory=list)
-    rows: list[JournalRow] = Field(default_factory=list)
     associates: list[PersonDetail] = Field(default_factory=list)
-    attachments: list[JsonValue] = Field(default_factory=list)
-    allocations: list[JsonValue] = Field(default_factory=list)
-    taxed_items: list[JsonValue] = Field(default_factory=list, validation_alias="taxedItems")
-    taxed: bool
-    default_currency_amount: Decimal | None = Field(
-        default=None, validation_alias="defaultCurrencyAmount"
-    )
-    account_ids: str | None = Field(default=None, validation_alias="accountIds")
-    items_index: str | None = Field(default=None, validation_alias="itemsIndex")
-    recurrence_id: JsonValue = Field(default=None, validation_alias="recurrenceId")
+
+
+class JournalEntryDetailProjection(_JournalEntryDetailFields):
+    """One journal entry as ``get_journal_entry`` returns it, its persons projected.
+
+    ``JournalEntryDetail`` with ``associates`` as ``PersonDetailProjection`` records,
+    without ``ssn`` and ``iban`` (ADR-0017, conventions §3). Every other field is
+    ``JournalEntryDetail``'s, under the same name and type; built with
+    ``UpstreamModel.project``.
+    """
+
+    associates: list[PersonDetailProjection] = Field(default_factory=list)
 
 
 class OrderItem(UpstreamModel):
@@ -1550,11 +1630,14 @@ class WritePreview[T](UpstreamModel):
         endpoint: The operation that would be called, e.g. ``journal/create.json``.
         payload: The exact form fields upstream would receive, upstream name to encoded
             text, e.g. ``{"debitId": "3", "amount": "100.00"}``: booleans ``true`` or
-            ``false``, dates ``YYYY-MM-DD``, lists as JSON, ``custom`` as XML.
+            ``false``, dates ``YYYY-MM-DD``, lists as JSON, ``custom`` as XML. A personal
+            identifier, ``ssn`` or the ``iban`` of an item of ``bankAccounts``, shows as
+            ``REDACTED``; upstream receives the value (ADR-0017).
         before: For an update or a delete, the record as upstream holds it now, read with
-            ``read.json``; ``None`` for a create.
+            ``read.json``, as the task's projection, without ``ssn`` and ``iban``
+            (ADR-0017); ``None`` for a create.
         changes: For an update, the fields the call changes, upstream name to encoded
-            text; ``None`` otherwise.
+            text, a personal identifier as ``REDACTED``; ``None`` otherwise.
     """
 
     performed: Literal[False] = False
