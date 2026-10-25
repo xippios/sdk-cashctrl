@@ -45,6 +45,10 @@ dev = [
   "respx>=0.22",
   "anyio>=4",
   "detect-secrets>=1.5",
+  # scripts/refresh_upstream.py runs with the versions its PEP 723 block pins; these
+  # are here so that mypy --strict checks it against their own type hints.
+  "beautifulsoup4>=4.15.0",
+  "markdownify>=1.2.3",
 ]
 
 [build-system]
