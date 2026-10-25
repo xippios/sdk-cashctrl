@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-25
+
+First release. Named organisations declared in the environment, each with its own
+client, key and rate limit, on core 0.2.0's `Tenants` (ADR-0014); twelve read tasks
+over CashCtrl's ledger basics, journal, persons and orders, plus `list_organisations`,
+as MCP tools and HTTP routes; eight confirm-gated write tools for journal entries,
+persons and orders on a separate write server; fixtures and live tests against a
+synthetic demo organisation only. It depends on `xippios-core~=0.2.0` from PyPI and is
+built on sdk-template v0.2.0 and conventions 1.13. Nothing was published before, so
+the entries under Changed, Removed and Fixed record steps on the way to this release;
+a note marked superseded names what replaced one.
+
 ### Added
 
 - Scaffold from [sdk-template](https://github.com/xippios/sdk-template): configured
