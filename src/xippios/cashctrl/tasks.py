@@ -20,10 +20,12 @@ valid values for every parameter. ``/add-endpoint`` walks through the whole reci
 ``meta.tenant`` the organisation the data came from, by name (ADR-0014), and
 ``meta.request`` holds ``org`` plus the query parameters sent, under upstream's names.
 CashCtrl publishes no release time or identifier, so ``published_at`` and ``vintage``
-stay empty. The persons a task returns are projections without the personal identifiers
-``ssn`` and ``iban`` (ADR-0017, ``_person`` and its neighbours); the endpoint wrappers'
-read models keep them. Every list task sets ``meta.total`` to upstream's ``total``, its count of the
+stay empty. Every list task sets ``meta.total`` to upstream's ``total``, its count of the
 records matching the request (ADR-0012); it is never computed from ``len(data)``.
+
+The persons a task returns are projections without the personal identifiers ``ssn`` and
+``iban`` (ADR-0017, ``_person`` and its neighbours); the endpoint wrappers' read models
+keep them.
 
 The journal, person and order lists page by offset (``start``, ``limit``), resolved once
 in ``_offset_pages`` (conventions §4). With ``limit`` the task sends one request,
