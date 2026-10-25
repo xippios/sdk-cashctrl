@@ -35,7 +35,8 @@ label, lower-cased) as the subdomain's check.
   rebuilt when one of its variables changes (the key included). An undeclared name is an
   `InvalidRequestError` listing the declared ones ("unknown tenant"); a malformed
   `CASHCTRL_ORGS` or a missing or malformed subdomain is a `ConfigError` naming the
-  variable, never its value.
+  variable, never its value, a malformed subdomain with what it should hold
+  (`Tenants(hints=...)`).
 - `TENANTS.names()` reads `CASHCTRL_ORGS` (comma-separated, `^[a-z0-9_]+$`) on every call
   and appends `demo` when `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY` are both
   set. `list_organisations` (core's `list_task`, the tool `cashctrl_list_organisations`)
@@ -88,12 +89,13 @@ public.
 
 ## Rate limit (ADR-0010)
 
-Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 waits for core's quota helper.
+Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 is deliberately not applied.
 
-1. **Pace.** 60 requests per minute per organisation, one token bucket per client
-   (`RATE_LIMIT` in `_client.py`). The pace is self-imposed: CashCtrl documents no
-   per-second or per-minute limit, only a 429 ("We recommend adding delays between your
-   requests", `docs/upstream/error-handling.md`).
+1. **Pace.** 60 requests per minute per organisation with a burst of 1, one request at
+   a time and then one a second, one token bucket per client (`RATE_LIMIT` in
+   `_client.py`). The pace is self-imposed: CashCtrl documents no per-second or
+   per-minute limit, only a 429 ("We recommend adding delays between your requests",
+   `docs/upstream/error-handling.md`).
 2. **Quotas.** No longer-window quota is documented, so nothing is rationed.
 3. **A spent limit.** A 429 becomes `RateLimitError` through core's status mapping inside
    `classify`, with `retry_after` from `Retry-After` when upstream sends it; retries
@@ -101,7 +103,14 @@ Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 waits for core's quo
    (`tests/test_errors.py`). CashCtrl documents no fallback, and every answer carries
    `x-cashctrl-requests-left` (299 on every answer observed on 2026-10-23, a 401
    included) with an unknown window and scope, so it is not read.
-4. **No firing into a spent quota** waits for the core helper ADR-0010 announces.
+4. **No firing into a spent quota** is deliberately not applied: no `QuotaPolicy` is
+   installed (decided by Johannes on 2026-10-25). Core's `QuotaPolicy` (ADR-0015) keeps
+   a long-window quota, and CashCtrl documents none, nor a window for
+   `x-cashctrl-requests-left`; its 429 asks only for delays, a pace refusal. With no
+   window to give it, a policy would take its default of an hour and turn one 429
+   without `Retry-After` into an hour of refusals once a call's retries are spent. A
+   429 stays `RateLimitError`, with `Retry-After` when upstream sends it, and the
+   self-imposed pace stands.
 5. **Pauses are stated** by core's adapters: `error: RateLimitError: ... (retry after N s)`
    over MCP, a 429 problem with `retry_after` and `Retry-After` over HTTP.
 
@@ -150,7 +159,8 @@ src/xippios/cashctrl/
                    never edited by hand
   reference/       documented value sets plus README with provenance; never tenant data
 scripts/
-  refresh_reference.py   stub until a documented value set is needed (refresh-reference-data)
+  refresh_reference.py   stub until a documented value set is needed (refresh-reference-data);
+                         --render-only renders enums.py from reference/ without a request
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
   record_fixture.py      records one exchange with the demo organisation; core's Scrub plus e-mails, API tags, tokens
   seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md)
@@ -159,14 +169,15 @@ tests/
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
   test_tasks.py    structural checks on every task plus per-task replay tests
   test_tasks_write.py  the write tasks: previews send nothing, writes replay, updates fail closed
-  test_adapters.py the adapters expose exactly tasks.__all__
+  test_adapters.py the adapters expose exactly tasks.__all__; core's assert_write_tools
   test_layout.py   namespace levels stay empty; py.typed ships
   test_registry.py organisation declaration, lookup and per-organisation clients
+  test_key_resolution.py  keys resolved as in production: placeholder_api_key pins nothing
   test_errors.py   classify, RequestRejected and the recorded refusals
   test_org_lock.py the --org lock, driven through core's mcp_call_text (an in-process MCP client)
   test_record_fixture.py  the recorder never writes the demo host or key
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
-  test_refresh_reference.py  nothing is packaged; the refresh script is a stub
+  test_refresh_reference.py  nothing is packaged; the stub refuses, --render-only reproduces enums.py
   test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
 docs/upstream/     documentation snapshot and FETCHED.md
 docs/demo-org.md   the synthetic demo organisation: why, how to create and seed it, its books
