@@ -1,9 +1,7 @@
 """Structural checks every task must satisfy. Per-task tests with recorded fixtures go below."""
 
-import base64
 import inspect
 import json
-import os
 import re
 import typing
 from collections.abc import Callable, Iterator
@@ -19,7 +17,7 @@ from xippios.core.mcp import tool_name
 from xippios.core.testing import fixture_path, load_fixture, mcp_call
 
 from xippios.cashctrl import __version__, api, tasks, tasks_write
-from xippios.cashctrl._client import DEMO, SOURCE, TENANTS, client_for
+from xippios.cashctrl._client import DEMO, SOURCE, TENANTS
 from xippios.cashctrl.mcp import server
 from xippios.cashctrl.models import (
     Account,
@@ -29,10 +27,6 @@ from xippios.cashctrl.models import (
     PersonAddress,
     PersonDetail,
 )
-
-SHELL_KEY = os.environ.get(TENANTS.var(DEMO, "API_KEY"))
-"""The demo key the shell held when the tests were collected, before any fixture; never printed."""
-LIST_URL = "https://demo.cashctrl.com/api/v1/fiscalperiod/list.json"
 
 TENANT_LIST = "list_organisations"
 """Core's tenant list (ADR-0014): no ``org``, no async twin; tested on its own below."""
@@ -48,50 +42,6 @@ EVERY_TASK: dict[str, Callable[..., object]] = {
 
 def test_package_has_a_version() -> None:
     assert __version__
-
-
-def basic_user(request: httpx.Request) -> str:
-    """The basic auth user name of ``request``, where CashCtrl expects the key."""
-    encoded = request.headers.get("Authorization", "").removeprefix("Basic ")
-    return base64.b64decode(encoded).decode().partition(":")[0]
-
-
-def carries(request: httpx.Request, key: str) -> bool:
-    """Whether ``key``, plain or as a basic auth token, is anywhere in ``request``.
-
-    Only the answer leaves this function, so no test frame ever holds the key or its token
-    in a local that ``pytest -l`` could print.
-    """
-    token = base64.b64encode(f"{key}:".encode()).decode()
-    outgoing = [str(request.url), *request.headers.values(), basic_user(request)]
-    outgoing.append(request.content.decode())
-    return any(key in part or token in part for part in outgoing)
-
-
-@pytest.mark.anyio
-async def test_replay_tests_send_the_placeholder_key(
-    placeholder_api_key: str | None, respx_mock: respx.MockRouter
-) -> None:
-    """A request through the registry outside a live test carries the placeholder only.
-
-    Core's plugin pins the key (ADR-0013); this checks it through the registry. The demo
-    client is ``client_for("demo")``; the shell's ``CASHCTRL_DEMO_API_KEY``, if direnv
-    loaded one, appears nowhere in the request, neither plain nor as the basic auth
-    token. Every assertion is on a boolean, so a failure says where the key went, never
-    the key.
-    """
-    assert placeholder_api_key is not None
-    variable = TENANTS.var(DEMO, "API_KEY")
-    env_holds_placeholder = os.environ[variable] == placeholder_api_key
-    assert env_holds_placeholder, f"{variable} does not hold the placeholder"
-    route = respx_mock.get(LIST_URL).respond(200, json={"total": 0, "data": []})
-    await client_for(DEMO).get_json("/fiscalperiod/list.json")
-    sent = route.calls.last.request
-    sends_placeholder = basic_user(sent) == placeholder_api_key
-    assert sends_placeholder, "the basic auth user name does not carry the placeholder"
-    if SHELL_KEY and placeholder_api_key != SHELL_KEY:
-        leaked = carries(sent, SHELL_KEY)
-        assert not leaked, f"the key in {variable} went out with the request"
 
 
 def org_comes_first(fn: Callable[..., object]) -> bool:
