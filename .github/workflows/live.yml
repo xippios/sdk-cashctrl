@@ -3,7 +3,10 @@
 # The write tests run too: they act only on data kept for testing and clean up after
 # themselves.
 # Rendered by the template (the one workflow that is): the secret it names is the source's
-# key variable, and its start time derives from the slug.
+# key variable, and its start time derives from the slug. Edited by hand for the
+# organisation model (ADR-0014): the live tests reach the reserved demo organisation only,
+# declared by CASHCTRL_DEMO_SUBDOMAIN and CASHCTRL_DEMO_API_KEY, so those two org secrets
+# replace the rendered CASHCTRL_API_KEY, which nothing reads; CASHCTRL_ORGS is never set.
 name: Live
 
 on:
@@ -27,8 +30,9 @@ jobs:
           enable-cache: true
       - run: uv sync --all-extras --frozen
       - run: uv run pytest -m live
-        # The key, from the org secret, for this step only: checkout, setup-uv and uv sync
-        # never see it.
+        # The demo organisation's pair, from the org secrets, for this step only: checkout,
+        # setup-uv and uv sync never see it.
         env:
           XIPPIOS_LIVE_TESTS: "1"
-          CASHCTRL_API_KEY: ${{ secrets.CASHCTRL_API_KEY }}
+          CASHCTRL_DEMO_SUBDOMAIN: ${{ secrets.CASHCTRL_DEMO_SUBDOMAIN }}
+          CASHCTRL_DEMO_API_KEY: ${{ secrets.CASHCTRL_DEMO_API_KEY }}

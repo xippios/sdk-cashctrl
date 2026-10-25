@@ -57,7 +57,9 @@ reviewer's `ready`, and a release tag is not part of an adoption.
    resolution defines a `placeholder_api_key` fixture that pins nothing; a test that must
    reach the network is marked `network` (ADR-0013, ADR-0015).
    `xippios_placeholder_key_envs` under `[tool.pytest.ini_options]` names
-   `CASHCTRL_API_KEY`, and `tests/conftest.py` keeps no placeholder fixture of its own.
+   `CASHCTRL_DEMO_API_KEY`, the demo organisation's key (the scaffold's `CASHCTRL_API_KEY`
+   is never read, ADR-0014), and `tests/conftest.py` keeps no placeholder fixture of its
+   own.
 
 7. **Item 6: generated enums.** Re-render `enums.py` once with the release's renderers
    from the packaged lists, `uv run python scripts/refresh_reference.py --render-only`
