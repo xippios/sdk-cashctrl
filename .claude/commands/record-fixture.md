@@ -52,14 +52,19 @@ writes nothing and exits non-zero:
   case, at the start of a word or after a JSON escape. The final check refuses any other
   tag in any case and position, in the text and in the body's decoded strings, and the
   key's first four characters on their own as a possible key prefix.
-- **No token-like fields.** The text value of every body field named `hash`, `token`,
-  `secret` or `apiKey` (`api_key`, `api-key`), in any case and at any depth, becomes
-  `REDACTED`. `order/read.json` sends `hash`, an undocumented 32-character text that may
-  be the token of a public link to the order document (observed on 2026-10-23, not
-  verified); the others were never seen. The final check refuses any value under such
-  a name but `null` or `REDACTED`, whatever its type or shape (text behind an escaped
-  field name, a number, an array, an object). A compound name (`publicHash`) is not
-  scrubbed; `hash` is a key-like word, so the file is written for review.
+- **No token-like fields and no personal identifiers.** The text value of every body
+  field named `hash`, `token`, `secret` or `apiKey` (`api_key`, `api-key`), and of every
+  field named `ssn` or `iban`, the personal identifiers this package keeps out of its
+  projections (ADR-0017), in any case and at any depth, becomes `REDACTED`.
+  `order/read.json` sends `hash`, an undocumented 32-character text that may be the token
+  of a public link to the order document (observed on 2026-10-23, not verified);
+  `person/list.json` sends `ssn` and `iban`, only ever seen `null`; the others were never
+  seen. The final check refuses any value under such a name but `null` or `REDACTED`,
+  whatever its type or shape (text behind an escaped field name, a number, an array, an
+  object), in the response body and in a write's form body, a JSON form value such as
+  `bankAccounts` included: a write that sends `ssn` or an `iban` is not recorded. A
+  compound name (`publicHash`) is not scrubbed; `hash` is a key-like word, so the file is
+  written for review.
 
 1. The demo pair comes from direnv in `~/github/sdk`. Confirm it without printing it:
    `direnv exec ~/github/sdk sh -c '[ -n "$CASHCTRL_DEMO_SUBDOMAIN" ] && [ -n "$CASHCTRL_DEMO_API_KEY" ] && echo ok'`.
@@ -87,7 +92,8 @@ writes nothing and exits non-zero:
    fixture still holding either refused), replaces every e-mail address with
    `user@example.com`, every API user tag in `createdBy` and `lastUpdatedBy` with
    `API:REDACTED` and the value of every token-like field (`hash`, `token`, `secret`,
-   `apiKey`) with `REDACTED`, checks it, and only then writes
+   `apiKey`) and personal identifier (`ssn`, `iban`) with `REDACTED`, checks it, and only
+   then writes
    `tests/fixtures/<endpoint>/<case>.json` (`account/read.json` becomes `account_read/`).
    It prints only the status and that URL. `--wrong-key` sends an invalid key instead of
    the real one, to record a 401.
@@ -112,12 +118,19 @@ writes nothing and exits non-zero:
    grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' tests/fixtures | sort -u
    direnv exec ~/github/sdk sh -c 'git grep -n --untracked -i -- "$CASHCTRL_DEMO_SUBDOMAIN" >/dev/null && echo LEAK || echo clean'
    grep -rhoiE '(hash|token|secret|api[_-]?key)\\?": *\\?"[^"\\]*' tests/fixtures | sort -u
+   grep -rhoiE '\\?"(ssn|iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
+   grep -rhoiE '(ssn=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
    ```
 
    The first prints nothing but `REDACTED` values (and the README's own example line);
    the second prints `user@example.com` and nothing else; the third prints `clean`.
    `grep -rhoiE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u` prints `API:REDACTED` at
-   most. The fourth grep prints `REDACTED` values only.
+   most. The fourth grep prints `REDACTED` values only. The last two count, without
+   printing them, the values of `ssn` and `iban`, the personal identifiers this package
+   keeps out of its projections (ADR-0017), that are neither `null` nor `REDACTED`, in
+   the JSON bodies and in a write's form body (`ssn=`, and `iban` inside the
+   percent-encoded `bankAccounts`); both print `0`. A real value found means the file is
+   deleted, never committed.
 6. Keep the fixture small enough to review, well under 40 KB (`limit=`, a filter, a
    query): prefer the narrowest query that shows the shape. The default chart of
    accounts (139 accounts) is too large for one fixture; narrow `account/list.json`.
