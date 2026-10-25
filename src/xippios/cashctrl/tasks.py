@@ -23,6 +23,10 @@ CashCtrl publishes no release time or identifier, so ``published_at`` and ``vint
 stay empty. Every list task sets ``meta.total`` to upstream's ``total``, its count of the
 records matching the request (ADR-0012); it is never computed from ``len(data)``.
 
+The persons a task returns are projections without the personal identifiers ``ssn`` and
+``iban`` (ADR-0017, ``_person`` and its neighbours); the endpoint wrappers' read models
+keep them.
+
 The journal, person and order lists page by offset (``start``, ``limit``), resolved once
 in ``_offset_pages`` (conventions §4). With ``limit`` the task sends one request,
 ``start`` (default 0) and ``limit``, and returns that page; ``meta.total`` tells the
@@ -40,7 +44,7 @@ collect the same records again.
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, TypeGuard, get_args
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from pydantic_core import ErrorDetails
 from xippios.core import (
     InvalidRequestError,
@@ -64,6 +68,7 @@ from xippios.cashctrl.models import (
     FiscalPeriod,
     JournalEntry,
     JournalEntryDetail,
+    JournalEntryDetailProjection,
     ListResponse,
     Order,
     OrderCategory,
@@ -71,6 +76,8 @@ from xippios.cashctrl.models import (
     OrderType,
     Person,
     PersonDetail,
+    PersonDetailProjection,
+    PersonProjection,
     TaxCode,
 )
 
@@ -115,6 +122,30 @@ def _meta(
         total=total,
         tenant=org,
     )
+
+
+def _without_iban(account: JsonValue) -> JsonValue:
+    """One item of ``bankAccounts`` without its ``iban``; any other key is kept as sent."""
+    if isinstance(account, dict):
+        return {key: value for key, value in account.items() if key.lower() != "iban"}
+    return account
+
+
+def _person(person: Person) -> PersonProjection:
+    """A ``person/list.json`` entry without ``ssn`` and ``iban`` (ADR-0017)."""
+    return PersonProjection.project(person)
+
+
+def _person_detail(person: PersonDetail) -> PersonDetailProjection:
+    """A ``person/read.json`` record without ``ssn`` and its bank accounts' ``iban`` (ADR-0017)."""
+    accounts = [_without_iban(account) for account in person.bank_accounts]
+    return PersonDetailProjection.project(person, bank_accounts=accounts)
+
+
+def _journal_entry_detail(entry: JournalEntryDetail) -> JournalEntryDetailProjection:
+    """A ``journal/read.json`` record whose ``associates`` are projected (ADR-0017)."""
+    associates = [_person_detail(person) for person in entry.associates]
+    return JournalEntryDetailProjection.project(entry, associates=associates)
 
 
 async def _offset_pages[T](
@@ -484,7 +515,7 @@ async def list_journal_entries_async(
     return Result(data=entries, meta=meta)
 
 
-async def get_journal_entry_async(org: str, id: int) -> Result[JournalEntryDetail]:
+async def get_journal_entry_async(org: str, id: int) -> Result[JournalEntryDetailProjection]:
     """Read one journal entry by its id, with its lines, bookings and partners.
 
     The entry comes back as upstream's read returns it: ``date_added``, ``title``,
@@ -492,14 +523,14 @@ async def get_journal_entry_async(org: str, id: int) -> Result[JournalEntryDetai
     lists: ``items``, the lines of a collective entry (each with ``account_id``,
     ``debit`` or ``credit``, ``description`` and ``associate_id``; empty for a simple
     entry), ``rows``, the bookings per account with tax rows apart (``is_tax``), and
-    ``associates``, the full records of the persons the entry names. An id no entry has
-    raises ``NotFoundError``.
+    ``associates``, the records of the persons the entry names, as ``get_person`` returns
+    them, without ``ssn`` and ``iban``. An id no entry has raises ``NotFoundError``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The entry's ``id`` as ``list_journal_entries`` gives it, e.g. ``11``.
     """
-    entry = await api.journal_read(org, id)
+    entry = _journal_entry_detail(await api.journal_read(org, id))
     return Result(data=entry, meta=_meta(org, "journal/read.json", {"id": id}))
 
 
@@ -523,7 +554,7 @@ async def list_persons_async(
     dir: Direction | None = None,
     start: int = 0,
     limit: int | None = None,
-) -> Result[list[Person]]:
+) -> Result[list[PersonProjection]]:
     """List an organisation's persons, its customers, vendors and other contacts, by name.
 
     Every person comes back with its ``name``, ``nr`` (e.g. ``P-00001``), ``company``,
@@ -532,7 +563,7 @@ async def list_persons_async(
     ``category_name``, ``is_inactive``, the main address flattened (``address``,
     ``zip``, ``city``, ``country``) and ``email_work``. CashCtrl creates insurance
     records of its own (``is_insurance``). Addresses and contacts in full come from
-    ``get_person``.
+    ``get_person``. The personal identifiers ``ssn`` and ``iban`` are left out.
 
     Paging: with ``limit``, one page of at most ``limit`` persons from ``start``; without
     it, every matching person from ``start`` on. ``meta.total`` is upstream's count of
@@ -598,10 +629,10 @@ async def list_persons_async(
     persons, total = await _offset_pages(page, start=start, limit=limit)
     sent = api.person_list_params(**arguments, start=start, limit=limit)
     meta = _meta(org, "person/list.json", sent, total=total)
-    return Result(data=persons, meta=meta)
+    return Result(data=[_person(person) for person in persons], meta=meta)
 
 
-async def get_person_async(org: str, id: int) -> Result[PersonDetail]:
+async def get_person_async(org: str, id: int) -> Result[PersonDetailProjection]:
     """Read one person by its id, with its addresses and contacts.
 
     The person comes back as upstream's read returns it: ``name``, ``nr``, ``company``,
@@ -610,7 +641,8 @@ async def get_person_async(org: str, id: int) -> Result[PersonDetail]:
     (each with ``type`` such as ``MAIN``, ``address``, ``zip``, ``city``, ``country``)
     and ``contacts`` (each with ``type`` such as ``EMAIL_WORK`` and ``address``, the
     e-mail address, phone number or URL itself). Fields without a value are left out by
-    upstream and come back empty. An id no person has raises ``NotFoundError``; that
+    upstream and come back empty. The personal identifiers ``ssn`` and each bank
+    account's ``iban`` are left out. An id no person has raises ``NotFoundError``; that
     answer is assumed for persons, observed for accounts, currencies and the journal.
 
     Args:
@@ -618,7 +650,7 @@ async def get_person_async(org: str, id: int) -> Result[PersonDetail]:
         id: The person's ``id`` as ``list_persons`` gives it, e.g. ``3``; not its
             number ``nr``.
     """
-    person = await api.person_read(org, id)
+    person = _person_detail(await api.person_read(org, id))
     return Result(data=person, meta=_meta(org, "person/read.json", {"id": id}))
 
 

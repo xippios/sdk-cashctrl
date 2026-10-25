@@ -246,6 +246,41 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Adopted xippios-core 0.2.0, sdk-template v0.2.0 and conventions 1.13 (conventions §15).
+  - `xippios-core~=0.2.0` from PyPI, and its `mcp`, `http` and `testing` extras
+    likewise: one core minor (conventions §12, ADR-0018). The git pin of sdk-core
+    `863a443` is gone, `core_git_ref` is empty, and the pin's
+    `# pragma: allowlist secret` with it.
+  - Personal identifiers stay out of what the tasks return (ADR-0017, decided by
+    Johannes on 2026-10-25: `ssn` and `iban`). `list_persons`, `get_person` and
+    `get_journal_entry` return `PersonProjection`, `PersonDetailProjection` and
+    `JournalEntryDetailProjection`: no `ssn`, no `iban`, and each bank account without
+    its `iban`, its other keys kept. The endpoint wrappers' `Person`, `PersonDetail`
+    and `JournalEntryDetail` keep both. A write preview's `before` is the projection;
+    `create_person` and `update_person` send `ssn` and an `iban` as given, but a
+    preview's `payload` and `changes` and a performed write's `meta.request` show
+    `REDACTED` (a cleared `ssn` shows empty). The recorder rewrites both to `REDACTED`
+    by name and refuses a write that sends either, inside a JSON form value too; the
+    fixture grep counts their values.
+  - The pace keeps 60 requests per minute and gets a burst of 1, where it allowed 60 at
+    once (ADR-0010 decision 1). No `QuotaPolicy` is installed: CashCtrl documents no
+    quota and no window (CLAUDE.md, Rate limit). A malformed
+    `CASHCTRL_<NAME>_SUBDOMAIN` is refused with what it should hold (`Tenants(hints=)`).
+  - `test_replay_tests_send_the_placeholder_key` and its helpers are gone: core's plugin
+    pins the key on every auth object and proves it (ADR-0013). The key-resolution test
+    moved to `tests/test_key_resolution.py`, whose module-level `placeholder_api_key`
+    pins nothing.
+  - From the template: `/adopt-release`; the nightly `.github/workflows/live.yml`, its
+    pytest step given `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY` instead of
+    the rendered `CASHCTRL_API_KEY`; pre-commit in CI; `publish.yml` refusing a
+    git-pinned core; an sdist without tests; `MCP_CAPS` passed through by both servers
+    (none set); `mypy --strict` over `scripts/`, with beautifulsoup4 and markdownify in
+    the dev group for `refresh_upstream.py`; `scripts/refresh_reference.py
+    --render-only`, and `enums.py` re-rendered with it (its first line); the command
+    texts and CLAUDE.md rows that go with them.
+  - `scripts/refresh_upstream.py` writes `Fetched` as the UTC time with `Z` and a note
+    per file kept with HTML tables (conventions §3); the committed `FETCHED.md` keeps
+    the date of the first fetch until the next refresh.
 - Write tools, after the wave 2 review (decided by Johannes on 2026-10-24):
   - `clear` on a flag (`is_customer`, `is_inactive` and the other boolean update
     parameters of `update_person`) sends `false`, and the preview's `changes` shows
@@ -279,7 +314,8 @@ All notable changes to this project are documented here. The format follows
   let core 0.1.0 back in, which has none of these, names the tenant host in status error
   messages and ignores `total`, so the same change raises `xippios-core` and its three
   extras to `>=0.2.0` and deletes the pin's `# pragma: allowlist secret` comment by hand.
-  The bound cannot be raised yet: core main still reports 0.1.0.
+  The bound cannot be raised yet: core main still reports 0.1.0 (superseded: core 0.2.0
+  from PyPI, `~=0.2.0`, see the adoption above).
 - Adopted from that core: status error messages name the method and the path, never the
   host (`404 from GET /api/v1/account/nope.json: ...`, sdk-core#14), so `classify` no
   longer rewrites the request URL; it still hands core a copy of the response whose body

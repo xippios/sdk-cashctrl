@@ -18,13 +18,13 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "xippios-core>=0.1.0",
+  "xippios-core~=0.2.0",
 ]
 
 [project.optional-dependencies]
-mcp = ["xippios-core[mcp]>=0.1.0"]
-http = ["xippios-core[http]>=0.1.0"]
-testing = ["xippios-core[testing]>=0.1.0"]
+mcp = ["xippios-core[mcp]~=0.2.0"]
+http = ["xippios-core[http]~=0.2.0"]
+testing = ["xippios-core[testing]~=0.2.0"]
 
 [project.scripts]
 xippios-cashctrl-mcp = "xippios.cashctrl.mcp:run"
@@ -45,12 +45,11 @@ dev = [
   "respx>=0.22",
   "anyio>=4",
   "detect-secrets>=1.5",
+  # scripts/refresh_upstream.py runs with the versions its PEP 723 block pins; these
+  # are here so that mypy --strict checks it against their own type hints.
+  "beautifulsoup4>=4.15.0",
+  "markdownify>=1.2.3",
 ]
-
-[tool.uv.sources]
-# Development only: xippios-core from git until it is on PyPI. Remove this block
-# (re-run copier with core_git_ref="") once the published package is available.
-xippios-core = { git = "https://github.com/xippios/sdk-core.git", rev = "863a443a15b2e8c8123b15e3f3dd28df104d7d1e" }  # pragma: allowlist secret (a commit SHA)
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -60,7 +59,9 @@ build-backend = "hatchling.build"
 packages = ["src/xippios"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE"]
+# Anchored: hatch reads gitignore-style patterns, so a bare README.md would match
+# tests/fixtures/README.md as well. The sdist ships no tests; they live in the repository.
+include = ["/src", "/docs", "/README.md", "/CHANGELOG.md", "/LICENSE"]
 
 [tool.ruff]
 line-length = 100
@@ -93,7 +94,7 @@ quote-style = "double"
 strict = true
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 mypy_path = "src"
 namespace_packages = true
 explicit_package_bases = true
@@ -102,5 +103,6 @@ warn_unreachable = true
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers --import-mode=importlib"
 testpaths = ["tests"]
-# Core's plugin sets these to its placeholder key in every test not marked live (ADR-0013).
+# Core's plugin sets it to the placeholder key in every test not marked live (ADR-0013).
+# The demo organisation's key: the scaffold's CASHCTRL_API_KEY is never read (ADR-0014).
 xippios_placeholder_key_envs = ["CASHCTRL_DEMO_API_KEY"]

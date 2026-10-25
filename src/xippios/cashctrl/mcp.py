@@ -29,6 +29,7 @@ def build(tenant_lock: TenantLock | None = None) -> MCPServer:
         [getattr(tasks, name) for name in tasks.__all__],
         version=__version__,
         instructions=INSTRUCTIONS,
+        caps=getattr(tasks, "MCP_CAPS", None),
         tenant_lock=tenant_lock,
     )
 

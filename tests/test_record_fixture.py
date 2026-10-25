@@ -520,8 +520,13 @@ def test_a_form_body_keeps_its_percent_escapes_around_an_address(recorder: Modul
         ("createdBy=API%3AZZZZ", "an API user tag other than API:REDACTED"),
         (f"notes={REAL}", f"the value of {TENANTS.var(DEMO, 'SUBDOMAIN')}"),
         ("token=abc", "a value other than null or REDACTED under token"),
+        ("ssn=756.0000.0000.00", "a value other than null or REDACTED under ssn"),
+        (
+            "bankAccounts=%5B%7B%22iban%22%3A%22CH00TEST%22%2C%22type%22%3A%22DEFAULT%22%7D%5D",
+            "a value other than null or REDACTED under iban",
+        ),
     ],
-    ids=["address", "address-in-json", "api-tag", "subdomain", "token-field"],
+    ids=["address", "address-in-json", "api-tag", "subdomain", "token-field", "ssn", "iban"],
 )
 def test_the_final_check_covers_the_request_body(
     recorder: ModuleType, body: str, leak: str
@@ -863,6 +868,53 @@ def test_other_token_like_fields_are_redacted(
     assert "value" not in out.replace("REDACTED", "")
 
 
+def test_personal_identifiers_become_redacted(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``ssn`` and ``iban`` by name, at any depth (ADR-0017); scrubbed, they need no review."""
+    person = {
+        "id": 3,
+        "ssn": "756.0000.0000.00",
+        "iban": "CH00TEST",
+        "bankAccounts": [{"iban": "CH00TEST", "type": "DEFAULT"}],
+        "title": None,
+    }
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/person/read.json")
+    route.mock(return_value=httpx.Response(200, json={"success": True, "data": person}))
+    assert recorder.main(["person/read.json", "identifiers", "id=3"]) == 0
+    text = (tmp_path / "tests" / "fixtures" / "person_read" / "identifiers.json").read_text()
+    assert "756.0000" not in text
+    assert "CH00TEST" not in text
+    written = json.loads(json.loads(text)["response"]["body"])["data"]
+    assert (written["ssn"], written["iban"], written["bankAccounts"]) == (
+        "REDACTED",
+        "REDACTED",
+        [{"iban": "REDACTED", "type": "DEFAULT"}],
+    )
+    assert "review" not in capsys.readouterr().out
+
+
+def test_a_write_that_sends_an_identifier_is_not_recorded(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The form body is checked field by field and inside its JSON values: nothing is written."""
+    route = respx_mock.post(f"https://{REAL}.cashctrl.com/api/v1/person/create.json")
+    route.mock(return_value=httpx.Response(200, json={"success": True, "insertId": 15}))
+    accounts = json.dumps([{"iban": "CH00TEST", "type": "DEFAULT"}])
+    pairs = ["company=xippios-live AG", f"bankAccounts={accounts}"]
+    assert recorder.main(["person/create.json", "ok", "--method", "POST", *pairs]) == 1
+    assert not (tmp_path / "tests" / "fixtures" / "person_create").exists()
+    out = capsys.readouterr().out
+    assert "a value other than null or REDACTED under iban" in out
+    assert "CH00TEST" not in out
+
+
 ESCAPED_40 = "Xy" * 20  # 40 characters, longer than the observed hash
 
 
@@ -931,8 +983,11 @@ def test_a_compound_name_goes_to_review(
         ({"apiKey": 1}, True),
         ({"hash": ["REDACTED"]}, True),
         ({"token": {}}, True),
+        ({"ssn": "756.0000.0000.00"}, True),
+        ({"data": {"bankAccounts": [{"IBAN": "CH00TEST"}]}}, True),
         ({"hash": "REDACTED"}, False),
         ({"hash": None}, False),
+        ({"ssn": None, "iban": "REDACTED"}, False),
         ({"hashtag": TOKEN}, False),
         ({"publicHash": TOKEN}, False),
     ],
@@ -946,8 +1001,11 @@ def test_a_compound_name_goes_to_review(
         "number",
         "array",
         "object",
+        "ssn",
+        "nested-iban",
         "scrubbed",
         "null",
+        "identifiers-settled",
         "other-name",
         "compound-name",
     ],

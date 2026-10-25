@@ -43,8 +43,10 @@ from xippios.cashctrl._client import DEMO, TENANTS, client_for
 from xippios.cashctrl.models import (
     Filter,
     JournalEntryDetail,
+    JournalEntryDetailProjection,
     OrderCategory,
     PersonDetail,
+    PersonDetailProjection,
     WritePreview,
     WriteResult,
 )
@@ -225,6 +227,28 @@ def marked(text: str | None, nr: str | None = None) -> bool:
     return MARK in (text or "") or nr == MARK
 
 
+def journal_values(entry: JournalEntryDetailProjection) -> dict[str, Any]:
+    """The parameters ``update_journal_entry`` derives from ``entry``, as a task returned it.
+
+    The tasks return projections (ADR-0017), and ``_journal_values`` takes the read
+    model, so it is rebuilt from the projection: only its persons lack ``ssn`` and
+    ``iban``, which no journal parameter reads.
+    """
+    values, _ = tasks_write._journal_values(JournalEntryDetail.model_validate(entry.model_dump()))
+    return values
+
+
+def person_values(person: PersonDetailProjection) -> dict[str, Any]:
+    """The parameters ``update_person`` derives from ``person``, as a task returned it.
+
+    Rebuilt as the read model from the projection, which leaves out ``ssn`` and each bank
+    account's ``iban`` (ADR-0017): the test person holds neither, so ``ssn`` compares as
+    empty on both sides.
+    """
+    values, _, _ = tasks_write._person_values(PersonDetail.model_validate(person.model_dump()))
+    return values
+
+
 def derived_except(values: dict[str, Any], changed: str) -> dict[str, Any]:
     """The fields an update derives from the record, but the one the test changed."""
     return {name: value for name, value in values.items() if name != changed}
@@ -271,15 +295,15 @@ async def test_journal_entry_create_update_delete(demo_org: str, write_ids: dict
         title = f"{MARK} test updated"
         planned = await tasks_write.update_journal_entry_async(demo_org, created, title=title)
         assert isinstance(planned.data, WritePreview)
-        assert isinstance(planned.data.before, JournalEntryDetail)
-        before, _ = tasks_write._journal_values(planned.data.before)
+        assert isinstance(planned.data.before, JournalEntryDetailProjection)
+        before = journal_values(planned.data.before)
         updated = await tasks_write.update_journal_entry_async(
             demo_org, created, title=title, confirm=True
         )
         assert performed(updated).insert_id == created
         assert updated.meta.request["debitId"] == str(write_ids["bank"]), "the whole record"
         read_back = await tasks.get_journal_entry_async(demo_org, created)
-        after, _ = tasks_write._journal_values(read_back.data)
+        after = journal_values(read_back.data)
         assert after["title"] == title
         assert derived_except(after, "title") == derived_except(before, "title")
         deleted = await tasks_write.delete_journal_entry_async(demo_org, created, confirm=True)
@@ -310,15 +334,15 @@ async def test_person_create_update_delete(demo_org: str) -> None:
         assert isinstance(created, int)
         planned = await tasks_write.update_person_async(demo_org, created, department=MARK)
         assert isinstance(planned.data, WritePreview)
-        assert isinstance(planned.data.before, PersonDetail)
-        before, _, _ = tasks_write._person_values(planned.data.before)
+        assert isinstance(planned.data.before, PersonDetailProjection)
+        before = person_values(planned.data.before)
         updated = await tasks_write.update_person_async(
             demo_org, created, department=MARK, confirm=True
         )
         assert performed(updated).insert_id == created
         assert updated.meta.request["company"] == f"{MARK} Test GmbH", "the whole record"
         read_back = await tasks.get_person_async(demo_org, created)
-        after, _, _ = tasks_write._person_values(read_back.data)
+        after = person_values(read_back.data)
         assert after["department"] == MARK
         assert derived_except(after, "department") == derived_except(before, "department")
         deleted = await tasks_write.delete_person_async(demo_org, created, confirm=True)

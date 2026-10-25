@@ -12,9 +12,9 @@ that works here; the family rules it points to apply as well.
 | API base URL | `https://<subdomain>.cashctrl.com/api/v1`, one per organisation |
 | Documentation | https://app.cashctrl.com/static/help/en/api/index.html, snapshotted in `docs/upstream/` |
 | Credentials | `CASHCTRL_ORGS` names the organisations; per name `CASHCTRL_<NAME>_SUBDOMAIN` and `CASHCTRL_<NAME>_API_KEY`, the key sent as the HTTP basic user name. The reserved `demo` is declared by its own pair and never listed |
-| Rate limit | 60 requests per minute per organisation, a self-imposed pace in `_client.py` (upstream documents no limit, only a 429); ADR-0010 decisions 1, 2, 3 and 5 adopted, see Rate limit below |
+| Rate limit | 60 requests per minute per organisation, burst 1; a self-imposed pace, upstream documents none, only a 429 (ADR-0010); enforced client-side in `_client.py`, one token bucket per organisation; see Rate limit below |
 | Write tools | yes, in `tasks_write.py`, served by `xippios-cashctrl-mcp-write` |
-| Core pin | `xippios-core` from git at sdk-core `863a443` (`core_git_ref` in `.copier-answers.yml`, `[tool.uv.sources]` in `pyproject.toml`), the unreleased merge of sdk-core#17, for the tenant registry, the tenant lock and the option hooks (ADR-0014), the plugin's offline guarantees (ADR-0013), the recorder's `Scrub`, `ResultMeta.total` (ADR-0012) and `ResultMeta.tenant`, host-free error messages and the quiet request log. Decided on 2026-10-24: re-pin at core 0.2.0. This package releases only after core 0.2.0 is on PyPI. Removing the pin (`uvx copier update -d core_git_ref=`) is not enough: it would let core 0.1.0 back in, which has no `Tenants`, no `TenantLock`, no `Scrub` and no `ResultMeta.tenant`, names the tenant host in status error messages and ignores `total`. The same change raises `xippios-core` and its three extras (`mcp`, `http`, `testing`) to `>=0.2.0` in `pyproject.toml` and deletes the `# pragma: allowlist secret` comment by hand. The bound cannot be raised yet: core main still reports version 0.1.0 |
+| Core | `xippios-core~=0.2.0` from PyPI, its `mcp`, `http` and `testing` extras likewise: one core minor, adopted through conventions §15 (ADR-0018) |
 
 The snapshot in `docs/upstream/` is the reference for names, parameters and semantics.
 If it is empty or stale, run `/refresh-upstream` first and review the diff. Never write a
@@ -35,7 +35,8 @@ label, lower-cased) as the subdomain's check.
   rebuilt when one of its variables changes (the key included). An undeclared name is an
   `InvalidRequestError` listing the declared ones ("unknown tenant"); a malformed
   `CASHCTRL_ORGS` or a missing or malformed subdomain is a `ConfigError` naming the
-  variable, never its value.
+  variable, never its value, a malformed subdomain with what it should hold
+  (`Tenants(hints=...)`).
 - `TENANTS.names()` reads `CASHCTRL_ORGS` (comma-separated, `^[a-z0-9_]+$`) on every call
   and appends `demo` when `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY` are both
   set. `list_organisations` (core's `list_task`, the tool `cashctrl_list_organisations`)
@@ -77,8 +78,9 @@ Core's plugin does the rest (ADR-0013): no network outside a test marked `live` 
 organisation is synthetic: invented books seeded by `scripts/seed_demo.py` and described
 in `docs/demo-org.md`, never a copy of real books. So the recorder records any module and
 any amount; it still scrubs e-mail addresses to `user@example.com`, API user tags to
-`API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) to
-`REDACTED`, in the request body as well, and refuses any method but GET and POST, a POST
+`API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) and the
+personal identifiers `ssn` and `iban` to `REDACTED`, in the request body as well, and
+refuses any method but GET and POST, a POST
 to anything but the eight write paths, a create without the marker `xippios-live`, and
 any endpoint but `.json`. Writes against demo create a record marked `xippios-live`,
 update it and delete it again, nothing else (see Write tools). The demo subdomain is
@@ -87,12 +89,13 @@ public.
 
 ## Rate limit (ADR-0010)
 
-Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 waits for core's quota helper.
+Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 is deliberately not applied.
 
-1. **Pace.** 60 requests per minute per organisation, one token bucket per client
-   (`RATE_LIMIT` in `_client.py`). The pace is self-imposed: CashCtrl documents no
-   per-second or per-minute limit, only a 429 ("We recommend adding delays between your
-   requests", `docs/upstream/error-handling.md`).
+1. **Pace.** 60 requests per minute per organisation with a burst of 1, one request at
+   a time and then one a second, one token bucket per client (`RATE_LIMIT` in
+   `_client.py`). The pace is self-imposed: CashCtrl documents no per-second or
+   per-minute limit, only a 429 ("We recommend adding delays between your requests",
+   `docs/upstream/error-handling.md`).
 2. **Quotas.** No longer-window quota is documented, so nothing is rationed.
 3. **A spent limit.** A 429 becomes `RateLimitError` through core's status mapping inside
    `classify`, with `retry_after` from `Retry-After` when upstream sends it; retries
@@ -100,7 +103,14 @@ Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 waits for core's quo
    (`tests/test_errors.py`). CashCtrl documents no fallback, and every answer carries
    `x-cashctrl-requests-left` (299 on every answer observed on 2026-10-23, a 401
    included) with an unknown window and scope, so it is not read.
-4. **No firing into a spent quota** waits for the core helper ADR-0010 announces.
+4. **No firing into a spent quota** is deliberately not applied: no `QuotaPolicy` is
+   installed (decided by Johannes on 2026-10-25). Core's `QuotaPolicy` (ADR-0015) keeps
+   a long-window quota, and CashCtrl documents none, nor a window for
+   `x-cashctrl-requests-left`; its 429 asks only for delays, a pace refusal. With no
+   window to give it, a policy would take its default of an hour and turn one 429
+   without `Retry-After` into an hour of refusals once a call's retries are spent. A
+   429 stays `RateLimitError`, with `Retry-After` when upstream sends it, and the
+   self-imposed pace stands.
 5. **Pauses are stated** by core's adapters: `error: RateLimitError: ... (retry after N s)`
    over MCP, a 429 problem with `retry_after` and `Retry-After` over HTTP.
 
@@ -111,6 +121,8 @@ Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 waits for core's quo
    (also at https://github.com/xippios/sdk-core/tree/main/docs)
 3. `../sdk-core/docs/definition-of-done.md`: what a PR must satisfy
 4. The family file `../CLAUDE.md`
+5. When a new core minor or template release comes: conventions §15, the adoption
+   checklist, which `/adopt-release` walks
 
 ## The one rule: three layers (ADR-0001)
 
@@ -133,18 +145,22 @@ src/xippios/cashctrl/
   _client.py       organisation registry: TENANTS (core's Tenants), client_for(org), classify
   _cli.py          --org for both MCP servers: core's TenantLock through main's option hooks
   errors.py        RequestRejected (HTTP 200 with success:false) and FieldError
-  models.py        pydantic models mirroring upstream payloads (UpstreamModel)
+  models.py        pydantic models mirroring upstream payloads (UpstreamModel), and the
+                   projections tasks return without ssn and iban (ADR-0017)
   api/             endpoint wrappers, one module per upstream operation; _form.py encodes and posts writes
-  tasks.py         task functions and list_organisations; __all__ is what the adapters register
+  tasks.py         task functions and list_organisations; __all__ is what the adapters register,
+                   MCP_CAPS any per-tool result caps (none)
   tasks_write.py   confirm-gated write tasks for the separate write server (Write tools below)
   mcp_write.py     xippios-cashctrl-mcp-write entry point
   mcp.py           xippios-cashctrl-mcp entry point
   http.py          FastAPI router
   params.py        packaged value sets: PACKAGED_LISTS, packaged_values(); none yet
-  enums.py         StrEnums generated from documented value sets; never edited by hand
+  enums.py         StrEnums (IntEnums for integer ids) generated from documented value sets;
+                   never edited by hand
   reference/       documented value sets plus README with provenance; never tenant data
 scripts/
-  refresh_reference.py   stub until a documented value set is needed (refresh-reference-data)
+  refresh_reference.py   stub until a documented value set is needed (refresh-reference-data);
+                         --render-only renders enums.py from reference/ without a request
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
   record_fixture.py      records one exchange with the demo organisation; core's Scrub plus e-mails, API tags, tokens
   seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md)
@@ -153,18 +169,21 @@ tests/
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
   test_tasks.py    structural checks on every task plus per-task replay tests
   test_tasks_write.py  the write tasks: previews send nothing, writes replay, updates fail closed
-  test_adapters.py the adapters expose exactly tasks.__all__
+  test_adapters.py the adapters expose exactly tasks.__all__; core's assert_write_tools
   test_layout.py   namespace levels stay empty; py.typed ships
   test_registry.py organisation declaration, lookup and per-organisation clients
+  test_key_resolution.py  keys resolved as in production: placeholder_api_key pins nothing
   test_errors.py   classify, RequestRejected and the recorded refusals
   test_org_lock.py the --org lock, driven through core's mcp_call_text (an in-process MCP client)
   test_record_fixture.py  the recorder never writes the demo host or key
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
-  test_refresh_reference.py  nothing is packaged; the refresh script is a stub
+  test_refresh_reference.py  nothing is packaged; the stub refuses, --render-only reproduces enums.py
   test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
 docs/upstream/     documentation snapshot and FETCHED.md
 docs/demo-org.md   the synthetic demo organisation: why, how to create and seed it, its books
-.claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep
+.github/workflows/ ci.yml (the required ci check), publish.yml (tag to PyPI), live.yml (nightly live tests)
+.claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep,
+                   adopt-release
 ```
 
 `src/xippios/` has **no** `__init__.py`: it is a PEP 420 namespace package shared with
@@ -187,14 +206,18 @@ Run `/add-endpoint <upstream operation>`. In short:
    returns `Result[T]` with full `ResultMeta` through `_meta(org, ...)` (source,
    endpoint, `tenant=org`, request parameters, `published_at`/`vintage` when the upstream
    gives them). Derive the sync one with
-   `sync()`, add its name to `__all__`, re-export it from `__init__.py`.
+   `sync()`, add its name to `__all__`, re-export it from `__init__.py`. What it returns
+   leaves out documented personal identifiers (`ssn`, `iban` and their like) unless it
+   fetches them deliberately and says so, and a write task does not echo one in
+   `meta.request` (ADR-0017).
 5. Docstring for agents: one sentence, then `Args:` with examples of valid values for
    every parameter. The MCP tool description and the OpenAPI summary come from it.
 6. `/record-fixture` for at least one case (demo only), a replay test in `test_tasks.py`
    with `org="demo"` that also calls the tool end to end with
-   `xippios.core.testing.mcp_call`, a case in `TOOL_CASES` (which checks `meta.tenant`
-   and snake_case keys for every tool), a live smoke test in `test_live.py` that takes
-   the `demo_org` fixture.
+   `xippios.core.testing.mcp_call` (and compares what was sent through
+   `sent_urls(route)`, never a request from `route.calls`), a case in `TOOL_CASES` (which
+   checks `meta.tenant` and snake_case keys for every tool), a live smoke test in
+   `test_live.py` that takes the `demo_org` fixture.
 7. `CHANGELOG.md` under Unreleased, README status table, then the full check suite.
 
 A list that documents `start` and `limit` (journal, persons, orders) pages through
@@ -205,9 +228,13 @@ request. `meta.total` is upstream's `total` on every list task, never `len(data)
 
 Lookups (accounts, currencies, tax codes, fiscal periods) are tasks too, named
 `list_<thing>`, so agents can form valid calls; they serve the organisation's own data
-live and are never packaged (`/refresh-reference-data`). A task-shaped function that
-returns a subset of an upstream record builds its model with `UpstreamModel.project`;
-nothing is renamed or computed, parsing a value (`parse_decimal`) is the only override.
+live and are never packaged (`/refresh-reference-data`). One whose whole list an agent
+needs and the default result cap (200 rows or 64 KB) would cut gets a cap of its own in
+`MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (ADR-0016); none has one, since
+each list takes filters or pages and no list must reach an agent whole. A task-shaped
+function that returns a subset of an upstream record builds its model with
+`UpstreamModel.project`; nothing is renamed or computed, parsing a value
+(`parse_decimal`) is the only override.
 Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
@@ -241,11 +268,13 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
    create a person from a name. It returns
    `Result[WritePreview[<record>] | WriteResult]`: while `confirm` is false a
    `WritePreview` (`performed=False`, `endpoint`, `payload` = the exact fields,
-   `before` = the record for an update or a delete, `changes` for an update) with
-   `meta.request` = `{"org": org}`; with `confirm` a `WriteResult` (`performed=True`,
-   `insert_id`, `message`) with `meta.request` = `org` plus the fields as sent. The
-   payload is never in a result twice. A create's preview sends nothing; an update's
-   or a delete's sends one read, never a write.
+   `before` = the record for an update or a delete as the read task's projection,
+   `changes` for an update) with `meta.request` = `{"org": org}`; with `confirm` a
+   `WriteResult` (`performed=True`, `insert_id`, `message`) with `meta.request` = `org`
+   plus the fields as sent. `ssn` and an `iban` show as `REDACTED` in `payload`,
+   `changes` and `meta.request` (Personal identifiers below). The payload is never in a
+   result twice. A create's preview sends nothing; an update's or a delete's sends one
+   read, never a write.
 3. **Updates read, merge, send.** Upstream empties every parameter an update omits.
    `update_*` reads the record, maps every parameter `update.json` documents from it
    (`_journal_values`, `_person_values`), applies the arguments given (not `None`), and
@@ -293,6 +322,28 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
    previewed, confirmed and read back: the changed field holds the new value and every
    other derived field is unchanged.
 
+## Personal identifiers (ADR-0017)
+
+CashCtrl documents two personal identifiers, a person's `ssn` ("Social security number
+of the employee") and the `iban` of each of a person's `bankAccounts` (the list sends an
+`iban` of its own). Decided by Johannes on 2026-10-25: exactly these two.
+
+- The endpoint wrappers' read models stay faithful and carry them (`Person`,
+  `PersonDetail`, `JournalEntryDetail.associates`; ADR-0003).
+- The tasks return projections without them, built with `UpstreamModel.project` in
+  `tasks.py`: `PersonProjection` (`list_persons`), `PersonDetailProjection`
+  (`get_person`; each bank account kept without its `iban`) and
+  `JournalEntryDetailProjection` (`get_journal_entry`, its `associates` projected). A
+  write preview's `before` is the same projection.
+- `create_person` and `update_person` take `ssn` and, in `bank_accounts`, `iban`, and
+  send them as given; a preview's `payload` and `changes` and a performed write's
+  `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
+  as empty.
+- Fixtures never carry their values: the recorder rewrites both to `REDACTED` by name,
+  and its final check refuses any other value (How to record a fixture).
+- A task that fetches them deliberately may return them and says so in its docstring;
+  none does.
+
 ## How to record a fixture
 
 Run `/record-fixture <endpoint> <case> <parameters>`. It runs
@@ -306,7 +357,9 @@ made `REDACTED`, and the recorder's `scrub_text` over the body, the header value
 addresses to `user@example.com`, CashCtrl's API user tags (`API:` and the first four
 characters of a key, in `createdBy` and `lastUpdatedBy`) to `API:REDACTED` and the value
 of every token-like body field (`hash`, `token`, `secret`, `apiKey`, by name;
-`order/read.json` sends `hash`) to `REDACTED`. Core refuses the exchange when its verify
+`order/read.json` sends `hash`) and of the personal identifiers `ssn` and `iban`
+(ADR-0017; `person/list.json` sends both, only ever `null`) to `REDACTED`. Core refuses
+the exchange when its verify
 still finds the demo host or the key, a JSON body decoded included, and when the body is
 not UTF-8 text (exports are out of scope). A response in which core redacted the key is
 written but goes to review (exit status 1). The recorder's own final check then refuses,
@@ -314,12 +367,14 @@ before the one write to `tests/fixtures/<endpoint>/<case>.json`, a fixture that 
 text or in a decoded string of its body still holds the subdomain on its own, an e-mail
 address, an API user tag in any case and position, the key's first four characters on
 their own (a possible key prefix) or any value but `null` or `REDACTED` under a
-token-like name, and the recorder refuses what a policy of the demo-only rule above
+token-like or identifier name, and the recorder refuses what a policy of the demo-only
+rule above
 refuses. The write stays the recorder's: core's `record` writes as soon as its own
 verify passes, before a source's final check could run. A compound name such as
 `publicHash` is not scrubbed and goes to review. Grep the file for key patterns, e-mail
-addresses, API user tags and token-like fields before committing. Fixtures are never
-typed in by hand.
+addresses, API user tags, token-like fields and values under `ssn` and `iban` before
+committing (`/record-fixture`, `tests/fixtures/README.md`). Fixtures are never typed in
+by hand.
 
 Writes: `--method POST` is accepted for the eight write paths the write tools call only
 (`journal/create|update|delete.json`, `person/create|update|delete.json`,
@@ -329,7 +384,9 @@ refused before a request, and a `create.json` only when one of its values carrie
 write tools' `Content-Type` (`application/x-www-form-urlencoded; charset=UTF-8`). Core
 records the request body, and the recorder's rewrite and final check cover it (the raw
 text, each form field decoded, each JSON value's strings): host, key, e-mail addresses,
-API user tags, token-like fields. After the request the recorder says that the demo
+API user tags, token-like fields and identifiers, a form field `ssn` or the `iban` inside
+`bankAccounts` included, so a write that sends one is not recorded. After the request
+the recorder says that the demo
 organisation changed, names the `insertId` it answered, and asks for the matching
 delete, recorded or run. Record only a record marked `xippios-live`, its update and its
 delete; confirm afterwards with one list per resource (`query=xippios-live`, counts
@@ -348,6 +405,24 @@ uv run xippios-cashctrl-mcp --org demo   # stdio, locked to demo; --http for str
 uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loopback only
 ```
 
+The offline run is core's plugin's (ADR-0013): in every test not marked `live` it refuses
+the network and skips the rate limiter's waits, and the key sent is its placeholder,
+with `CASHCTRL_DEMO_API_KEY` set to it because `pyproject.toml` names that variable under
+`xippios_placeholder_key_envs`; the package keeps no placeholder fixture of its own
+(`tests/conftest.py` keeps the demo-only environment, Organisations above).
+A test that asserts a limiter wait or a quota pause is marked `rate_limited`, one that
+must reach the network `network`.
+
+`.github/workflows/live.yml` runs `uv run pytest -m live` with `XIPPIOS_LIVE_TESTS=1`
+nightly at 02:36 UTC, a time derived from the slug so that sources sharing a key never
+start together, and on demand from the Actions tab; pull requests never run live tests.
+Every `live` test runs, write tests included, so a live write test acts only on data kept
+for testing (the demo organisation, ADR-0014) and cleans up after itself. Only its
+`uv run pytest -m live` step sees the demo organisation's pair, from the org secrets
+`CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`: the template renders the
+scaffold's `CASHCTRL_API_KEY`, which nothing reads, so the workflow names the pair by
+hand, and both org secrets must give sdk-cashctrl access for the nightly run to pass.
+
 ## Workflow rules
 
 - Branch from `main` as `feature/<topic>`, `fix/<topic>`, `chore/<topic>` or `docs/<topic>`.
@@ -356,16 +431,26 @@ uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loop
 - Open the PR with `gh pr create`; the body is the definition-of-done checklist from
   `.github/PULL_REQUEST_TEMPLATE.md`, ticked honestly, with assumptions listed.
 - `ruff` leaves `docs/` alone; never reformat the upstream snapshot.
-- Template updates: `uvx copier update` pulls the latest sdk-template tag into the
-  infrastructure files (answers are in `.copier-answers.yml`; content files such as
-  `tasks.py`, `api/`, `tests/` and `README.md` are never overwritten). Review the diff
-  and open a `chore/template-update` PR.
+- Template and core updates: a new sdk-template release, and the core minor it carries,
+  arrive in one adoption PR, `chore/template-update-<tag>`, before the next release
+  (conventions §15); `/adopt-release <tag>` walks it, and it auto-merges after the
+  reviewer's `ready`. `uvx copier update` re-renders the files the template owns
+  (`tests/conftest.py`, `tests/test_layout.py` and `tests/test_adapters.py` among them;
+  answers are in `.copier-answers.yml`) and never overwrites the files this package fills:
+  `__init__.py`, `_client.py`, `models.py`, `api/`, `tasks.py`, `tasks_write.py`,
+  `params.py`, `enums.py`, `reference/`, `scripts/`, `tests/test_tasks.py`,
+  `tests/test_tasks_write.py`, `tests/test_live.py`, `tests/fixtures/`, `docs/upstream/`,
+  `README.md` and `CHANGELOG.md`. Template changes to those are listed per release under
+  "Hand-apply" in sdk-template's
+  [CHANGELOG](https://github.com/xippios/sdk-template/blob/main/CHANGELOG.md); port them
+  by hand in the same PR.
 - If a convention seems wrong, say so in the PR and follow it anyway; changing it is a
   PR against `sdk-core/docs/conventions.md` plus an ADR.
 
 ## Never
 
-- Never hand-write a fixture, and never commit one without grepping for key patterns.
+- Never hand-write a fixture, and never commit one without grepping for key patterns
+  and for values under `ssn` and `iban`.
 - Never record a fixture, run a live test or make a live call against any organisation
   but `demo`; never set `CASHCTRL_ORGS` with real names in a session or a test.
 - Never print, log or commit `CASHCTRL_DEMO_SUBDOMAIN` or any organisation's subdomain.
@@ -374,9 +459,13 @@ uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loop
 - Never write a key into a file or a commit.
 - Never put logic in `mcp.py` or `http.py`; never add a route or tool by hand.
 - Never rename or re-map an upstream concept to another source's (ADR-0003).
+- Never return a documented personal identifier in a task's projection, echo one in
+  `meta.request`, or commit one in a fixture (ADR-0017).
 - Never edit `docs/upstream/` by hand; `/refresh-upstream` fetches, a PR reviews.
 - Never add `src/xippios/__init__.py`.
-- Never tag, merge, release, force-push, or touch `gh secret`. Those are human actions.
+- Never tag, merge, release, force-push, or touch `gh secret`. Those are human actions;
+  the one exception is enabling auto-merge on a `chore/template-update*` or
+  `chore/release-*` PR after the reviewer's `ready` (ADR-0018).
 - Never point fixtures, live tests or the seeder at an organisation with real data: the
   demo organisation holds synthetic books only, created and seeded as `docs/demo-org.md`
   describes.

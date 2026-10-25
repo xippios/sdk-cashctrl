@@ -39,8 +39,15 @@ the organisation. ``meta.request`` is ``org`` plus the form fields as sent when 
 write was performed, and ``org`` alone for a preview, whose ``payload`` holds them:
 the payload never appears twice. ``tests/test_tasks.py`` checks every name in
 ``__all__``.
+
+Personal identifiers (ADR-0017): ``create_person`` and ``update_person`` take ``ssn``
+and, in ``bank_accounts``, each account's ``iban``, and send them as given, but no
+result echoes them: a preview's ``payload`` and ``changes`` and a performed write's
+``meta.request`` show ``REDACTED`` instead (``_shown``), and the record a preview shows
+as ``before`` is the read tasks' projection, without ``ssn`` and ``iban``.
 """
 
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 from decimal import Decimal
@@ -48,9 +55,11 @@ from typing import Any, TypeGuard, get_args
 
 from pydantic import BaseModel, JsonValue, ValidationError
 from xippios.core import InvalidRequestError, Result, sync
+from xippios.core.models import REDACTED
 
 from xippios.cashctrl import api
 from xippios.cashctrl._client import SOURCE
+from xippios.cashctrl.api._form import json_text
 from xippios.cashctrl.models import (
     AllocationInput,
     AttachmentInput,
@@ -59,6 +68,7 @@ from xippios.cashctrl.models import (
     Color,
     InsuranceContractInput,
     JournalEntryDetail,
+    JournalEntryDetailProjection,
     JournalItemInput,
     Language,
     NotifyType,
@@ -67,13 +77,14 @@ from xippios.cashctrl.models import (
     PersonAddressInput,
     PersonContactInput,
     PersonDetail,
+    PersonDetailProjection,
     Recurrence,
     ServicePeriodInput,
     WriteAnswer,
     WritePreview,
     WriteResult,
 )
-from xippios.cashctrl.tasks import _meta
+from xippios.cashctrl.tasks import _journal_entry_detail, _meta, _person_detail
 
 __all__ = [
     "create_journal_entry",
@@ -86,9 +97,9 @@ __all__ = [
     "update_person",
 ]
 
-JournalOutcome = WritePreview[JournalEntryDetail] | WriteResult
+JournalOutcome = WritePreview[JournalEntryDetailProjection] | WriteResult
 """A journal write's result: a preview (``performed`` false) or what was written (true)."""
-PersonOutcome = WritePreview[PersonDetail] | WriteResult
+PersonOutcome = WritePreview[PersonDetailProjection] | WriteResult
 """A person write's result: a preview (``performed`` false) or what was written (true)."""
 OrderOutcome = WritePreview[OrderDetail] | WriteResult
 """An order write's result: a preview (``performed`` false) or what was written (true)."""
@@ -99,6 +110,48 @@ LANGUAGES: tuple[str, ...] = get_args(Language)
 COLORS: tuple[str, ...] = get_args(Color)
 
 
+IDENTIFIERS = frozenset({"ssn"})
+"""Form fields that hold a documented personal identifier (ADR-0017), by upstream name."""
+IDENTIFIERS_IN_LISTS = {"bankAccounts": "iban"}
+"""JSON list fields whose items hold one, by upstream name: the list and the item's key."""
+
+
+def _redacted_items(text: str, key: str) -> str:
+    """A JSON list field with ``key`` of each item made ``REDACTED`` where it holds a value."""
+    try:
+        items = json.loads(text)
+    except ValueError:
+        return REDACTED
+    if not isinstance(items, list):
+        return REDACTED
+    shown = [
+        {
+            name: REDACTED if name == key and value not in (None, "") else value
+            for name, value in item.items()
+        }
+        if isinstance(item, dict)
+        else item
+        for item in items
+    ]
+    return json_text(shown)
+
+
+def _shown(fields: Mapping[str, str]) -> dict[str, str]:
+    """``fields`` as a result may show them: no personal identifier's value (ADR-0017).
+
+    ``ssn`` and the ``iban`` of each item of ``bankAccounts`` become ``REDACTED``; every
+    other field, and an identifier sent empty (a cleared ``ssn``, which reveals nothing),
+    is kept. Only what a result shows changes: upstream receives the values.
+    """
+    shown = dict(fields)
+    for name, value in fields.items():
+        if name in IDENTIFIERS and value:
+            shown[name] = REDACTED
+        elif name in IDENTIFIERS_IN_LISTS and value:
+            shown[name] = _redacted_items(value, IDENTIFIERS_IN_LISTS[name])
+    return shown
+
+
 def _preview[T](
     org: str,
     endpoint: str,
@@ -107,7 +160,12 @@ def _preview[T](
     before: T | None = None,
     changes: dict[str, str] | None = None,
 ) -> Result[WritePreview[T] | WriteResult]:
-    preview = WritePreview[T](endpoint=endpoint, payload=payload, before=before, changes=changes)
+    preview = WritePreview[T](
+        endpoint=endpoint,
+        payload=_shown(payload),
+        before=before,
+        changes=None if changes is None else _shown(changes),
+    )
     return Result[WritePreview[T] | WriteResult](data=preview, meta=_meta(org, endpoint, {}))
 
 
@@ -115,7 +173,8 @@ def _performed[T](
     org: str, endpoint: str, payload: dict[str, str], answer: WriteAnswer
 ) -> Result[WritePreview[T] | WriteResult]:
     result = WriteResult(insert_id=answer.insert_id, message=answer.message)
-    return Result[WritePreview[T] | WriteResult](data=result, meta=_meta(org, endpoint, payload))
+    meta = _meta(org, endpoint, _shown(payload))
+    return Result[WritePreview[T] | WriteResult](data=result, meta=meta)
 
 
 def _whole(value: object) -> TypeGuard[int]:
@@ -721,7 +780,8 @@ async def update_journal_entry_async(
     changes = _changes(api.journal_fields, JOURNAL_UPDATE, given, cleared, custom)
     endpoint = "journal/update.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=entry, changes=changes)
+        before = _journal_entry_detail(entry)
+        return _preview(org, endpoint, fields, before=before, changes=changes)
     answer = await api.journal_update(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -758,7 +818,7 @@ async def delete_journal_entry_async(
     if booked is not None:
         raise booked
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=entry)
+        return _preview(org, endpoint, fields, before=_journal_entry_detail(entry))
     answer = await api.journal_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 
@@ -1057,7 +1117,8 @@ async def create_person_async(
         bank_data: Unstructured bank information when no IBAN is known.
         bank_accounts: Bank accounts, each with ``iban`` and ``type`` (``DEFAULT``,
             ``ORDER``, ``SALARY``, ``HISTORICAL``, ``OTHER``), optionally ``bic``,
-            ``notes``.
+            ``notes``; each ``iban`` is sent as given and shown as ``REDACTED`` in the
+            preview and in ``meta.request``.
         discount_percentage: A discount for orders, 0 to 100, e.g. ``5``.
         date_birth: The date of birth, e.g. ``1980-05-17``.
         color: The colour in the organisational chart: ``BLUE``, ``GREEN``, ``RED``,
@@ -1069,7 +1130,8 @@ async def create_person_async(
         is_auto_fill_responsible_person: ``true`` fills this person in as responsible
             person on order documents (with ``user_id``).
         location_id: The employee's workplace, a location's id.
-        ssn: The employee's social security number.
+        ssn: The employee's social security number; sent as given, shown as
+            ``REDACTED`` in the preview and in ``meta.request``.
         children: Children of an employee or family, each with ``name``.
         service_periods: Service periods of an employee, each with ``date_entry``.
         certificate_template_id: The salary certificate template of an employee.
@@ -1235,7 +1297,8 @@ async def update_person_async(
         vat_uid: The VAT number (UID), e.g. ``"CHE-123.456.789"``.
         bank_data: Unstructured bank information when no IBAN is known.
         bank_accounts: Bank accounts replacing the stored ones, each with ``iban`` and
-            ``type``.
+            ``type``; each ``iban`` is shown as ``REDACTED`` in the preview and in
+            ``meta.request``.
         discount_percentage: A discount for orders, 0 to 100, e.g. ``5``.
         date_birth: The date of birth, e.g. ``1980-05-17``.
         color: ``BLUE``, ``GREEN``, ``RED``, ``YELLOW``, ``ORANGE``, ``BLACK``, ``GRAY``,
@@ -1247,7 +1310,8 @@ async def update_person_async(
         is_auto_fill_responsible_person: ``true`` fills this person in as responsible
             person on order documents.
         location_id: The employee's workplace, a location's id.
-        ssn: The employee's social security number.
+        ssn: The employee's social security number; sent as given, shown as
+            ``REDACTED`` in the preview and in ``meta.request``.
         children: Children replacing the stored ones, each with ``name``.
         service_periods: Service periods replacing the stored ones, each with
             ``date_entry``.
@@ -1347,7 +1411,8 @@ async def update_person_async(
     changes = _changes(api.person_fields, PERSON_UPDATE, given, cleared, custom)
     endpoint = "person/update.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=person, changes=changes)
+        before = _person_detail(person)
+        return _preview(org, endpoint, fields, before=before, changes=changes)
     answer = await api.person_update(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -1370,7 +1435,7 @@ async def delete_person_async(org: str, id: int, *, confirm: bool = False) -> Re
     endpoint = "person/delete.json"
     if confirm is not True:
         person = await api.person_read(org, id)
-        return _preview(org, endpoint, fields, before=person)
+        return _preview(org, endpoint, fields, before=_person_detail(person))
     answer = await api.person_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 

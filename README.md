@@ -71,7 +71,8 @@ tool and route result alike, `meta` the upstream operation, the parameters as se
 upstream's names (`onlyActive`), the organisation as `tenant`, when they were fetched
 and, for a list, `total`, upstream's count of the matching records. Async twins are
 named `<task>_async` (`list_organisations` has none). The tasks are listed in the status
-table below.
+table below. Persons come back without the personal identifiers `ssn` and `iban`
+(`list_persons`, `get_person`, the persons `get_journal_entry` names; ADR-0017).
 
 ## MCP
 
@@ -143,12 +144,13 @@ by the write server only: never by the read server, never as an HTTP route.
   Without it nothing is written: the result is a preview, `performed: false`, with
   `endpoint`, `payload` (the exact form fields CashCtrl would receive, under upstream's
   names: booleans `true`/`false`, dates `YYYY-MM-DD`, lists as JSON, custom fields as
-  XML), `before` (for an update or a delete, the record as it is now) and `changes`
-  (for an update). A create's preview sends no request; an update's or a delete's sends
-  one read and never a write. With `confirm=true` the write is sent and the result is
-  `performed: true` with `insert_id` (the new record's id; an update answers the
-  record's own) and upstream's `message`. Call once without `confirm`, show the
-  preview, then confirm. Only `confirm=True` writes: from Python anything else
+  XML; `ssn` and an `iban` as `REDACTED`, as in `meta.request` after a write), `before`
+  (for an update or a delete, the record as it is now, as the read tools show it) and
+  `changes` (for an update). A create's preview sends no request; an update's or a
+  delete's sends one read and never a write. With `confirm=true` the write is sent and
+  the result is `performed: true` with `insert_id` (the new record's id; an update
+  answers the record's own) and upstream's `message`. Call once without `confirm`, show
+  the preview, then confirm. Only `confirm=True` writes: from Python anything else
   (`"false"`, `1`) previews; over MCP the schema turns `"true"`, `"yes"`, `"1"`, `1`
   into true and `"false"`, `"no"`, `"0"`, `0` into false, and refuses anything else.
   In Python the result is `Result[WritePreview[<record>] | WriteResult]`; narrow it

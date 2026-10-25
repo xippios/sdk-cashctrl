@@ -59,11 +59,15 @@ __all__ = [
 SOURCE = "cashctrl"
 BASE_URL_TEMPLATE = "https://{subdomain}.cashctrl.com/api/v1"
 """Base URL of one organisation; ``subdomain`` is the organisation's (introduction.md)."""
-RATE_LIMIT = RateLimit(per_minute=60)
+# A self-imposed pace: upstream documents no limit (ADR-0010 decision 1).
+RATE_LIMIT = RateLimit(per_minute=60, burst=1)
 """Per organisation and self-imposed: upstream documents only a 429 and "add delays".
 
-Every response carries ``x-cashctrl-requests-left`` (299 observed on 2026-10-23, a 401
-included); its window and scope are not documented, so nothing here reads it.
+One request at a time, then one a second: CashCtrl documents no burst either. Every
+response carries ``x-cashctrl-requests-left`` (299 observed on 2026-10-23, a 401
+included); its window and scope are not documented, so nothing here reads it, and no
+``QuotaPolicy`` is installed (ADR-0015): with no documented window, its default of an
+hour would turn one 429 without ``Retry-After`` into an hour of refusals.
 """
 DEMO = "demo"
 """The reserved organisation, declared by its own two variables and never listed."""
@@ -94,6 +98,7 @@ TENANTS = Tenants(
     fields=("SUBDOMAIN", "API_KEY"),
     reserved=(DEMO,),
     validate={"SUBDOMAIN": check_subdomain},
+    hints={"SUBDOMAIN": "set the subdomain alone, one DNS label: acme for acme.cashctrl.com"},
 )
 """CashCtrl's organisations, declared in the environment (ADR-0014)."""
 

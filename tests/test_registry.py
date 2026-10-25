@@ -7,9 +7,7 @@ behaviour and the variable names, not the text.
 
 import os
 
-import httpx
 import pytest
-import respx
 from xippios.core import ConfigError, InvalidRequestError
 
 from xippios.cashctrl._client import DEMO, RATE_LIMIT, TENANTS, check_subdomain, client_for
@@ -222,22 +220,14 @@ def test_a_missing_or_malformed_subdomain_is_a_config_error(
         assert value not in str(info.value)
 
 
-class TestKeyResolution:
-    """Keys resolved as in production: core's placeholder pin is lifted for these tests."""
-
-    @pytest.fixture
-    def placeholder_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Pins nothing (ADR-0013); the shell's demo key is removed instead."""
-        monkeypatch.delenv(api_key_env(DEMO), raising=False)
-
-    async def test_a_declared_org_without_its_key_fails_on_the_first_request(
-        self, monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter
-    ) -> None:
-        monkeypatch.setenv(ORGS_ENV, "xa")
-        declare(monkeypatch, "xa", key=False)
-        route = respx_mock.get(url__startswith=f"https://xa-{HIDDEN_SUBDOMAIN}.cashctrl.com/")
-        route.mock(return_value=httpx.Response(200, json={}))
-        client = client_for("xa")
-        with pytest.raises(ConfigError, match="CASHCTRL_XA_API_KEY"):
-            await client.get("/fiscalperiod/list.json")
-        assert not route.called
+def test_a_malformed_subdomain_says_what_the_variable_should_hold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``Tenants(hints=...)``: the operator learns the expected form, never the value."""
+    monkeypatch.setenv(ORGS_ENV, "xa")
+    monkeypatch.setenv(subdomain_env("xa"), f"{HIDDEN_SUBDOMAIN}.cashctrl.com")
+    with pytest.raises(ConfigError) as info:
+        client_for("xa")
+    assert "CASHCTRL_XA_SUBDOMAIN" in str(info.value)
+    assert "one DNS label: acme for acme.cashctrl.com" in str(info.value)
+    assert HIDDEN_SUBDOMAIN not in str(info.value)

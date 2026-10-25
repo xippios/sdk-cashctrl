@@ -31,6 +31,7 @@ def build(tenant_lock: TenantLock | None = None) -> MCPServer:
         name="xippios-cashctrl-write",
         version=__version__,
         instructions=INSTRUCTIONS,
+        caps=getattr(tasks_write, "MCP_CAPS", None),
         read_only=False,
         tenant_lock=tenant_lock,
     )

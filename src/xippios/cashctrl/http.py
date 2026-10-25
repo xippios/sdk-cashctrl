@@ -1,10 +1,10 @@
 """FastAPI router for CashCtrl.
 
-One route per task, ``/cashctrl/<task>`` (ADR-0007): a task whose parameters are all
-scalars is a ``GET`` with query parameters, and a task with a non-scalar parameter
-(``list_accounts``, whose ``filter`` is a list) is a ``POST`` whose JSON body is keyed
-by parameter name. No logic lives here (ADR-0001). The consumer mounts it; it is never
-served standalone.
+One route per task in ``tasks.__all__``, at ``/cashctrl/<task>``. A task whose
+parameters are all scalars is a ``GET`` with query parameters; a task with any non-scalar
+parameter (``list_accounts``, whose ``filter`` is a list) is a ``POST`` whose JSON body is
+keyed by parameter name (ADR-0007). No logic lives here (ADR-0001). The consumer mounts
+it; it is never served standalone.
 """
 
 from xippios.core.http import router_from_tasks

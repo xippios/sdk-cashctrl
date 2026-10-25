@@ -22,7 +22,8 @@ once and writes:
   after the entry (``error-handling.md``, ``common.md``), holding the page's sections for
   that entry under a one-line provenance header (the URL with its fragment);
 - ``FETCHED.md``: regenerated entirely, with the page's fingerprint, the attribution and
-  one row per file with the fetch date.
+  one row per file with the fetch time, the UTC time of the run with an explicit ``Z``
+  (conventions §3), and a note naming the tables kept as HTML.
 
 Every table on the page is a two-column parameter table (a ``<th>`` name, a ``<td>`` with
 labels and description). It becomes a pipe table, or an HTML table where it nests another
@@ -31,7 +32,7 @@ table. The script stops on any other table shape, on a tag in a table cell outsi
 a new construct is looked at before it is converted; it also stops unless every section
 shows the same words, in the same order, on the page and in the Markdown. Files a previous
 snapshot had and this one does not are removed. The same page gives the same snapshot
-files on any day; only ``FETCHED.md`` carries the date. No key is needed or read. Run from
+files on any day; only ``FETCHED.md`` carries the time. No key is needed or read. Run from
 the repository root, or give a saved copy of the page to work offline::
 
     uv run scripts/refresh_upstream.py
@@ -645,8 +646,15 @@ def _headings(markdown: str) -> int:
     return count
 
 
-def render_fetched(parts: list[Part], response: Response, day: str, year: str) -> str:
-    """The whole of ``FETCHED.md``; ``year`` is the year of the footer's copyright notice."""
+def render_fetched(
+    parts: list[Part], files: dict[str, str], response: Response, fetched: str, year: str
+) -> str:
+    """The whole of ``FETCHED.md``; ``year`` is the year of the footer's copyright notice.
+
+    ``fetched`` is the UTC time of the run in ISO 8601 with an explicit ``Z``
+    (``2026-10-24T09:15:00Z``, conventions §3); a file of ``files`` that holds an HTML
+    table gets a note saying so.
+    """
     digest = hashlib.sha256(response.body).hexdigest()
     notice = f"\N{COPYRIGHT SIGN} {year} CashCtrl Ltd."
     lines = [
@@ -665,7 +673,7 @@ def render_fetched(parts: list[Part], response: Response, day: str, year: str) -
         "and writes one Markdown file per top-level entry of the table of contents, named",
         "after the entry: the five general sections, then one file per module holding all of",
         "the module's controllers. Each file starts with one line, the URL of its entry; the",
-        "fetch date is recorded only in this file. Headings keep the page's levels: `##`",
+        "fetch time is recorded only in this file. Headings keep the page's levels: `##`",
         "controller, `###` operation, `####` Parameters, Endpoint or Example; each paragraph is",
         "one line.",
         "",
@@ -698,13 +706,21 @@ def render_fetched(parts: list[Part], response: Response, day: str, year: str) -
         f"- {len(response.body)} bytes, sha256 `{digest}`",
         f"- {_origin(response)}",
         "",
-        "Fetched is the UTC date of the run.",
+        "`Fetched` is the UTC time of the run in ISO 8601 with an explicit `Z`. A file whose",
+        "note says so keeps a table that nests another as its HTML, as described above.",
         "",
-        "| File | URL | Fetched |",
-        "| --- | --- | --- |",
+        "| File | URL | Fetched | Note |",
+        "| --- | --- | --- | --- |",
     ]
-    lines += [f"| {part.file} | {part.url} | {day} |" for part in parts]
+    lines += [
+        f"| {part.file} | {part.url} | {fetched} | {_note(files[part.file])} |" for part in parts
+    ]
     return "\n".join(lines) + "\n"
+
+
+def _note(markdown: str) -> str:
+    """The note of a snapshot file in ``FETCHED.md``: whether it keeps tables as HTML."""
+    return "nested tables kept as HTML" if "<table>" in markdown else ""
 
 
 def write_snapshot(out: Path, files: dict[str, str], fetched_md: str) -> None:
@@ -734,7 +750,7 @@ def main() -> None:
     args = parser.parse_args()
     out: Path = args.out
     from_file: Path | None = args.from_file
-    day = datetime.now(UTC).date().isoformat()
+    fetched = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     if from_file is None:
         _log(f"Page: {PAGE_URL}")
@@ -775,7 +791,7 @@ def main() -> None:
     for part in parts:
         _log(f"  {part.file}: {part.label}, {len(part.sections)} sections, {part.url}")
     _log(f"  {words} words, the same on the page and in the Markdown, section by section")
-    write_snapshot(out, files, render_fetched(parts, response, day, year))
+    write_snapshot(out, files, render_fetched(parts, files, response, fetched, year))
     _log(f"Wrote {len(files)} files and FETCHED.md under {out}")
 
 
