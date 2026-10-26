@@ -890,6 +890,28 @@ def test_update_person_never_echoes_a_given_iban(
     assert IBAN not in result.model_dump_json() + preview.model_dump_json()
 
 
+def test_a_shown_iban_is_redacted_whatever_the_case_of_its_key() -> None:
+    """The key of an item of ``bankAccounts`` is matched in any case, as the projection's.
+
+    ``BankAccountInput`` sends ``iban`` only, so this goes to ``_shown`` directly.
+    """
+    sent = json_text(
+        [
+            {"IBAN": IBAN, "type": "DEFAULT"},
+            {"Iban": IBAN, "type": "SALARY"},
+            {"iban": "", "type": "OTHER"},
+        ]
+    )
+    shown = tasks_write._shown({"bankAccounts": sent, "company": "x"})
+    assert json.loads(shown["bankAccounts"]) == [
+        {"IBAN": "REDACTED", "type": "DEFAULT"},
+        {"Iban": "REDACTED", "type": "SALARY"},
+        {"iban": "", "type": "OTHER"},
+    ]
+    assert shown["company"] == "x"
+    assert IBAN not in json.dumps(shown)
+
+
 # Orders ------------------------------------------------------------------------------
 
 
