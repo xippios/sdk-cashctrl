@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-10-26T05:06:17.307510Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/journal/read.json?id=50"
+  },
+  "response": {
+    "body": "{\"success\":true,\"data\":{\"id\":50,\"created\":\"2026-10-23 10:30:24.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:24.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"creditId\":9,\"debitId\":22,\"associateId\":4,\"taxId\":13,\"orderId\":6,\"orderBookEntryId\":null,\"statementId\":null,\"salaryBookEntryId\":null,\"inventoryId\":null,\"currencyId\":null,\"importEntryId\":null,\"recurrenceId\":null,\"items\":[],\"attachments\":[],\"allocations\":[],\"type\":\"ORDER\",\"dateAdded\":\"2026-05-04 00:00:00.0\",\"title\":\"Netzwerk B\u00fcro Z\u00fcrich\",\"custom\":null,\"notes\":null,\"reference\":\"EK-2026-002\",\"amount\":830,\"currencyRate\":1,\"accountIds\":\"[\\\"22\\\",\\\"34\\\",\\\"9\\\"]\",\"itemsIndex\":null,\"itemsCount\":0,\"taxed\":true,\"taxRate\":8.1,\"attachmentCount\":null,\"allocationCount\":0,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"currencyCode\":null,\"associateName\":\"Beispiel Telecom AG\",\"rows\":[{\"fcDebit\":767.81,\"fcCredit\":0,\"acDebit\":767.81,\"acCredit\":0,\"dcDebit\":767.81,\"dcCredit\":0,\"fcTax\":62.19,\"acTax\":62.19,\"dcTax\":62.19,\"taxPercentage\":8.1,\"accountName\":\"6500 <values><de>Verwaltungsaufwand</de><en>Administrative expenses</en><fr>Charges d'administration</fr><it>Costi amministrativi</it></values>\",\"accountId\":22,\"isTax\":false,\"isTaxed\":true},{\"fcDebit\":0,\"fcCredit\":830,\"acDebit\":0,\"acCredit\":830,\"dcDebit\":0,\"dcCredit\":830,\"fcTax\":0,\"acTax\":0,\"dcTax\":0,\"taxPercentage\":null,\"accountName\":\"2000 <values><de>Kreditoren</de><en>Accounts payable</en><fr>Cr\u00e9anciers</fr><it>Creditori</it></values>\",\"accountId\":9,\"isTax\":false,\"isTaxed\":false},{\"fcDebit\":62.19,\"fcCredit\":0,\"acDebit\":62.19,\"acCredit\":0,\"dcDebit\":62.19,\"dcCredit\":0,\"fcTax\":0,\"acTax\":0,\"dcTax\":0,\"taxPercentage\":8.1,\"accountName\":\"1170 <values><de>Vorsteuer</de><en>Sales tax receivable</en><fr>Imp\u00f4t pr\u00e9alable</fr><it>Imposta precedente</it></values>\",\"accountId\":34,\"isTax\":true,\"isTaxed\":false}],\"associates\":[{\"id\":4,\"created\":\"2026-10-23 10:29:14.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:14.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"categoryId\":2,\"contacts\":[{\"id\":2,\"personId\":4,\"type\":\"EMAIL_WORK\",\"purpose\":null,\"address\":\"user@example.com\",\"notes\":null,\"pos\":0}],\"addresses\":[{\"id\":2,\"personId\":4,\"titleId\":null,\"type\":\"MAIN\",\"company\":null,\"firstName\":null,\"lastName\":null,\"address\":\"Musterweg 15\",\"zip\":\"6300\",\"city\":\"Zug\",\"canton\":\"ZG\",\"country\":\"CHE\",\"pos\":0,\"hideCompany\":false,\"hideName\":false,\"companyForAddress\":\"Beispiel Telecom AG\",\"firstNameForAddress\":null,\"lastNameForAddress\":null,\"streetName\":\"Musterweg\",\"streetNumber\":\"15\",\"titleName\":\"\",\"cantonCode\":\"ZG\",\"countryCode2\":\"CH\",\"countryCode3\":\"CHE\",\"isHideCompany\":false,\"isHideName\":false}],\"bankAccounts\":[],\"servicePeriods\":[],\"children\":[],\"insuranceContracts\":[],\"attachments\":[],\"nr\":\"P-00002\",\"name\":\"Beispiel Telecom AG\",\"company\":\"Beispiel Telecom AG\",\"language\":\"DE\",\"emailWork\":\"user@example.com\",\"address\":\"Musterweg 15\",\"zip\":\"6300\",\"city\":\"Zug\",\"canton\":\"ZG\",\"country\":\"CHE\",\"attachmentCount\":0,\"fullName\":\"\",\"inactive\":false,\"numberOfChildren\":0,\"abbreviatedName\":\"Beispiel Telecom AG\",\"languageName\":\"Deutsch\",\"customer\":false,\"vendor\":true,\"employee\":false,\"insurance\":false,\"family\":false,\"titleName\":\"\",\"companyOrFullName\":\"Beispiel Telecom AG\",\"categoryName\":\"<values><de>Lieferanten</de><en>Vendors</en><fr>Fournisseurs</fr><it>Fornitori</it></values>\",\"languageCode\":\"de\",\"cantonCode\":\"ZG\",\"countryCode2\":\"CH\",\"countryCode3\":\"CHE\",\"iconCls\":\"person\",\"certificateValuesMap\":{},\"isCustomer\":false,\"isVendor\":true,\"isEmployee\":false,\"isInsurance\":false,\"isFamily\":false,\"isInactive\":false,\"isAutoFillResponsiblePerson\":false}],\"taxCode\":\"VN1\",\"taxedItems\":[],\"defaultCurrencyAmount\":830,\"startDate\":null,\"nr\":\"EK-2026-002\",\"notifyEmail\":null,\"recurrence\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null}}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Mon, 26 Oct 2026 05:06:17 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}
