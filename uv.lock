@@ -1514,9 +1514,9 @@ provides-extras = ["mcp", "http", "testing"]
 [package.metadata.requires-dev]
 dev = [
     { name = "anyio", specifier = ">=4" },
-    { name = "beautifulsoup4", specifier = ">=4.15.0" },
+    { name = "beautifulsoup4", specifier = "==4.15.0" },
     { name = "detect-secrets", specifier = ">=1.5" },
-    { name = "markdownify", specifier = ">=1.2.3" },
+    { name = "markdownify", specifier = "==1.2.3" },
     { name = "mypy", specifier = ">=1.18" },
     { name = "pre-commit", specifier = ">=4" },
     { name = "pytest", specifier = ">=8" },
