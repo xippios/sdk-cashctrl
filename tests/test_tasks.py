@@ -1015,8 +1015,7 @@ def test_the_person_projection_itself_drops_each_iban(fixtures_dir: Path) -> Non
         {"Iban": IBAN, "type": "OTHER", "notes": "kept"},
     ]
     read = PersonDetail.model_validate(body["data"])
-    assert [account["type"] for account in read.bank_accounts] == ["DEFAULT", "SALARY", "OTHER"]
-    assert IBAN in read.model_dump_json(), "the read model stays faithful"
+    assert read.bank_accounts == body["data"]["bankAccounts"], "the read model stays faithful"
     person = PersonDetailProjection.project(read)
     assert person.bank_accounts == [
         {"type": "DEFAULT", "bic": "TESTCHZZ"},
