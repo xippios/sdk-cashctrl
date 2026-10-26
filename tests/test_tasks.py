@@ -14,7 +14,7 @@ import pytest
 import respx
 from xippios.core import InvalidRequestError, NotFoundError, sync
 from xippios.core.mcp import tool_name
-from xippios.core.testing import fixture_path, load_fixture, mcp_call
+from xippios.core.testing import fixture_path, load_fixture, mcp_call, sent_urls
 
 from xippios.cashctrl import __version__, api, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, SOURCE, TENANTS
@@ -848,6 +848,41 @@ def test_get_journal_entry_replays_a_collective_entry(
     ]
     assert sum(row.dc_debit for row in entry.rows) == sum(row.dc_credit for row in entry.rows)
     assert [person.id for person in entry.associates] == [3, 4]
+
+
+def test_list_journal_entries_parses_the_entries_an_order_booked(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    """Recorded on 2026-10-26: an entry an order booked sends ``attachmentCount`` ``null``.
+
+    The 2026 journal with ``onlyPurchase``: the two entries the seeded purchase orders
+    booked, ``type`` ``ORDER`` with ``orderId`` set. Their ``attachmentCount`` failed the
+    whole list before it was typed ``int | None``.
+    """
+    route = replay_fixture("journal_list", "order_booked")
+    result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2026, only_purchase=True, limit=20)
+    recorded = load_fixture(fixture_path(fixtures_dir, "journal_list", "order_booked"))
+    assert sent_urls(route) == [recorded.request.url]
+    assert result.meta.total == 2
+    assert [(entry.id, entry.type, entry.order_id) for entry in result.data] == [
+        (50, "ORDER", 6),
+        (49, "ORDER", 5),
+    ]
+    assert all(entry.attachment_count is None for entry in result.data)
+    assert all(entry.order_type == "PURCHASE" for entry in result.data)
+
+
+def test_get_journal_entry_parses_an_entry_an_order_booked(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """Recorded on 2026-10-26: the read of entry 50 sends ``attachmentCount`` ``null`` too."""
+    route = replay_fixture("journal_read", "order_booked")
+    entry = tasks.get_journal_entry(DEMO, 50).data
+    assert sent_urls(route) == ["https://demo.cashctrl.com/api/v1/journal/read.json?id=50"]
+    assert isinstance(entry, JournalEntryDetailProjection)
+    assert (entry.id, entry.type, entry.order_id) == (50, "ORDER", 6)
+    assert (entry.attachment_count, entry.order_book_entry_id) == (None, None)
+    assert entry.rows
 
 
 def test_get_journal_entry_raises_not_found_for_an_unknown_id(

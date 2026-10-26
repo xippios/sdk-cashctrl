@@ -494,6 +494,49 @@ def test_delete_journal_entry_refuses_an_entry_another_module_booked(
     assert (read.call_count, write.called) == (1, False)
 
 
+ORDER_BOOKED = 50
+"""The entry a seeded purchase order booked, recorded as ``journal_read/order_booked``."""
+
+
+@pytest.mark.parametrize(
+    ("write", "path", "call"),
+    [
+        (
+            "deleted",
+            "journal/delete.json",
+            lambda: tasks_write.delete_journal_entry(DEMO, ORDER_BOOKED),
+        ),
+        (
+            "updated",
+            "journal/update.json",
+            lambda: tasks_write.update_journal_entry(DEMO, ORDER_BOOKED, title="x"),
+        ),
+    ],
+    ids=["delete", "update"],
+)
+def test_a_preview_refuses_an_entry_an_order_booked(
+    replay_fixture: ReplayFixture,
+    respx_mock: respx.MockRouter,
+    write: str,
+    path: str,
+    call: Callable[[], Any],
+) -> None:
+    """The recorded read of an entry an order booked (2026-10-26), unchanged: refused.
+
+    ``orderId`` is set, ``attachmentCount`` is ``null``; without ``confirm`` the delete's
+    and the update's read refuses it, and nothing is written.
+    """
+    read = replay_fixture("journal_read", "order_booked")
+    sent = respx_mock.post(f"{BASE}/{path}")
+    with pytest.raises(
+        InvalidRequestError,
+        match=rf"journal entry {ORDER_BOOKED} was booked by an order or a salary run "
+        rf"\(orderId set\); upstream documents that such entries cannot be {write} here",
+    ):
+        call()
+    assert (read.call_count, sent.called) == (1, False)
+
+
 # Persons -----------------------------------------------------------------------------
 
 

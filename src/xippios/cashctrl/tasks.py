@@ -429,8 +429,9 @@ async def list_journal_entries_async(
     Every entry comes back with its date ``date_added``, ``title``, ``reference``,
     ``amount``, the accounts it books (``debit_id`` and ``debit_name``, ``credit_id`` and
     ``credit_name``), the partner (``associate_id``, ``associate_name``), the tax code
-    (``tax_code``, ``tax_rate``) and its ``type`` (``MANUAL``, ``COLLECTIVE``). A
-    collective entry has ``items_count`` lines, which ``get_journal_entry`` returns.
+    (``tax_code``, ``tax_rate``) and its ``type`` (``MANUAL``, ``COLLECTIVE``, or
+    ``ORDER`` with ``order_id`` for one an order booked, which only that order changes).
+    A collective entry has ``items_count`` lines, which ``get_journal_entry`` returns.
     Pass ``fiscal_period_id`` (an id from ``list_fiscal_periods``) for a reproducible
     answer; without it upstream uses the API user's current period, server-side state
     that ``fiscalperiod/switch.json`` changes, and ``meta.request`` does not show which
