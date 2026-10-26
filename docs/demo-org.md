@@ -446,12 +446,15 @@ printed the following; the balances and totals are quoted as printed.
   2025's, account 1020 ending at 101'230.00.
 - Whether order creation booked journal entries: `journal/list.json` reports 38 entries
   for 2026, two more than the 36 manual entries. The balance of 1100 holds no sales order
-  amount, so the four sales invoices did not book to the debtors. Which records the two
-  extra entries are was not read; the two purchase orders are the likeliest source, not
-  verified. The order lists recorded the same day (`tests/fixtures/order_list/`) fit
-  that: both purchase orders are in their category's first status, Open, with `isBook`
-  true and `open` equal to their total; the four sales invoices are in Draft with
-  `isBook` false.
+  amount, so the four sales invoices did not book to the debtors. The two extra entries
+  are the ones the two purchase orders booked, verified on 2026-10-26: ids 49 and 50,
+  `type` `ORDER`, `orderId` 5 and 6, recorded as
+  `tests/fixtures/journal_list/order_booked.json` (`onlyPurchase`) and
+  `tests/fixtures/journal_read/order_booked.json`; both carry `attachmentCount` `null`.
+  The order lists recorded the same day as the seeding (`tests/fixtures/order_list/`)
+  fit that: both purchase orders are in their category's first status, Open, with
+  `isBook` true and `open` equal to their total; the four sales invoices are in Draft
+  with `isBook` false.
 - Order item prices: CashCtrl read the seeded `unitPrice` values as gross, VAT included:
   every item of the order read recorded the same day (`tests/fixtures/order_read/`) has
   `baseValue` `GROSS` and `taxCalcType` `NET`, and the order `displayItemGross` false.

@@ -54,7 +54,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import AliasChoices, BeforeValidator, ConfigDict, Field, JsonValue
+from pydantic import AliasChoices, BeforeValidator, ConfigDict, Field, JsonValue, field_validator
 from xippios.core import UpstreamModel
 
 __all__ = [
@@ -483,7 +483,17 @@ class JournalRow(UpstreamModel):
 
 
 class _JournalEntryFields(UpstreamModel):
-    """The fields ``journal/list.json`` and ``journal/read.json`` both send."""
+    """The fields ``journal/list.json`` and ``journal/read.json`` both send.
+
+    ``attachment_count`` may be ``None``. ``docs/upstream/journal.md`` documents no
+    ``attachmentCount``: Read journal entry (line 7) and List journal entries (line 23)
+    give parameters only, no response body, and ``attachments`` is an input of create and
+    update (lines 199 and 263). It was typed from the manual entries, which send a number;
+    the entries an order booked (``type`` ``ORDER``, ``orderId`` set) send ``null`` in the
+    list and the read, seen in the demo organisation on 2026-10-26
+    (``tests/fixtures/journal_list/order_booked.json``,
+    ``tests/fixtures/journal_read/order_booked.json``).
+    """
 
     id: int
     type: str
@@ -504,7 +514,7 @@ class _JournalEntryFields(UpstreamModel):
     custom: str | None = None
     notes: str | None = None
     items_count: int = Field(validation_alias="itemsCount")
-    attachment_count: int = Field(validation_alias="attachmentCount")
+    attachment_count: int | None = Field(default=None, validation_alias="attachmentCount")
     allocation_count: int | None = Field(default=None, validation_alias="allocationCount")
     cost_center_ids: JsonValue = Field(default=None, validation_alias="costCenterIds")
     cost_center_numbers: JsonValue = Field(default=None, validation_alias="costCenterNumbers")
@@ -541,18 +551,22 @@ class JournalEntry(_JournalEntryFields):
     (HTML), ``recurrence``, ``start_date``, ``end_date``, ``days_before`` and the
     ``notify_*`` fields.
 
-    Typed from observation: ``type`` (seen: ``MANUAL``, ``COLLECTIVE``), ``debit_name``
-    and ``credit_name`` (the account's number and localised name), ``associate_name``,
-    ``tax_code``, ``tax_rate``, ``currency_code``, ``items_count`` (the lines of a
-    collective entry, ``0`` otherwise), ``attachment_count``, ``allocation_count``,
-    ``recurring`` with its ``is_*`` twin, and the ``created*``/``last_updated*``
-    bookkeeping fields. A collective entry has no ``debit_id`` and one ``credit_id`` in
-    the list; its lines are in ``get_journal_entry``'s ``items``. Only seen as ``null``
-    and kept as sent: ``order_id``, ``order_book_entry_id``, ``salary_book_entry_id``,
-    ``statement_id``, ``inventory_id``, ``import_entry_id``, ``imported``,
-    ``imported_by``, ``cost_center_ids``, ``cost_center_numbers``, and the list's
-    ``account_id``, ``account_currency_id``, ``account_class``, ``balance``,
-    ``name_singular`` and ``order_type``.
+    Typed from observation: ``type`` (seen: ``MANUAL``, ``COLLECTIVE``, and ``ORDER`` for
+    an entry an order booked), ``debit_name`` and ``credit_name`` (the account's number
+    and localised name), ``associate_name``, ``tax_code``, ``tax_rate``,
+    ``currency_code``, ``items_count`` (the lines of a collective entry, ``0``
+    otherwise), ``attachment_count`` (``None`` for an entry an order booked),
+    ``allocation_count``, ``recurring`` with its ``is_*`` twin, and the
+    ``created*``/``last_updated*`` bookkeeping fields. A collective entry has no
+    ``debit_id`` and one ``credit_id`` in the list; its lines are in
+    ``get_journal_entry``'s ``items``. Kept as sent: ``order_id``, the order's id on an
+    entry an order booked, and the list's ``name_singular`` (a localised name) and
+    ``order_type`` (``PURCHASE``); ``order_id``, ``name_singular`` and ``order_type`` are
+    filled on such an entry (seen on 2026-10-26) and ``null`` on a manual one; only seen
+    as ``null``: ``order_book_entry_id``, ``salary_book_entry_id``, ``statement_id``,
+    ``inventory_id``, ``import_entry_id``, ``imported``, ``imported_by``,
+    ``cost_center_ids``, ``cost_center_numbers``, and the list's ``account_id``,
+    ``account_currency_id``, ``account_class`` and ``balance``.
     """
 
     debit_name: str | None = Field(default=None, validation_alias="debitName")
@@ -583,7 +597,10 @@ class PersonAddress(UpstreamModel):
     with a create was stored and read back, with ``title_name``, in the live
     verification of 2026-10-24 (``docs/demo-org.md``, Person reads); it is in neither
     ``addresses`` table (``person/create.json``, ``person/update.json``), but reads
-    return it, so ``update_person`` refuses to carry it over.
+    return it, so ``update_person`` refuses to carry it over. Typed as the id of a title,
+    an integer, as the person's own ``titleId`` is: "optional, NUMBER", a "Person title"
+    (``docs/upstream/person.md`` line 314), whose ``id`` is "mandatory, NUMBER" (line
+    683, Read title).
     """
 
     id: int
@@ -597,7 +614,7 @@ class PersonAddress(UpstreamModel):
     company: str | None = None
     first_name: str | None = Field(default=None, validation_alias="firstName")
     last_name: str | None = Field(default=None, validation_alias="lastName")
-    title_id: JsonValue = Field(default=None, validation_alias="titleId")
+    title_id: int | None = Field(default=None, validation_alias="titleId")
     title_name: str | None = Field(default=None, validation_alias="titleName")
     company_for_address: str | None = Field(default=None, validation_alias="companyForAddress")
     first_name_for_address: str | None = Field(default=None, validation_alias="firstNameForAddress")
@@ -828,18 +845,34 @@ class PersonDetail(_PersonDetailFields):
     bank_accounts: list[JsonValue] = Field(default_factory=list, validation_alias="bankAccounts")
 
 
+def _without_iban(account: JsonValue) -> JsonValue:
+    """One item of ``bankAccounts`` without its ``iban``, the key in any case; others kept."""
+    if isinstance(account, dict):
+        return {key: value for key, value in account.items() if key.lower() != "iban"}
+    return account
+
+
 class PersonDetailProjection(_PersonDetailFields):
     """One person as ``get_person`` returns it: ``PersonDetail`` without ``ssn`` and ``iban``.
 
     Documented personal identifiers stay out of the projections tasks return (ADR-0017,
     conventions §3): ``ssn`` is left out, and so is the ``iban`` of each of
-    ``bank_accounts``, whose other keys are kept as sent. Every other field is
-    ``PersonDetail``'s, under the same name and type; built with
-    ``UpstreamModel.project``. Write previews show the record before an update or a
-    delete as this projection, and ``JournalEntryDetailProjection.associates`` holds it.
+    ``bank_accounts``, whose other keys are kept as sent. The type enforces both: it has
+    no ``ssn`` field, and its validator drops each bank account's ``iban`` (the key in
+    any case) however it is validated, so ``PersonDetailProjection.project`` needs no
+    help from the caller. Every other field is ``PersonDetail``'s, under the
+    same name and type; built with ``UpstreamModel.project``. Write previews show the
+    record before an update or a delete as this projection, and
+    ``JournalEntryDetailProjection.associates`` holds it.
     """
 
     bank_accounts: list[JsonValue] = Field(default_factory=list, validation_alias="bankAccounts")
+
+    @field_validator("bank_accounts")
+    @classmethod
+    def _drop_iban(cls, accounts: list[JsonValue]) -> list[JsonValue]:
+        """Each bank account without its ``iban`` (ADR-0017); its other keys as sent."""
+        return [_without_iban(account) for account in accounts]
 
 
 class _JournalEntryDetailFields(_JournalEntryFields):

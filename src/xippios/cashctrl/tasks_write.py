@@ -113,11 +113,14 @@ COLORS: tuple[str, ...] = get_args(Color)
 IDENTIFIERS = frozenset({"ssn"})
 """Form fields that hold a documented personal identifier (ADR-0017), by upstream name."""
 IDENTIFIERS_IN_LISTS = {"bankAccounts": "iban"}
-"""JSON list fields whose items hold one, by upstream name: the list and the item's key."""
+"""JSON list fields whose items hold one, by upstream name: the list and the item's key.
+
+The item's key is matched in any case, as the projections and the recorder match it.
+"""
 
 
 def _redacted_items(text: str, key: str) -> str:
-    """A JSON list field with ``key`` of each item made ``REDACTED`` where it holds a value."""
+    """A JSON list field with ``key`` (in any case) of each item ``REDACTED`` where it is set."""
     try:
         items = json.loads(text)
     except ValueError:
@@ -126,7 +129,7 @@ def _redacted_items(text: str, key: str) -> str:
         return REDACTED
     shown = [
         {
-            name: REDACTED if name == key and value not in (None, "") else value
+            name: REDACTED if name.lower() == key.lower() and value not in (None, "") else value
             for name, value in item.items()
         }
         if isinstance(item, dict)
