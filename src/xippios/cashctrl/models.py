@@ -54,7 +54,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import AliasChoices, BeforeValidator, ConfigDict, Field, JsonValue
+from pydantic import AliasChoices, BeforeValidator, ConfigDict, Field, JsonValue, field_validator
 from xippios.core import UpstreamModel
 
 __all__ = [
@@ -828,18 +828,34 @@ class PersonDetail(_PersonDetailFields):
     bank_accounts: list[JsonValue] = Field(default_factory=list, validation_alias="bankAccounts")
 
 
+def _without_iban(account: JsonValue) -> JsonValue:
+    """One item of ``bankAccounts`` without its ``iban``, the key in any case; others kept."""
+    if isinstance(account, dict):
+        return {key: value for key, value in account.items() if key.lower() != "iban"}
+    return account
+
+
 class PersonDetailProjection(_PersonDetailFields):
     """One person as ``get_person`` returns it: ``PersonDetail`` without ``ssn`` and ``iban``.
 
     Documented personal identifiers stay out of the projections tasks return (ADR-0017,
     conventions §3): ``ssn`` is left out, and so is the ``iban`` of each of
-    ``bank_accounts``, whose other keys are kept as sent. Every other field is
-    ``PersonDetail``'s, under the same name and type; built with
-    ``UpstreamModel.project``. Write previews show the record before an update or a
-    delete as this projection, and ``JournalEntryDetailProjection.associates`` holds it.
+    ``bank_accounts``, whose other keys are kept as sent. The type enforces both: it has
+    no ``ssn`` field, and its validator drops each bank account's ``iban`` (the key in
+    any case) however the projection is built, so ``PersonDetailProjection.project``
+    needs no help from the caller. Every other field is ``PersonDetail``'s, under the
+    same name and type; built with ``UpstreamModel.project``. Write previews show the
+    record before an update or a delete as this projection, and
+    ``JournalEntryDetailProjection.associates`` holds it.
     """
 
     bank_accounts: list[JsonValue] = Field(default_factory=list, validation_alias="bankAccounts")
+
+    @field_validator("bank_accounts")
+    @classmethod
+    def _drop_iban(cls, accounts: list[JsonValue]) -> list[JsonValue]:
+        """Each bank account without its ``iban`` (ADR-0017); its other keys as sent."""
+        return [_without_iban(account) for account in accounts]
 
 
 class _JournalEntryDetailFields(_JournalEntryFields):

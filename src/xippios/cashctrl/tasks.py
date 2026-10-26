@@ -44,7 +44,7 @@ collect the same records again.
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, TypeGuard, get_args
 
-from pydantic import JsonValue, ValidationError
+from pydantic import ValidationError
 from pydantic_core import ErrorDetails
 from xippios.core import (
     InvalidRequestError,
@@ -124,22 +124,17 @@ def _meta(
     )
 
 
-def _without_iban(account: JsonValue) -> JsonValue:
-    """One item of ``bankAccounts`` without its ``iban``; any other key is kept as sent."""
-    if isinstance(account, dict):
-        return {key: value for key, value in account.items() if key.lower() != "iban"}
-    return account
-
-
 def _person(person: Person) -> PersonProjection:
     """A ``person/list.json`` entry without ``ssn`` and ``iban`` (ADR-0017)."""
     return PersonProjection.project(person)
 
 
 def _person_detail(person: PersonDetail) -> PersonDetailProjection:
-    """A ``person/read.json`` record without ``ssn`` and its bank accounts' ``iban`` (ADR-0017)."""
-    accounts = [_without_iban(account) for account in person.bank_accounts]
-    return PersonDetailProjection.project(person, bank_accounts=accounts)
+    """A ``person/read.json`` record without ``ssn`` and its bank accounts' ``iban`` (ADR-0017).
+
+    The projection drops each ``iban`` itself (its validator), so nothing is overridden.
+    """
+    return PersonDetailProjection.project(person)
 
 
 def _journal_entry_detail(entry: JournalEntryDetail) -> JournalEntryDetailProjection:

@@ -1003,6 +1003,30 @@ def person_with_identifiers(fixtures_dir: Path) -> dict[str, typing.Any]:
     return body
 
 
+def test_the_person_projection_itself_drops_each_iban(fixtures_dir: Path) -> None:
+    """ADR-0017 enforced by the type: ``project`` alone, no task, carries no IBAN.
+
+    The recorded person read with bank accounts, changed in memory; the key in any case.
+    """
+    body = person_with_identifiers(fixtures_dir)
+    body["data"]["bankAccounts"] = [
+        {"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"},
+        {"IBAN": IBAN, "type": "SALARY"},
+        {"Iban": IBAN, "type": "OTHER", "notes": "kept"},
+    ]
+    read = PersonDetail.model_validate(body["data"])
+    assert [account["type"] for account in read.bank_accounts] == ["DEFAULT", "SALARY", "OTHER"]
+    assert IBAN in read.model_dump_json(), "the read model stays faithful"
+    person = PersonDetailProjection.project(read)
+    assert person.bank_accounts == [
+        {"type": "DEFAULT", "bic": "TESTCHZZ"},
+        {"type": "SALARY"},
+        {"type": "OTHER", "notes": "kept"},
+    ]
+    assert IBAN not in person.model_dump_json()
+    assert IBAN not in PersonDetailProjection.model_validate(body["data"]).model_dump_json()
+
+
 @pytest.mark.anyio
 async def test_get_person_leaves_out_ssn_and_each_iban(
     respx_mock: respx.MockRouter, fixtures_dir: Path
