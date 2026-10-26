@@ -397,7 +397,7 @@ only) that nothing is left.
 ```bash
 uv sync --all-extras
 uv run pytest                      # offline, replays fixtures
-direnv exec ~/github/sdk env -u CASHCTRL_ORGS XIPPIOS_LIVE_TESTS=1 uv run pytest -m live   # demo only
+direnv exec ~/github/sdk env -u CASHCTRL_ORGS XIPPIOS_LIVE_TESTS=1 uv run pytest -m live --tb=short   # demo only
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
 uv run pre-commit run --all-files
@@ -413,15 +413,19 @@ with `CASHCTRL_DEMO_API_KEY` set to it because `pyproject.toml` names that varia
 A test that asserts a limiter wait or a quota pause is marked `rate_limited`, one that
 must reach the network `network`.
 
-`.github/workflows/live.yml` runs `uv run pytest -m live` with `XIPPIOS_LIVE_TESTS=1`
-nightly at 02:36 UTC, a time derived from the slug so that sources sharing a key never
-start together, and on demand from the Actions tab; pull requests never run live tests.
+`.github/workflows/live.yml` runs `uv run pytest -m live --tb=short` with
+`XIPPIOS_LIVE_TESTS=1` nightly at 02:36 UTC, a time derived from the slug so that sources
+sharing a key never start together, and on demand from the Actions tab; pull requests
+never run live tests.
 Every `live` test runs, write tests included, so a live write test acts only on data kept
 for testing (the demo organisation, ADR-0014) and cleans up after itself. Only its
-`uv run pytest -m live` step sees the demo organisation's pair, from the org secrets
-`CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`: the template renders the
+`uv run pytest -m live --tb=short` step sees the demo organisation's pair, from the org
+secrets `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`: the template renders the
 scaffold's `CASHCTRL_API_KEY`, which nothing reads, so the workflow names the pair by
 hand, and both org secrets must give sdk-cashctrl access for the nightly run to pass.
+`--tb=short` is added by hand too, and every live run here uses it: pytest's long
+traceback prints each frame's arguments, so a failed parse would print the upstream
+payload it was given, API user tags included, into the public Actions log.
 
 ## Workflow rules
 

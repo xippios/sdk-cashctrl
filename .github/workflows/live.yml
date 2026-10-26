@@ -7,6 +7,8 @@
 # organisation model (ADR-0014): the live tests reach the reserved demo organisation only,
 # declared by CASHCTRL_DEMO_SUBDOMAIN and CASHCTRL_DEMO_API_KEY, so those two org secrets
 # replace the rendered CASHCTRL_API_KEY, which nothing reads; CASHCTRL_ORGS is never set.
+# Also by hand: --tb=short, since pytest's long traceback prints each frame's arguments,
+# an upstream payload among them, into this public log.
 name: Live
 
 on:
@@ -29,7 +31,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --all-extras --frozen
-      - run: uv run pytest -m live
+      - run: uv run pytest -m live --tb=short
         # The demo organisation's pair, from the org secrets, for this step only: checkout,
         # setup-uv and uv sync never see it.
         env:
