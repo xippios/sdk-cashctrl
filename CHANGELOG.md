@@ -17,10 +17,10 @@ synthetic demo organisation only. It depends on `xippios-core~=0.2.0` from PyPI 
 built on sdk-template v0.2.0 and conventions 1.13. The last changes before the release
 enforce ADR-0017 by the projection type (`PersonDetailProjection` drops each bank
 account's `iban` itself), accept the `null` `attachmentCount` CashCtrl sends for a
-journal entry an order booked, and run the live tests with short tracebacks, so a failed
-parse prints no upstream payload into the public log. Nothing was published before, so
-the entries under Changed, Removed and Fixed record steps on the way to this release; a
-note marked superseded names what replaced one.
+journal entry an order booked, and run the live tests with short tracebacks, which keep
+each frame's arguments, the upstream payload among them, out of the public log. Nothing
+was published before, so the entries under Changed, Removed and Fixed record steps on
+the way to this release; a note marked superseded names what replaced one.
 
 ### Added
 
