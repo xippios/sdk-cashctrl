@@ -243,6 +243,12 @@ All notable changes to this project are documented here. The format follows
   updates it (journal, person; previewed first, read back after, every other derived
   field unchanged) and deletes it with the tools, after sweeping marked leftovers (by
   marked text or `nr`); and one for `list_order_categories`.
+- Two fixtures recorded on 2026-10-26 from the demo organisation, GET only: the 2026
+  journal with `onlyPurchase` (`journal_list/order_booked`, the two entries the seeded
+  purchase orders booked) and the read of one of them (`journal_read/order_booked`).
+- A read-only live check: the delete of a journal entry an order booked, found with
+  `only_purchase`, is previewed without `confirm` and refused; a delete is never
+  attempted. Two calls more, 42 a run.
 
 ### Changed
 
@@ -258,6 +264,9 @@ All notable changes to this project are documented here. The format follows
   - The dev group pins beautifulsoup4 (`==4.15.0`) and markdownify (`==1.2.3`) to the
     versions `scripts/refresh_upstream.py` pins in its PEP 723 block, where it took
     them with `>=`.
+  - The nightly `live.yml` and the live command in CLAUDE.md run pytest with
+    `--tb=short`: the long traceback prints each frame's arguments, so a failed parse
+    would print the upstream payload, API user tags included, into the public log.
 - Adopted xippios-core 0.2.0, sdk-template v0.2.0 and conventions 1.13 (conventions §15).
   - `xippios-core~=0.2.0` from PyPI, and its `mcp`, `http` and `testing` extras
     likewise: one core minor (conventions §12, ADR-0018). The git pin of sdk-core
@@ -427,3 +436,10 @@ All notable changes to this project are documented here. The format follows
 - The write tasks showed the `iban` of an item of `bankAccounts` as `REDACTED` only
   under the key `iban` exactly; the key is now matched in any case, as the projection
   and the recorder match it (ADR-0017).
+- A journal entry an order booked (`type` `ORDER`, `orderId` set) sends
+  `attachmentCount` `null` in the list and the read (seen in the demo organisation on
+  2026-10-26), where `JournalEntry` and `JournalEntryDetail` required a number:
+  `list_journal_entries` failed with `ValidationError` on any page holding one (the
+  whole 2026 journal of the demo organisation, for one), and `get_journal_entry`,
+  `update_journal_entry` and `delete_journal_entry` failed at their read, before the
+  booked-entry refusal. `attachment_count` is now `int | None`.
