@@ -860,6 +860,36 @@ def test_a_previewed_record_leaves_out_ssn_and_iban(
     assert IBAN not in preview.model_dump_json()
 
 
+def test_update_person_never_echoes_a_given_iban(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    """ADR-0017: an ``iban`` given to ``update_person`` goes upstream, never into a result.
+
+    The recorded read the update starts from, and for the confirmed call the recorded
+    update's answer: a replay never matches the request body, so the form asserted here
+    is the one the task sent, with the made-up value no fixture carries.
+    """
+    accounts = [BankAccountInput(iban=IBAN, type="DEFAULT", bic="TESTCHZZ")]
+    shown = [{"iban": "REDACTED", "type": "DEFAULT", "bic": "TESTCHZZ"}]
+    read = replay_fixture("person_read", "for_update")
+    preview = preview_of(tasks_write.update_person(DEMO, PERSON, bank_accounts=accounts))
+    assert preview.changes is not None
+    assert set(preview.changes) == {"bankAccounts"}
+    assert json.loads(preview.changes["bankAccounts"]) == shown
+    assert json.loads(preview.payload["bankAccounts"]) == shown
+    update = replay_fixture("person_update", "ok")
+    result = tasks_write.update_person(DEMO, PERSON, bank_accounts=accounts, confirm=True)
+    assert read.call_count == 2, "the confirmed call reads again"
+    sent = dict(sent_body(update))
+    assert json.loads(sent["bankAccounts"]) == [
+        {"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"}
+    ], "upstream receives the value"
+    assert isinstance(result.data, WriteResult)
+    assert (result.data.insert_id, result.data.message) == (PERSON, "Person saved")
+    assert json.loads(result.meta.request["bankAccounts"]) == shown
+    assert IBAN not in result.model_dump_json() + preview.model_dump_json()
+
+
 # Orders ------------------------------------------------------------------------------
 
 
