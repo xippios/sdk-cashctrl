@@ -583,7 +583,10 @@ class PersonAddress(UpstreamModel):
     with a create was stored and read back, with ``title_name``, in the live
     verification of 2026-10-24 (``docs/demo-org.md``, Person reads); it is in neither
     ``addresses`` table (``person/create.json``, ``person/update.json``), but reads
-    return it, so ``update_person`` refuses to carry it over.
+    return it, so ``update_person`` refuses to carry it over. Typed as the id of a title,
+    an integer, as the person's own ``titleId`` is: "optional, NUMBER", a "Person title"
+    (``docs/upstream/person.md`` line 314), whose ``id`` is "mandatory, NUMBER" (line
+    683, Read title).
     """
 
     id: int
@@ -597,7 +600,7 @@ class PersonAddress(UpstreamModel):
     company: str | None = None
     first_name: str | None = Field(default=None, validation_alias="firstName")
     last_name: str | None = Field(default=None, validation_alias="lastName")
-    title_id: JsonValue = Field(default=None, validation_alias="titleId")
+    title_id: int | None = Field(default=None, validation_alias="titleId")
     title_name: str | None = Field(default=None, validation_alias="titleName")
     company_for_address: str | None = Field(default=None, validation_alias="companyForAddress")
     first_name_for_address: str | None = Field(default=None, validation_alias="firstNameForAddress")
