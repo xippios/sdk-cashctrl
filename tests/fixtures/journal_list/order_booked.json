@@ -1,0 +1,49 @@
+{
+  "recorded_at": "2026-10-26T05:06:03.448412Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/journal/list.json?fiscalPeriodId=1&onlyPurchase=true&start=0&limit=20"
+  },
+  "response": {
+    "body": "{\"total\":2,\"data\":[{\"id\":50,\"created\":\"2026-10-23 10:30:24.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:24.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"debitId\":22,\"debitName\":\"6500 <values><de>Verwaltungsaufwand</de><en>Administrative expenses</en><fr>Charges d'administration</fr><it>Costi amministrativi</it></values>\",\"creditId\":9,\"creditName\":\"2000 <values><de>Kreditoren</de><en>Accounts payable</en><fr>Cr\u00e9anciers</fr><it>Creditori</it></values>\",\"associateId\":4,\"associateName\":\"Beispiel Telecom AG\",\"taxId\":13,\"taxCode\":\"VN1\",\"taxRate\":8.1,\"orderId\":6,\"orderBookEntryId\":null,\"salaryBookEntryId\":null,\"statementId\":null,\"inventoryId\":null,\"importEntryId\":null,\"type\":\"ORDER\",\"dateAdded\":\"2026-05-04 00:00:00.0\",\"title\":\"Netzwerk B\u00fcro Z\u00fcrich\",\"custom\":null,\"notes\":null,\"reference\":\"EK-2026-002\",\"amount\":830,\"currencyId\":null,\"currencyRate\":1,\"currencyCode\":\"CHF\",\"accountId\":null,\"accountCurrencyId\":null,\"accountClass\":null,\"balance\":null,\"nameSingular\":\"<values><de>Rechnung</de><en>Invoice</en><fr>Facture</fr><it>Fattura</it></values>\",\"orderType\":\"PURCHASE\",\"itemsCount\":0,\"recurrence\":null,\"startDate\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"attachmentCount\":null,\"allocationCount\":0,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"recurring\":false,\"isRecurring\":false},{\"id\":49,\"created\":\"2026-10-23 10:30:23.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:23.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"debitId\":45,\"debitName\":\"4200 <values><de>Warenaufwand</de><en>Cost of goods sold</en><fr>Charges de marchandises</fr><it>Costi delle merci di rivendita</it></values>\",\"creditId\":9,\"creditName\":\"2000 <values><de>Kreditoren</de><en>Accounts payable</en><fr>Cr\u00e9anciers</fr><it>Creditori</it></values>\",\"associateId\":3,\"associateName\":\"Muster B\u00fcro AG\",\"taxId\":13,\"taxCode\":\"VN1\",\"taxRate\":8.1,\"orderId\":5,\"orderBookEntryId\":null,\"salaryBookEntryId\":null,\"statementId\":null,\"inventoryId\":null,\"importEntryId\":null,\"type\":\"ORDER\",\"dateAdded\":\"2026-02-02 00:00:00.0\",\"title\":\"Wareneinkauf B\u00fcrom\u00f6bel\",\"custom\":null,\"notes\":null,\"reference\":\"EK-2026-001\",\"amount\":4650,\"currencyId\":null,\"currencyRate\":1,\"currencyCode\":\"CHF\",\"accountId\":null,\"accountCurrencyId\":null,\"accountClass\":null,\"balance\":null,\"nameSingular\":\"<values><de>Rechnung</de><en>Invoice</en><fr>Facture</fr><it>Fattura</it></values>\",\"orderType\":\"PURCHASE\",\"itemsCount\":0,\"recurrence\":null,\"startDate\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"notifyEmail\":null,\"attachmentCount\":null,\"allocationCount\":0,\"costCenterIds\":null,\"imported\":null,\"importedBy\":null,\"costCenterNumbers\":null,\"recurring\":false,\"isRecurring\":false}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Mon, 26 Oct 2026 05:06:02 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457-gzip\""
+      ],
+      [
+        "set-cookie",
+        "REDACTED"
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

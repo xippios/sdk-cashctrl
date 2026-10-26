@@ -25,18 +25,24 @@ creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10
   through the endpoint wrapper should an assertion fail first. A confirmed journal
   delete reads the entry first and refuses one an order or a salary run booked.
 
+That refusal is checked live once, read-only: a delete without ``confirm`` of an entry a
+seeded purchase order booked, found with GET calls, is refused before any preview.
+
 The calls of one run: 17 for the reads, 4 lookups (accounts, tax codes, customers, the
 sales categories), 9 for the journal (sweep, create, the sweep's query seeing the new
 entry, the update's preview, the update as read and write, the read back, the delete as
-read and write), 7 for a person (the same without the query, the delete one call) and 3
-for an order; 40 in all, one more per leftover swept, two for a journal entry.
+read and write), 7 for a person (the same without the query, the delete one call), 3
+for an order and 2 for the refused delete of an entry an order booked (the list, the
+delete's read); 42 in all, one more per leftover swept, two for a journal entry.
 """
 
+from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
 from typing import Any
 
 import pytest
+from xippios.core import InvalidRequestError
 
 from xippios.cashctrl import api, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
@@ -312,6 +318,43 @@ async def test_journal_entry_create_update_delete(demo_org: str, write_ids: dict
     finally:
         if created is not None:
             await api.journal_delete(demo_org, [created])
+
+
+async def test_delete_journal_entry_refuses_an_entry_an_order_booked(
+    demo_org: str, fiscal_periods: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The preview of a delete of an entry an order booked is refused; GET calls only.
+
+    The journal of 2026 is listed with ``only_purchase`` ("Flag to only include purchase
+    order book entries", ``docs/upstream/journal.md`` line 47): the seeded purchase
+    orders booked two (``journal_list/order_booked``, recorded on 2026-10-26). The first
+    entry that names its order (``order_id`` or ``order_book_entry_id``, marks the delete
+    refuses) is deleted without ``confirm``: the task reads it and refuses it before any
+    preview. Nothing is created or deleted, and the delete wrapper is replaced by one
+    that fails the test.
+    """
+
+    async def no_delete(org: str, ids: Sequence[int]) -> Any:
+        raise AssertionError("a delete without confirm never deletes")
+
+    monkeypatch.setattr(api, "journal_delete", no_delete)
+    listed = await tasks.list_journal_entries_async(
+        demo_org, fiscal_period_id=fiscal_periods["2026"], only_purchase=True, limit=20
+    )
+    booked = [
+        entry
+        for entry in listed.data
+        if entry.order_id is not None or entry.order_book_entry_id is not None
+    ]
+    assert booked, "no entry a purchase order booked in 2026; journal_list/order_booked has two"
+    entry = booked[0]
+    with pytest.raises(
+        InvalidRequestError,
+        match=rf"journal entry {entry.id} was booked by an order or a salary run "
+        r"\((orderId|orderBookEntryId)[^)]* set\); upstream documents that such entries "
+        "cannot be deleted here",
+    ):
+        await tasks_write.delete_journal_entry_async(demo_org, entry.id)
 
 
 async def test_person_create_update_delete(demo_org: str) -> None:

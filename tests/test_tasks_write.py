@@ -494,6 +494,49 @@ def test_delete_journal_entry_refuses_an_entry_another_module_booked(
     assert (read.call_count, write.called) == (1, False)
 
 
+ORDER_BOOKED = 50
+"""The entry a seeded purchase order booked, recorded as ``journal_read/order_booked``."""
+
+
+@pytest.mark.parametrize(
+    ("write", "path", "call"),
+    [
+        (
+            "deleted",
+            "journal/delete.json",
+            lambda: tasks_write.delete_journal_entry(DEMO, ORDER_BOOKED),
+        ),
+        (
+            "updated",
+            "journal/update.json",
+            lambda: tasks_write.update_journal_entry(DEMO, ORDER_BOOKED, title="x"),
+        ),
+    ],
+    ids=["delete", "update"],
+)
+def test_a_preview_refuses_an_entry_an_order_booked(
+    replay_fixture: ReplayFixture,
+    respx_mock: respx.MockRouter,
+    write: str,
+    path: str,
+    call: Callable[[], Any],
+) -> None:
+    """The recorded read of an entry an order booked (2026-10-26), unchanged: refused.
+
+    ``orderId`` is set, ``attachmentCount`` is ``null``; without ``confirm`` the delete's
+    and the update's read refuses it, and nothing is written.
+    """
+    read = replay_fixture("journal_read", "order_booked")
+    sent = respx_mock.post(f"{BASE}/{path}")
+    with pytest.raises(
+        InvalidRequestError,
+        match=rf"journal entry {ORDER_BOOKED} was booked by an order or a salary run "
+        rf"\(orderId set\); upstream documents that such entries cannot be {write} here",
+    ):
+        call()
+    assert (read.call_count, sent.called) == (1, False)
+
+
 # Persons -----------------------------------------------------------------------------
 
 
@@ -858,6 +901,58 @@ def test_a_previewed_record_leaves_out_ssn_and_iban(
     assert preview.before.bank_accounts == [{"type": "DEFAULT"}]
     assert SSN not in preview.model_dump_json()
     assert IBAN not in preview.model_dump_json()
+
+
+def test_update_person_never_echoes_a_given_iban(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    """ADR-0017: an ``iban`` given to ``update_person`` goes upstream, never into a result.
+
+    The recorded read the update starts from, and for the confirmed call the recorded
+    update's answer: a replay never matches the request body, so the form asserted here
+    is the one the task sent, with the made-up value no fixture carries.
+    """
+    accounts = [BankAccountInput(iban=IBAN, type="DEFAULT", bic="TESTCHZZ")]
+    shown = [{"iban": "REDACTED", "type": "DEFAULT", "bic": "TESTCHZZ"}]
+    read = replay_fixture("person_read", "for_update")
+    preview = preview_of(tasks_write.update_person(DEMO, PERSON, bank_accounts=accounts))
+    assert preview.changes is not None
+    assert set(preview.changes) == {"bankAccounts"}
+    assert json.loads(preview.changes["bankAccounts"]) == shown
+    assert json.loads(preview.payload["bankAccounts"]) == shown
+    update = replay_fixture("person_update", "ok")
+    result = tasks_write.update_person(DEMO, PERSON, bank_accounts=accounts, confirm=True)
+    assert read.call_count == 2, "the confirmed call reads again"
+    sent = dict(sent_body(update))
+    assert json.loads(sent["bankAccounts"]) == [
+        {"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"}
+    ], "upstream receives the value"
+    assert isinstance(result.data, WriteResult)
+    assert (result.data.insert_id, result.data.message) == (PERSON, "Person saved")
+    assert json.loads(result.meta.request["bankAccounts"]) == shown
+    assert IBAN not in result.model_dump_json() + preview.model_dump_json()
+
+
+def test_a_shown_iban_is_redacted_whatever_the_case_of_its_key() -> None:
+    """The key of an item of ``bankAccounts`` is matched in any case, as the projection's.
+
+    ``BankAccountInput`` sends ``iban`` only, so this goes to ``_shown`` directly.
+    """
+    sent = json_text(
+        [
+            {"IBAN": IBAN, "type": "DEFAULT"},
+            {"Iban": IBAN, "type": "SALARY"},
+            {"iban": "", "type": "OTHER"},
+        ]
+    )
+    shown = tasks_write._shown({"bankAccounts": sent, "company": "x"})
+    assert json.loads(shown["bankAccounts"]) == [
+        {"IBAN": "REDACTED", "type": "DEFAULT"},
+        {"Iban": "REDACTED", "type": "SALARY"},
+        {"iban": "", "type": "OTHER"},
+    ]
+    assert shown["company"] == "x"
+    assert IBAN not in json.dumps(shown)
 
 
 # Orders ------------------------------------------------------------------------------
