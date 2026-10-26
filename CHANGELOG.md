@@ -247,8 +247,8 @@ All notable changes to this project are documented here. The format follows
   journal with `onlyPurchase` (`journal_list/order_booked`, the two entries the seeded
   purchase orders booked) and the read of one of them (`journal_read/order_booked`).
 - A read-only live check: the delete of a journal entry an order booked, found with
-  `only_purchase`, is previewed without `confirm` and refused; a delete is never
-  attempted. Two calls more, 42 a run.
+  `only_purchase`, is asked for without `confirm` and refused before any preview; a
+  delete is never attempted. Two calls more, 42 a run.
 
 ### Changed
 

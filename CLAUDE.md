@@ -332,9 +332,9 @@ of the employee") and the `iban` of each of a person's `bankAccounts` (the list 
   `PersonDetail`, `JournalEntryDetail.associates`; ADR-0003).
 - The tasks return projections without them, built with `UpstreamModel.project` in
   `tasks.py`: `PersonProjection` (`list_persons`), `PersonDetailProjection`
-  (`get_person`; each bank account kept without its `iban`) and
-  `JournalEntryDetailProjection` (`get_journal_entry`, its `associates` projected). A
-  write preview's `before` is the same projection.
+  (`get_person`; each bank account kept without its `iban`, which the projection's own
+  validator drops) and `JournalEntryDetailProjection` (`get_journal_entry`, its
+  `associates` projected). A write preview's `before` is the same projection.
 - `create_person` and `update_person` take `ssn` and, in `bank_accounts`, `iban`, and
   send them as given; a preview's `payload` and `changes` and a performed write's
   `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`

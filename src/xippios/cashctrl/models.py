@@ -561,11 +561,12 @@ class JournalEntry(_JournalEntryFields):
     ``debit_id`` and one ``credit_id`` in the list; its lines are in
     ``get_journal_entry``'s ``items``. Kept as sent: ``order_id``, the order's id on an
     entry an order booked, and the list's ``name_singular`` (a localised name) and
-    ``order_type`` (``PURCHASE``), both filled on such an entry (seen on 2026-10-26) and
-    ``null`` on a manual one; only seen as ``null``: ``order_book_entry_id``,
-    ``salary_book_entry_id``, ``statement_id``, ``inventory_id``, ``import_entry_id``,
-    ``imported``, ``imported_by``, ``cost_center_ids``, ``cost_center_numbers``, and the
-    list's ``account_id``, ``account_currency_id``, ``account_class`` and ``balance``.
+    ``order_type`` (``PURCHASE``); ``order_id``, ``name_singular`` and ``order_type`` are
+    filled on such an entry (seen on 2026-10-26) and ``null`` on a manual one; only seen
+    as ``null``: ``order_book_entry_id``, ``salary_book_entry_id``, ``statement_id``,
+    ``inventory_id``, ``import_entry_id``, ``imported``, ``imported_by``,
+    ``cost_center_ids``, ``cost_center_numbers``, and the list's ``account_id``,
+    ``account_currency_id``, ``account_class`` and ``balance``.
     """
 
     debit_name: str | None = Field(default=None, validation_alias="debitName")
@@ -858,8 +859,8 @@ class PersonDetailProjection(_PersonDetailFields):
     conventions §3): ``ssn`` is left out, and so is the ``iban`` of each of
     ``bank_accounts``, whose other keys are kept as sent. The type enforces both: it has
     no ``ssn`` field, and its validator drops each bank account's ``iban`` (the key in
-    any case) however the projection is built, so ``PersonDetailProjection.project``
-    needs no help from the caller. Every other field is ``PersonDetail``'s, under the
+    any case) however it is validated, so ``PersonDetailProjection.project`` needs no
+    help from the caller. Every other field is ``PersonDetail``'s, under the
     same name and type; built with ``UpstreamModel.project``. Write previews show the
     record before an update or a delete as this projection, and
     ``JournalEntryDetailProjection.associates`` holds it.
