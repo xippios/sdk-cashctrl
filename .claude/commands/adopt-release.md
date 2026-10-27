@@ -12,6 +12,14 @@ build or install route) waits for Johannes (ADR-0018, amendment (e); the merge c
 are in the README of the organisation's `.github` repository). A release tag is not part
 of an adoption.
 
+From template v0.2.2 on, cashctrl adopts a core minor without a template release (D35,
+Johannes 2026-10-26; D85, 2026-10-27): the argument is then the core version, e.g.
+`0.4.0`. Step 3 runs no `copier update`: `.copier-answers.yml` stays at
+`_commit: v0.2.2`, its `core_version` left as the record of the last render, and the
+floor is raised to `~=X.Y.0` by hand in `pyproject.toml`, its extras likewise, then
+`uv lock`. Items 3 to 9 apply as written; item 2 is unticked with the reason "no
+template release to adopt (D35)" and item 6 with "no enum file" (step 7).
+
 1. **Where the repository stands.** Read `.copier-answers.yml`: `_commit` is the template
    tag the repository is on, `core_version` the core minor it depends on, `core_git_ref` a
    git pin of core, if any. Start from a clean `main` on a branch
@@ -49,11 +57,7 @@ of an adoption.
    `conftest.py`. The files the source fills, `__init__.py`, `_client.py`, `models.py`,
    `api/`, `tasks.py`, `tasks_write.py`, `scripts/`, `tests/test_tasks.py`,
    `tests/test_tasks_write.py`, `tests/test_live.py`, `tests/fixtures/`, `docs/upstream/`,
-   `README.md` and `CHANGELOG.md`, are never touched by the update. The update renders
-   the template's reference-data scaffolding again, `params.py`, `enums.py`,
-   `reference/README.md` and `scripts/refresh_reference.py`, since copier re-creates a
-   deleted file that matches the template's `_skip_if_exists`: delete those four again,
-   cashctrl packages no reference data (`/refresh-reference-data`). Then `uv lock` and
+   `README.md` and `CHANGELOG.md`, are never touched by the update. Then `uv lock` and
    `uv sync --all-extras`. `pyproject.toml` depends on `xippios-core~=X.Y.Z`, its `mcp`,
    `http` and `testing` extras likewise, with no `[tool.uv.sources]` left: `~=X.Y.0`, or
    `~=X.Y.Z` when patch `Z` shipped what the source adopts (`~=0.2.1` for template
@@ -84,10 +88,9 @@ of an adoption.
 
 7. **Item 6: generated enums.** cashctrl has no generated enum file and no
    `scripts/refresh_reference.py`, since it packages no reference data: the item stays
-   unticked with that reason, and the scaffold the update renders again is deleted
-   (step 3). An adoption fetches nothing: `docs/upstream/FETCHED.md` stays as it is,
-   left to the next `/refresh-upstream`; only the capture script's changes are ported
-   (conventions §15, ADR-0003 amendment).
+   unticked with that reason. An adoption fetches nothing: `docs/upstream/FETCHED.md`
+   stays as it is, left to the next `/refresh-upstream`; only the capture script's
+   changes are ported (conventions §15, ADR-0003 amendment).
 
 8. **Item 7: scripts.** `uv run mypy` covers `scripts/` too
    (`files = ["src", "tests", "scripts"]`); fix what `--strict` reports there.

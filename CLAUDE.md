@@ -490,12 +490,12 @@ payload it was given, API user tags included, into the public Actions log.
   through conventions §15; `copier update` must never be run past v0.2.2: the v0.3.0
   template deletes `mcp_write.py`, `tasks_write.py` and `tests/test_tasks_write.py` and
   rewrites `api_key_location: basic` to `query` without a conflict marker. An adoption
-  of a later core minor runs `uvx copier update --defaults --vcs-ref=v0.2.2 -d
-  core_version=<X.Y.Z> -d core_git_ref=` and ports that core release's Hand-apply list.
-  The update renders the template's reference-data scaffolding again (`params.py`,
-  `enums.py`, `reference/README.md`, `scripts/refresh_reference.py`): copier re-creates
-  a deleted file that matches the template's `_skip_if_exists` (copier 9.19), so the
-  adoption deletes those four again, since cashctrl packages no reference data.
+  of a later core minor runs no `copier update` (D35, D85): it raises the floor to
+  `~=X.Y.0` by hand in `pyproject.toml`, runs `uv lock` and ports that core release's
+  Hand-apply list (`/adopt-release`). The reference-data scaffolding (`params.py`,
+  `enums.py`, `reference/`, `scripts/refresh_reference.py`) does not come back, since
+  cashctrl runs no further `copier update` (D35); a future value set brings the script
+  back from the template's scaffold by hand.
 - If a convention seems wrong, say so in the PR and follow it anyway; changing it is a
   PR against `sdk-core/docs/conventions.md` plus an ADR.
 
