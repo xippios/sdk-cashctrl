@@ -24,9 +24,11 @@ stay empty. Every list task sets ``meta.total`` to upstream's ``total``, its cou
 records matching the request (ADR-0012); it is never computed from ``len(data)``.
 
 The persons a task returns are projections without the personal identifiers ``ssn`` and
-``iban`` (ADR-0017, ``_person`` and its neighbours), and the locations are projections
-without their bank account numbers ``iban`` and ``qr_iban`` (``_location``); the endpoint
-wrappers' read models keep them.
+``iban`` (ADR-0017, ``_person`` and its neighbours), the locations projections without
+their bank account numbers ``iban`` and ``qr_iban`` (``_location``), and the rows of a
+report, kept as upstream sends them, lose every key named ``ssn``, ``iban`` or
+``qrIban`` in any letter case and at any depth (``_report``); the endpoint wrappers' read
+models keep them.
 
 The journal, person and order lists page by offset (``start``, ``limit``), resolved once
 in ``_offset_pages`` (conventions §4). With ``limit`` the task sends one request,
@@ -46,7 +48,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import date, datetime
 from typing import Any, TypeGuard, get_args
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from pydantic_core import ErrorDetails
 from xippios.core import (
     InvalidRequestError,
@@ -1036,6 +1038,36 @@ async def get_report_tree_async(org: str) -> Result[list[ReportTreeNode]]:
     return Result(data=response.data, meta=meta)
 
 
+_IDENTIFIER_KEYS = frozenset({"ssn", "iban", "qriban"})
+"""Keys dropped from a report's raw rows, compared in lower case (ADR-0017, row 123)."""
+
+
+def _without_identifiers(value: JsonValue) -> JsonValue:
+    """``value`` without a key named ``ssn``, ``iban`` or ``qrIban``, in any case, at any depth."""
+    if isinstance(value, dict):
+        return {
+            key: _without_identifiers(item)
+            for key, item in value.items()
+            if key.lower() not in _IDENTIFIER_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_identifiers(item) for item in value]
+    return value
+
+
+def _report(report: ReportData) -> ReportData:
+    """``report`` without the identifier keys in its rows and ``properties`` (ADR-0017).
+
+    The rows stay upstream's JSON (``JsonValue``); dropping a nested identifier is the
+    projection rule's parsing only (ADR-0003, amendment 2026-10-26).
+    """
+    return ReportData.project(
+        report,
+        data=[_without_identifiers(row) for row in report.data],
+        properties=_without_identifiers(report.properties),
+    )
+
+
 def _check_report_arguments(
     *,
     element_id: object,
@@ -1108,6 +1140,14 @@ async def get_report_data_async(
     camelCase names, and amounts are JSON numbers. Over MCP a result over 128 KB comes
     back as a note and a preview: narrow the period or read a smaller report.
 
+    Payroll and people reports (``SALARY_LIST``, ``SETTLEMENT``,
+    ``WITHHOLDING_TAX_SETTLEMENT``, ``REVENUE_BY_PERSON``, ``OPEN_DEBTORS``, ...) carry
+    personal data under names the documentation does not give. Every key named ``ssn``,
+    ``iban`` or ``qrIban``, in any letter case and at any depth, is dropped before the
+    data comes back; nothing else is. The salary module is outside what this package
+    covers, but its reports are not refused: the answer does not say which type of
+    report it is.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         element_id: The report, an ``element_id`` from ``get_report_tree``, e.g. ``1``.
@@ -1138,7 +1178,7 @@ async def get_report_data_async(
         "start_date": start_date,
     }
     sent = api.report_element_data_params(element_id, **arguments)
-    report = await api.report_element_data(org, element_id, **arguments)
+    report = _report(await api.report_element_data(org, element_id, **arguments))
     meta = _meta(org, "report/element/data.json", sent, total=report.total)
     return Result(data=report, meta=meta)
 
