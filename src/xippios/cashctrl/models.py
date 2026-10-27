@@ -14,16 +14,20 @@ generated into ``enums.py`` would be a ``StrEnum``, and one of integer ids an ``
 upstream concept, and nothing is renamed or computed.
 
 These read models stay faithful, documented personal identifiers included: ``ssn`` and
-``iban`` (``Person``, ``PersonDetail``, and ``JournalEntryDetail.associates``). The
-projections tasks return leave those out (``PersonProjection``,
-``PersonDetailProjection``, ``JournalEntryDetailProjection``), a write task does not
-echo one in ``meta.request`` and its preview shows one as ``REDACTED``, and fixtures
-never carry their values (ADR-0017).
+``iban`` (``Person``, ``PersonDetail``, and ``JournalEntryDetail.associates``), and a
+location's ``iban`` and ``qrIban`` (``Location``, row 123). The projections tasks return
+leave those out (``PersonProjection``, ``PersonDetailProjection``,
+``JournalEntryDetailProjection``, ``LocationProjection``), as ``get_report_data`` drops
+them from its raw rows (``ReportData`` itself keeps what upstream sends), a write task
+does not echo one in ``meta.request`` and its preview shows one as ``REDACTED``, and
+fixtures never carry their values (ADR-0017).
 
 ``docs/upstream/`` shows no response bodies. Field types come from the create and update
 parameter tables where they describe the field, and from the answers recorded against the
-demo organisation on 2026-10-23 where they do not; the latter are named in each model's
-docstring as typed from observation. Two demo organisations answered that day: the
+demo organisation where they do not: on 2026-10-23 and 2026-10-24 for the ledger,
+journal, person and order models, on 2026-10-27 for the custom field, category, title,
+cost center, location and report models. The latter fields are named in each model's
+docstring as typed from observation. Two demo organisations answered on 2026-10-23: the
 first, a copy of real books, since retired, and the synthetic one seeded by
 ``scripts/seed_demo.py``; the committed fixtures come from the synthetic one only. What
 those answers showed:
@@ -1420,8 +1424,9 @@ class AccountCategory(UpstreamModel):
     ``category_id`` an account carries and ``list_accounts`` takes. Typed from the tables
     of ``account/category/create.json`` and ``update.json``: ``name`` (localised as
     ``<values><de>...</de></values>``; the five top-level categories' plain,
-    ``Assets``), ``number`` (text, "Must be numeric", used for sorting: ``"1"``,
-    ``"10"``, ``"100"``) and ``parent_id`` (``None`` at the top level). Typed from
+    ``Assets``), ``number`` (optional text, "Must be numeric", used for sorting: ``"1"``,
+    ``"10"``, ``"100"``; every recorded category has one) and ``parent_id`` (``None`` at
+    the top level). Typed from
     observation on 2026-10-27 (CashCtrl's default chart, 38 categories): ``id``,
     ``account_class`` (seen: ``ASSET``, ``LIABILITY``, ``EXPENSE``, ``REVENUE``,
     ``BALANCE``, one per top-level category and inherited below it), ``full_name`` (the
@@ -1437,7 +1442,7 @@ class AccountCategory(UpstreamModel):
     """
 
     id: int
-    number: str
+    number: str | None = None
     name: str
     parent_id: int | None = Field(default=None, validation_alias="parentId")
     account_class: str | None = Field(default=None, validation_alias="accountClass")
@@ -1460,12 +1465,14 @@ class CostCenter(UpstreamModel):
     has no cost center, and ``account/costcenter/list.json`` answered ``{"total": 0,
     "data": []}`` on 2026-10-27, so no record was observed. Every field but ``id`` is
     therefore optional: ``name`` (localised), ``category_id``, ``notes`` (HTML),
-    ``is_inactive``, ``target_min`` and ``target_max``. ``number`` is documented as the
-    account number is ("NUMBER", "Must be numeric but can contain a decimal point"),
-    which comes as text, and is kept as sent. The list documents ``fiscalPeriodId``,
-    "from which we retrieve the balances", so its records presumably carry balances;
-    never observed, they are not modelled. The ``created*``/``last_updated*``
-    bookkeeping fields every other list sends are assumed here, not observed.
+    ``is_inactive``, ``target_min`` and ``target_max``, and ``attachments``, documented
+    as a list of ``{fileId}`` and kept as sent, as ``Location``'s are. ``number`` is
+    documented as the account number is ("NUMBER", "Must be numeric but can contain a
+    decimal point"), which comes as text, and is kept as sent. The list documents
+    ``fiscalPeriodId``, "from which we retrieve the balances", so its records presumably
+    carry balances; never observed, they are not modelled. The ``created*`` and
+    ``last_updated*`` bookkeeping fields every other list sends are assumed here, not
+    observed.
     """
 
     id: int
@@ -1476,6 +1483,7 @@ class CostCenter(UpstreamModel):
     is_inactive: bool | None = Field(default=None, validation_alias="isInactive")
     target_min: Decimal | None = Field(default=None, validation_alias="targetMin")
     target_max: Decimal | None = Field(default=None, validation_alias="targetMax")
+    attachments: list[JsonValue] = Field(default_factory=list)
     created: datetime | None = None
     created_by: str | None = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
@@ -1623,6 +1631,12 @@ class ReportData(UpstreamModel):
     category's total is a row of its own. ``properties.columns`` lists the columns the
     report shows, each with its ``title`` (``01/01/2025``) and ``dataIndex``, the row
     field it shows (``dcOpeningAmount``).
+
+    The envelope, ``total`` a number and ``data`` a list, was observed for ``BALANCE``
+    alone and is assumed for every report type: an answer of another shape (a chart
+    without a ``total``, ``data`` as an object) fails to parse with ``ValidationError``
+    instead of being returned misread. Neither the answer nor the request names the
+    report's type.
     """
 
     total: int
