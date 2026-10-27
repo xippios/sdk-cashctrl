@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-10-27T22:23:59.174731Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/history/list.json?orderId=5&start=0&limit=100"
+  },
+  "response": {
+    "body": "{\"total\":2,\"data\":[{\"id\":72,\"created\":\"2026-10-23 10:30:23.0\",\"createdBy\":\"API:REDACTED\",\"type\":\"ORDER\",\"changeType\":\"STATUS\",\"personId\":3,\"orderId\":5,\"statementId\":null,\"message\":\"Rechnung 'EK-2026-001' Status changed to Offen.\"},{\"id\":71,\"created\":\"2026-10-23 10:30:23.0\",\"createdBy\":\"API:REDACTED\",\"type\":\"ORDER\",\"changeType\":\"CREATE\",\"personId\":3,\"orderId\":5,\"statementId\":null,\"message\":\"Rechnung 'EK-2026-001' created.\"}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 27 Oct 2026 22:23:57 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

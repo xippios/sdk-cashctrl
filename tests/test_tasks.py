@@ -1246,6 +1246,197 @@ async def test_get_order_as_a_tool(
     assert payload["data"]["total"] == 7750
 
 
+# The book entries of an order and the history, recorded on 2026-10-27: the entry the
+# seeded purchase order EK-2026-001 (order 5) booked from its items, that order's history,
+# and the history of the order a write fixture created, updated and deleted (order 20),
+# read after the delete.
+
+BOOKED_ORDER = 5
+"""The seeded purchase order EK-2026-001, in a status that books (``docs/demo-org.md``)."""
+
+
+def test_list_order_book_entries_replays_a_booked_purchase_order(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    route = replay_fixture("order_bookentry_list", "booked")
+    result = tasks.list_order_book_entries(DEMO, BOOKED_ORDER)
+    assert sent_query(route) == {"id": "5"}, "the order's id, under upstream's name"
+    assert sent_query(route) == recorded_query(
+        recorded(fixtures_dir, "order_bookentry_list", "booked")
+    )
+    assert result.meta.endpoint == "order/bookentry/list.json"
+    assert result.meta.request == {"org": DEMO, "id": BOOKED_ORDER}
+    assert (result.meta.tenant, result.meta.total, len(result.data)) == (DEMO, 1, 1)
+    (entry,) = result.data
+    assert (entry.order_id, entry.type, entry.date) == (BOOKED_ORDER, "GENERATED", date(2026, 2, 2))
+    assert (entry.amount, entry.net_amount, entry.tax_amount) == (
+        Decimal(4650),
+        Decimal("4301.57"),
+        Decimal("348.43"),
+    ), "EK-2026-001's total, read as gross (docs/demo-org.md)"
+    assert entry.net_amount + entry.tax_amount == entry.amount  # type: ignore[operator]
+    assert (entry.debit_id, entry.credit_id, entry.tax_id) == (45, 9, 13)
+    assert (entry.debit_name or "").startswith("4200 ")
+    assert (entry.credit_name or "").startswith("2000 ")
+    assert [(row.account_id, row.is_tax) for row in entry.rows] == [
+        (45, False),
+        (9, False),
+        (34, True),
+    ], "a row per account, the input tax apart, as a journal entry's rows"
+    assert entry.created_by == "API:REDACTED"
+
+
+@pytest.mark.anyio
+async def test_list_order_book_entries_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("order_bookentry_list", "booked")
+    arguments = {"org": DEMO, "order_id": BOOKED_ORDER}
+    payload = await mcp_call(server, "cashctrl_list_order_book_entries", arguments)
+    assert payload["meta"]["total"] == 1
+    assert payload["meta"]["request"] == {"org": DEMO, "id": BOOKED_ORDER}
+    assert (payload["data"][0]["amount"], payload["data"][0]["net_amount"]) == (4650, 4301.57)
+
+
+def test_list_order_book_entries_as_a_route(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from xippios.cashctrl.http import router
+
+    app = FastAPI()
+    app.include_router(router)
+    replay_fixture("order_bookentry_list", "booked")
+    response = TestClient(app).get(
+        "/cashctrl/list_order_book_entries", params={"org": DEMO, "order_id": BOOKED_ORDER}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["meta"]["total"] == 1
+    assert response.json()["meta"]["tenant"] == DEMO
+
+
+def test_list_history_replays_an_orders_history(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    route = replay_fixture("history_list", "order")
+    result = tasks.list_history(DEMO, order_id=BOOKED_ORDER)
+    sent = sent_query(route)
+    assert sent == {"orderId": "5", "start": "0", "limit": "100"}, "every page, 100 a request"
+    assert sent == recorded_query(recorded(fixtures_dir, "history_list", "order"))
+    assert result.meta.endpoint == "history/list.json"
+    assert result.meta.request == {"org": DEMO, "orderId": BOOKED_ORDER, "start": 0}
+    assert (result.meta.tenant, result.meta.total, len(result.data)) == (DEMO, 2, 2)
+    assert [(e.change_type, e.type, e.order_id, e.person_id) for e in result.data] == [
+        ("STATUS", "ORDER", BOOKED_ORDER, 3),
+        ("CREATE", "ORDER", BOOKED_ORDER, 3),
+    ], "newest first, upstream's default dir"
+    assert [entry.message for entry in result.data] == [
+        "Rechnung 'EK-2026-001' Status changed to Offen.",
+        "Rechnung 'EK-2026-001' created.",
+    ]
+    assert {entry.created_by for entry in result.data} == {"API:REDACTED"}
+    assert result.data[0].created == datetime(2026, 10, 23, 10, 30, 23)
+    assert result.data[0].statement_id is None
+
+
+def test_list_history_with_limit_is_one_page(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    route = replay_fixture("history_list", "order")
+    result = tasks.list_history(DEMO, order_id=BOOKED_ORDER, limit=100)
+    assert sent_query(route) == {"orderId": "5", "start": "0", "limit": "100"}
+    assert route.call_count == 1
+    assert result.meta.request == {
+        "org": DEMO,
+        "orderId": BOOKED_ORDER,
+        "start": 0,
+        "limit": 100,
+    }
+    assert result.meta.total == 2
+
+
+def test_the_history_of_a_deleted_order_is_empty(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """Order 20, created, updated and deleted for the write fixtures, read after the delete.
+
+    Its create and update were listed before the delete; after it upstream lists none.
+    """
+    replay_fixture("history_list", "deleted_order")
+    result = tasks.list_history(DEMO, order_id=20)
+    assert (result.data, result.meta.total) == ([], 0)
+
+
+def test_list_history_sends_its_parameters_as_upstream_reads_them(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """What is sent; the answer is the recorded history, which matches any query."""
+    route = replay_fixture("history_list", "order")
+    result = tasks.list_history(
+        DEMO,
+        person_id=3,
+        statement_id=4,
+        query="EK-2026-001",
+        filter=[{"comparison": "eq", "field": "changeType", "value": "CREATE"}],  # type: ignore[list-item]
+        dir="ASC",
+        start=20,
+        limit=20,
+    )
+    sent = sent_query(route)
+    assert sent == {
+        "dir": "ASC",
+        "filter": '[{"comparison":"eq","field":"changeType","value":"CREATE"}]',
+        "personId": "3",
+        "query": "EK-2026-001",
+        "statementId": "4",
+        "start": "20",
+        "limit": "20",
+    }
+    assert result.meta.request == {
+        "org": DEMO,
+        **sent,
+        "personId": 3,
+        "statementId": 4,
+        "start": 20,
+        "limit": 20,
+    }
+
+
+@pytest.mark.anyio
+async def test_list_history_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("history_list", "order")
+    payload = await mcp_call(server, "cashctrl_list_history", {"org": DEMO, "order_id": 5})
+    assert payload["meta"]["total"] == 2
+    assert [entry["change_type"] for entry in payload["data"]] == ["STATUS", "CREATE"]
+    assert "note" not in payload
+
+
+@pytest.mark.anyio
+async def test_a_history_over_its_cap_names_the_filters_and_where_to_resume(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """``MCP_CAPS``'s note for ``list_history``, on the recorded history with one row a page.
+
+    The recorded history, two entries, fits the default bound, so the bound is lowered
+    here and the note kept; the cut and the resume hint are core's (ADR-0016).
+    """
+    replay_fixture("history_list", "order")
+    cap = dataclasses.replace(tasks.MCP_CAPS["list_history"], max_rows=1)
+    capped = build_server(SOURCE, [tasks.list_history], caps={"list_history": cap})
+    arguments = {"org": DEMO, "order_id": BOOKED_ORDER}
+    payload = json.loads(await mcp_call_text(capped, "cashctrl_list_history", arguments))
+    assert len(payload["data"]) == 1
+    assert payload["note"].startswith("showing 1 of 2 rows")
+    assert payload["note"].endswith(
+        "narrow the history with order_id, person_id, statement_id, query or filter, or "
+        "page it with limit; resume with start=1"
+    )
+
+
 def test_list_order_categories_replays_the_sales_categories(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
@@ -1815,11 +2006,17 @@ def test_every_cap_names_a_task_and_only_parameters_it_takes() -> None:
     assert {"query", "filter", "category_id", "only_active"} <= set(
         re.findall(r"[a-z]+(?:_[a-z]+)*", tasks.MCP_CAPS["list_cost_centers"].note or "")
     )
+    assert {"order_id", "person_id", "statement_id", "query", "filter", "limit"} <= set(
+        re.findall(r"[a-z]+(?:_[a-z]+)*", tasks.MCP_CAPS["list_history"].note or "")
+    )
 
 
 @pytest.mark.anyio
 async def test_the_discovery_lists_and_reports_are_read_tools_and_routes() -> None:
-    """Agents need their ids to form write calls: on the read server, never the write one."""
+    """Agents need their ids to form write calls: on the read server, never the write one.
+
+    The book entries of an order and the history are reads too, served the same way.
+    """
     from fastapi.routing import APIRoute
 
     from xippios.cashctrl.http import router
@@ -1834,6 +2031,8 @@ async def test_the_discovery_lists_and_reports_are_read_tools_and_routes() -> No
         "list_locations",
         "get_report_tree",
         "get_report_data",
+        "list_order_book_entries",
+        "list_history",
     ]
     read_tools = {tool.name for tool in await server.list_tools()}
     write_tools = {tool.name for tool in await write_server.list_tools()}
@@ -1848,6 +2047,7 @@ PAGED_LISTS: dict[str, Callable[..., typing.Any]] = {
     "list_journal_entries": tasks.list_journal_entries,
     "list_persons": tasks.list_persons,
     "list_orders": tasks.list_orders,
+    "list_history": tasks.list_history,
 }
 
 
@@ -1907,6 +2107,7 @@ PAGED_ROUTES: dict[str, tuple[str, dict[str, typing.Any], int]] = {
     ),
     "list_persons": ("person_list/only_vendors", {"only_vendors": True}, 4),
     "list_orders": ("order_list/fp2026_sales", {"type": "SALES", "fiscal_period_id": FP2026}, 4),
+    "list_history": ("history_list/order", {"order_id": BOOKED_ORDER}, 2),
 }
 
 
@@ -1954,6 +2155,8 @@ RECORDED_LISTS: dict[str, tuple[Callable[..., typing.Any], dict[str, typing.Any]
     "account_category_list/default": (api.account_category_list, {}),
     "location_list/default": (api.location_list, {}),
     "report_tree/default": (api.report_tree, {}),
+    "order_bookentry_list/booked": (api.order_bookentry_list, {"id": BOOKED_ORDER}),
+    "history_list/order": (api.history_list, {"order_id": BOOKED_ORDER, "start": 0, "limit": 100}),
 }
 
 
@@ -2015,6 +2218,8 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
         "report_element_data/balance_fp2025",
         {"element_id": 1, "fiscal_period": FP2025},
     ),
+    "cashctrl_list_order_book_entries": ("order_bookentry_list/booked", {"order_id": 5}),
+    "cashctrl_list_history": ("history_list/order", {"order_id": 5}),
 }
 UNOBSERVED = frozenset({"cashctrl_list_custom_fields", "cashctrl_list_cost_centers"})
 """Tools whose recorded answer is an empty list: their snake_case names are checked on the

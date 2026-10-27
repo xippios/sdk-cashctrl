@@ -73,6 +73,7 @@ from xippios.cashctrl.models import (
     Direction,
     Filter,
     FiscalPeriod,
+    HistoryEntry,
     JournalEntry,
     JournalEntryDetail,
     JournalEntryDetailProjection,
@@ -80,6 +81,7 @@ from xippios.cashctrl.models import (
     Location,
     LocationProjection,
     Order,
+    OrderBookEntry,
     OrderCategory,
     OrderDetail,
     OrderType,
@@ -107,8 +109,10 @@ __all__ = [
     "list_currencies",
     "list_custom_fields",
     "list_fiscal_periods",
+    "list_history",
     "list_journal_entries",
     "list_locations",
+    "list_order_book_entries",
     "list_order_categories",
     "list_orders",
     "list_organisations",
@@ -134,6 +138,12 @@ MCP_CAPS: Mapping[str, ResultCap] = {
         max_bytes=131_072,
         note="the list is every custom field of the type and cannot be narrowed further",
     ),
+    "list_history": ResultCap(
+        note=(
+            "narrow the history with order_id, person_id, statement_id, query or filter, "
+            "or page it with limit"
+        )
+    ),
 }
 """Per-tool MCP result caps (ADR-0016), which ``mcp.py`` passes to ``build_server``.
 
@@ -144,7 +154,9 @@ whole: ``get_report_data``'s result is no list, so the cap replaces one over its
 with a note and a preview. The demo organisation's balance sheet of 2025, 25 rows with
 its totals, is about 17 KB, some 650 bytes a row, so 64 KB holds a report of about 100
 rows and 128 KB one of about 200; the note names the period parameters.
-``list_cost_centers`` keeps the default bound and names its filters.
+``list_cost_centers`` keeps the default bound and names its filters, and so does
+``list_history``, whose whole log may hold far more than the bound: a cut is resumed at
+``start`` (ADR-0016, amended 2026-10-27), or narrowed to one record's history.
 """
 
 DIRECTIONS: tuple[str, ...] = get_args(Direction)
@@ -828,6 +840,102 @@ async def get_order_async(org: str, id: int) -> Result[OrderDetail]:
     return Result(data=order, meta=_meta(org, "order/read.json", {"id": id}))
 
 
+async def list_order_book_entries_async(org: str, order_id: int) -> Result[list[OrderBookEntry]]:
+    """List the book entries of one order: the journal entries it booked, and its payments.
+
+    These are "all the journal book entries that are created for an order (e.g. an
+    invoice or a credit note), either automatically from items or manually by the user,
+    like payments for example". Every entry comes back with its ``type`` (``GENERATED``
+    for one booked from the items), ``date``, ``description``, ``reference``, ``amount``
+    (gross) with ``net_amount`` and ``tax_amount``, the accounts it books
+    (``debit_id`` and ``debit_name``, ``credit_id`` and ``credit_name``), ``tax_id``,
+    and ``rows``, the bookings per account with the tax rows apart (``is_tax``), as
+    ``get_journal_entry`` returns them. An order in a status that books nothing (a
+    draft) has none; ``is_book`` in ``get_order`` says whether its status books.
+    ``meta.total`` is upstream's count. What an id no order has answers was not observed.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        order_id: The order's ``id`` as ``list_orders`` gives it, e.g. ``5``; not its
+            number ``nr``. Sent as upstream's ``id``.
+    """
+    response = await api.order_bookentry_list(org, order_id)
+    meta = _meta(org, "order/bookentry/list.json", {"id": order_id}, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
+async def list_history_async(
+    org: str,
+    *,
+    order_id: int | None = None,
+    person_id: int | None = None,
+    statement_id: int | None = None,
+    query: str | None = None,
+    filter: list[Filter] | None = None,
+    dir: Direction | None = None,
+    start: int = 0,
+    limit: int | None = None,
+) -> Result[list[HistoryEntry]]:
+    """List an organisation's history, the audit log of its changes, newest first.
+
+    Every entry comes back with ``created`` (when the change was made), ``created_by``
+    (who made it; an API user shows as ``API:`` and the first four characters of its
+    key), ``type`` (the module, e.g. ``ORDER``), ``change_type`` (``CREATE``,
+    ``UPDATE`` and ``STATUS`` were seen), the record it concerns (``order_id``,
+    ``person_id``, ``statement_id``) and ``message``, upstream's text of the change
+    (``Rechnung 'EK-2026-001' created.``). ``order_id``, ``person_id`` or
+    ``statement_id`` narrow it to one record's history; the history of an order that was
+    deleted is not listed (observed: none, a minute after the delete).
+
+    Paging: with ``limit``, one page of at most ``limit`` entries from ``start``; without
+    it, every matching entry from ``start`` on, which for a whole organisation is long:
+    pass ``limit`` (about 20), or one record's id. ``meta.total`` is upstream's count of
+    all matching entries. The next page starts at ``start`` plus the number of entries
+    received. Offset pages over a log that grows meanwhile can repeat entries: one added
+    shifts every later page by one. Upstream ignores values it does not understand, so
+    ``dir`` and the filters' ``comparison`` are checked first and a wrong one is
+    refused.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        order_id: Only the history of one order, an ``id`` from ``list_orders``,
+            e.g. ``5``.
+        person_id: Only the history of one person, an ``id`` from ``list_persons``,
+            e.g. ``3``.
+        statement_id: Only the history of one salary statement, its id, e.g. ``4``.
+        query: Full-text search, e.g. ``"EK-2026-001"``.
+        filter: Filters that must all match, each with ``comparison`` (``eq``, ``like``,
+            ``gt`` or ``lt``; ``like`` when left out), ``field`` (a column of the list,
+            e.g. ``changeType``) and ``value`` (a text, or a list of texts of which any
+            may match), e.g.
+            ``[{"comparison": "eq", "field": "changeType", "value": "CREATE"}]``.
+        dir: ``DESC`` (upstream's default, newest first) or ``ASC``.
+        start: The offset of the first entry, ``0`` (the default) for the first page;
+            for the next, ``start`` plus the number of entries received, e.g. ``20``.
+        limit: One page of at most this many entries, e.g. ``20``; every entry when
+            left out.
+    """
+    filters = _check_list_arguments(
+        dir=dir, filter=filter, texts={"query": query}, start=start, limit=limit
+    )
+    arguments: dict[str, Any] = {
+        "dir": dir,
+        "filter": filters,
+        "order_id": order_id,
+        "person_id": person_id,
+        "query": query,
+        "statement_id": statement_id,
+    }
+
+    async def page(offset: int, size: int) -> ListResponse[HistoryEntry]:
+        return await api.history_list(org, **arguments, start=offset, limit=size)
+
+    entries, total = await _offset_pages(page, start=start, limit=limit)
+    sent = api.history_list_params(**arguments, start=start, limit=limit)
+    meta = _meta(org, "history/list.json", sent, total=total)
+    return Result(data=entries, meta=meta)
+
+
 async def list_order_categories_async(
     org: str, *, type: OrderType | None = None, fiscal_period_id: int | None = None
 ) -> Result[list[OrderCategory]]:
@@ -1166,6 +1274,8 @@ list_persons = sync(list_persons_async)
 get_person = sync(get_person_async)
 list_orders = sync(list_orders_async)
 get_order = sync(get_order_async)
+list_order_book_entries = sync(list_order_book_entries_async)
+list_history = sync(list_history_async)
 list_order_categories = sync(list_order_categories_async)
 list_custom_fields = sync(list_custom_fields_async)
 list_person_categories = sync(list_person_categories_async)
