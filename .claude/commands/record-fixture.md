@@ -21,13 +21,14 @@ recorded. If the demo pair ever points at an organisation that is not that synth
 one, stop: never record from it. These policies stand all the same, and each refusal
 writes nothing and exits non-zero:
 
-- **GET, and POST for the eight write paths only.** `--method POST` is accepted for
+- **GET, and POST for the nine write paths only.** `--method POST` is accepted for
   exactly the operations the write tools call: `journal/create.json`,
   `journal/update.json`, `journal/delete.json`, `person/create.json`,
   `person/update.json`, `person/delete.json`, `order/create.json`,
-  `order/delete.json`. Every other POST (`order/update.json`, `update_status.json`,
-  ...) and every other method is refused before a request is sent, and so is a
-  `create.json` none of whose pairs carries `xippios-live`. A POST sends the `key=value` pairs
+  `order/update.json`, `order/delete.json`. Every other POST (`update_status.json`,
+  `order/bookentry/create.json`, ...) and every other method is refused before a
+  request is sent, and so is a `create.json` none of whose pairs carries
+  `xippios-live`. A POST sends the `key=value` pairs
   as the form body, in their order, as the write tools send theirs
   (`application/x-www-form-urlencoded; charset=UTF-8`). A recorded write changes the
   demo organisation: the recorder says so, names the `insertId` upstream answered, and

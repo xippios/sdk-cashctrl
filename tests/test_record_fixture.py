@@ -385,14 +385,14 @@ def test_only_get_and_post_are_recorded(
         "person/categorize.json",
         "journal/create",
         "order/document/mail.json",
-        "order/update.json",
+        "order/bookentry/create.json",
         "account/create.json",
         "fiscalperiod/delete.json",
         "person/category/create.json",
         "order/category/delete.json",
     ],
 )
-def test_a_post_is_recorded_for_the_eight_write_paths_only(
+def test_a_post_is_recorded_for_the_nine_write_paths_only(
     recorder: ModuleType,
     tmp_path: Path,
     respx_mock: respx.MockRouter,
@@ -403,11 +403,11 @@ def test_a_post_is_recorded_for_the_eight_write_paths_only(
     assert not respx_mock.calls, "refused before any request"
     assert not (tmp_path / "tests" / "fixtures").exists()
     out = capsys.readouterr().out
-    assert out.startswith("not recorded: a POST is recorded only for one of the eight write paths")
+    assert out.startswith("not recorded: a POST is recorded only for one of the nine write paths")
     assert out.rstrip().endswith(f"not {endpoint}")
 
 
-EIGHT = [
+NINE = [
     "journal/create.json",
     "journal/update.json",
     "journal/delete.json",
@@ -415,13 +415,14 @@ EIGHT = [
     "person/update.json",
     "person/delete.json",
     "order/create.json",
+    "order/update.json",
     "order/delete.json",
 ]
 
 
-@pytest.mark.parametrize("endpoint", EIGHT)
-def test_the_eight_write_paths_may_be_posted(recorder: ModuleType, endpoint: str) -> None:
-    assert frozenset(EIGHT) == recorder.WRITE_PATHS
+@pytest.mark.parametrize("endpoint", NINE)
+def test_the_nine_write_paths_may_be_posted(recorder: ModuleType, endpoint: str) -> None:
+    assert frozenset(NINE) == recorder.WRITE_PATHS
     assert recorder.refusal("POST", endpoint) is None
     assert recorder.refusal("post", endpoint) is None
 
@@ -442,6 +443,7 @@ def test_a_create_without_the_marker_is_refused(
     )
     assert recorder.unmarked("POST", endpoint, {"company": "xippios-live AG"}) is None
     assert recorder.unmarked("POST", "journal/update.json", {"id": "51"}) is None
+    assert recorder.unmarked("POST", "order/update.json", {"id": "8"}) is None
 
 
 def test_a_write_is_recorded_with_its_form_body(

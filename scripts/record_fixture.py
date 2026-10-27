@@ -25,15 +25,15 @@ described in ``docs/demo-org.md``: invented companies on placeholder streets,
 recorded. These policies stand all the same; every refusal writes nothing, says why,
 never shows a value, and exits with status 1:
 
-- GET, and POST for the eight write paths only. ``--method POST`` is allowed for
+- GET, and POST for the nine write paths only. ``--method POST`` is allowed for
   exactly the operations this package's write tools call (``WRITE_PATHS``):
   ``journal/create.json``, ``journal/update.json``, ``journal/delete.json``,
   ``person/create.json``, ``person/update.json``, ``person/delete.json``,
-  ``order/create.json`` and ``order/delete.json``. It sends the ``key=value`` pairs as a
-  form body, as the write tools do (``api/_form.py``:
+  ``order/create.json``, ``order/update.json`` and ``order/delete.json``. It sends the
+  ``key=value`` pairs as a form body, as the write tools do (``api/_form.py``:
   ``application/x-www-form-urlencoded; charset=UTF-8``). Every other POST
-  (``order/update.json``, ``account/create.json``, ``update_status.json``, a POST to a
-  list) and every other method is refused before a request is sent, and so is a
+  (``order/update_status.json``, ``account/create.json``, ``order/bookentry/create.json``,
+  a POST to a list) and every other method is refused before a request is sent, and so is a
   ``create.json`` whose pairs do not carry the marker ``xippios-live`` (``MARK``) in a
   value: a write records a marked record, updates it or deletes it, and nothing else. A
   recorded write changes the demo organisation: the recorder says so after the request
@@ -141,6 +141,7 @@ WRITE_PATHS = frozenset(
         "person/update.json",
         "person/delete.json",
         "order/create.json",
+        "order/update.json",
         "order/delete.json",
     }
 )
@@ -223,7 +224,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--method",
         default="GET",
-        help="HTTP method: GET, or POST for one of the eight write paths the write tools call",
+        help="HTTP method: GET, or POST for one of the nine write paths the write tools call",
     )
     parser.add_argument(
         "--wrong-key", action="store_true", help=f"send {WRONG_KEY!r} instead of the key"
@@ -276,7 +277,7 @@ def refusal(method: str, endpoint: str) -> str | None:
         )
     if is_write(method) and endpoint not in WRITE_PATHS:
         return (
-            f"a POST is recorded only for one of the eight write paths the write tools "
+            f"a POST is recorded only for one of the nine write paths the write tools "
             f"call ({', '.join(sorted(WRITE_PATHS))}), not {endpoint}"
         )
     if not endpoint.endswith(".json"):

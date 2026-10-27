@@ -91,7 +91,7 @@ any amount; it still scrubs e-mail addresses to `user@example.com`, API user tag
 `API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) and the
 personal identifiers `ssn` and `iban` to `REDACTED`, in the request body as well, and
 refuses any method but GET and POST, a POST
-to anything but the eight write paths, a create without the marker `xippios-live`, and
+to anything but the nine write paths, a create without the marker `xippios-live`, and
 any endpoint but `.json`. Writes against demo create a record marked `xippios-live`,
 update it and delete it again, nothing else (see Write tools). The demo subdomain is
 treated like a key: never in a file, a commit, a log line or a report. The repository is
@@ -426,9 +426,9 @@ addresses, API user tags, token-like fields and values under `ssn` and `iban` be
 committing (`/record-fixture`, `tests/fixtures/README.md`). Fixtures are never typed in
 by hand.
 
-Writes: `--method POST` is accepted for the eight write paths the write tools call only
+Writes: `--method POST` is accepted for the nine write paths the write tools call only
 (`journal/create|update|delete.json`, `person/create|update|delete.json`,
-`order/create|delete.json`, `WRITE_PATHS`), every other POST and every other method
+`order/create|update|delete.json`, `WRITE_PATHS`), every other POST and every other method
 refused before a request, and a `create.json` only when one of its values carries
 `xippios-live`; the `key=value` pairs go as the form body, in their order, with the
 write tools' `Content-Type` (`application/x-www-form-urlencoded; charset=UTF-8`). Core

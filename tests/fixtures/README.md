@@ -15,7 +15,7 @@ characters on their own as a possible key prefix, and any value but `null` or `R
 under a token-like or identifier name, in a write's form body and its JSON values too; a
 compound name such as `publicHash` is written for review.
 Bodies that are not UTF-8 text, methods other than GET and POST, a POST to anything but
-the eight write paths the write tools call, a create without `xippios-live`, and
+the nine write paths the write tools call, a create without `xippios-live`, and
 endpoints other than `.json` are refused. A write's fixture holds the request body too
 (core records it), scrubbed and checked like the rest; the write fixtures of 2026-10-24
 record a journal entry, a person and an order marked `xippios-live`, created, read,
