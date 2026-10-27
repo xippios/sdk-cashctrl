@@ -163,7 +163,7 @@ src/xippios/cashctrl/
   api/             endpoint wrappers, one module per upstream operation; _form.py encodes and posts writes
   tasks.py         task functions and list_organisations; __all__ is what the adapters register,
                    MCP_CAPS the per-tool result caps (list_custom_fields, list_cost_centers,
-                   get_report_data)
+                   get_report_data, list_history)
   tasks_write.py   confirm-gated write tasks for the separate write server (Write tools below)
   mcp_write.py     xippios-cashctrl-mcp-write entry point
   mcp.py           xippios-cashctrl-mcp entry point
@@ -239,7 +239,7 @@ Run `/add-endpoint <upstream operation>`. In short:
 7. `CHANGELOG.md` under Unreleased, README status table (the task's name first in its
    cell, in backticks, as the family check reads it), then the full check suite.
 
-A list that documents `start` and `limit` (journal, persons, orders) pages through
+A list that documents `start` and `limit` (journal, persons, orders, history) pages through
 `_offset_pages` in `tasks.py` (conventions §4, ADR-0012): `limit` given is one request
 for the page at `start` (default 0); `limit` omitted collects every page from `start`
 through core's `paginate_offset`, `PAGE_SIZE` (100, upstream's documented default) a
@@ -259,8 +259,9 @@ where). A lookup whose whole list an agent needs and the default result cap (200
 through (ADR-0016): `list_custom_fields` (500 rows or 128 KB; no filter but `type`, and
 a write needs a type's custom fields whole) and `get_report_data` (128 KB; a report is
 read whole, and its result, no list, is cut to a note and a preview);
-`list_cost_centers` keeps the default bound with a note naming its filters. Every other
-list takes filters or pages, or is short. Where the documentation gives no schema and
+`list_cost_centers` and `list_history` keep the default bound with a note naming their
+filters (the history's note also names `limit`, and core's cut ends with where to
+resume). Every other list takes filters or pages, or is short. Where the documentation gives no schema and
 the shape differs by kind, as the rows of `report/element/data.json` differ by report
 type, the task returns upstream's JSON as sent (`JsonValue`, camelCase keys included)
 and says so in its docstring (decided by Johannes on 2026-10-27); `AS_SENT` in
@@ -276,8 +277,11 @@ raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
 
 ## Write tools
 
-`tasks_write.py` holds the write tasks (`create_*`, `update_*`, `delete_*` for journal
-entries, persons and orders), served by `xippios-cashctrl-mcp-write` only: never by the
+`tasks_write.py` holds the nine write tasks (`create_*`, `update_*`, `delete_*` for
+journal entries, persons and orders: `create_journal_entry`, `update_journal_entry`,
+`delete_journal_entry`, `create_person`, `update_person`, `delete_person`,
+`create_order`, `update_order`, `delete_order`), served by
+`xippios-cashctrl-mcp-write` only: never by the
 read server, never on the HTTP router (`tests/test_tasks_write.py` checks it with
 `assert_write_tools`). The decisions behind them were taken by Johannes in the wave 2
 interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more:
@@ -310,12 +314,16 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
    read, never a write.
 3. **Updates read, merge, send.** Upstream empties every parameter an update omits.
    `update_*` reads the record, maps every parameter `update.json` documents from it
-   (`_journal_values`, `_person_values`), applies the arguments given (not `None`), and
-   sends all of them. A mandatory parameter neither the record nor the call gives
-   raises `InvalidRequestError` before any write; so does a stored list whose shape was
-   never observed (attachments, allocations, bank accounts, children, service periods,
-   insurance contracts, certificate values), a stored key the input table does not
-   document (an address's `titleId`, a contact's `purpose`), and a field whose absence
+   (`_journal_values`, `_person_values`, `_order_values`), applies the arguments given
+   (not `None`), and sends all of them. An order's items go back under the keys the
+   items table documents (`_order_items`, in their `pos`), the computed ones left out;
+   upstream stores the items an update sends anew, with new ids (observed 2026-10-27).
+   A mandatory parameter neither the record nor the call gives raises
+   `InvalidRequestError` before any write; so does a stored list whose shape was never
+   observed (attachments, allocations, bank accounts, children, service periods,
+   insurance contracts, certificate values, an order item's allocations), a stored key
+   the input table does not document (an address's `titleId`, a contact's `purpose`,
+   an order item's `attachments` or `isOptional`), and a field whose absence
    from the read is unknown rather than empty (an insurance's `insuranceNr` and
    `insuranceMemberNr`, an employee's `userId`), unless the call gives or clears it.
    `person/read.json` returns every stored documented field and leaves empty ones out
@@ -325,7 +333,9 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
    cleared is refused, and so is one an update sends only when given (`_UNSENT`:
    `sequence_number_id`). A journal entry an order or a salary run booked (`orderId`,
    `orderBookEntryId`, `salaryBookEntryId`) is refused, by `delete_journal_entry` as
-   well, which reads the entry first, confirmed or not. A confirmed call reads again and
+   well, which reads the entry first, confirmed or not; an order is not refused for
+   being booked, since upstream changes an order's automatic book entries through its
+   items (`docs/upstream/order.md`, Book entry). A confirmed call reads again and
    recomputes, so its payload can differ from the preview's if the record changed. Never
    send a partial record.
 4. **Custom fields** are `customField<ID>` to text (`api/_form.py`'s `CUSTOM_FIELD`),

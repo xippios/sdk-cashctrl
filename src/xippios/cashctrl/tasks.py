@@ -890,10 +890,10 @@ async def list_history_async(
     it, every matching entry from ``start`` on, which for a whole organisation is long:
     pass ``limit`` (about 20), or one record's id. ``meta.total`` is upstream's count of
     all matching entries. The next page starts at ``start`` plus the number of entries
-    received. Offset pages over a log that grows meanwhile can repeat entries: one added
-    shifts every later page by one. Upstream ignores values it does not understand, so
-    ``dir`` and the filters' ``comparison`` are checked first and a wrong one is
-    refused.
+    received, which can be fewer than ``limit``: never advance by ``limit``. Offset pages
+    over a log that grows meanwhile can repeat entries: one added shifts every later page
+    by one. Upstream ignores values it does not understand, so ``dir`` and the filters'
+    ``comparison`` are checked first and a wrong one is refused.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.

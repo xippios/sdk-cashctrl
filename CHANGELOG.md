@@ -32,10 +32,38 @@ All notable changes to this project are documented here. The format follows
   center, so those two models are typed from the create tables alone.
 - `MCP_CAPS` (ADR-0016): `list_custom_fields` at 500 rows or 128 KB and
   `get_report_data` at 128 KB, since an agent needs them whole, and `list_cost_centers`
-  with a note naming its filters.
+  and `list_history` with a note naming their filters.
+- `update_order` (`order/update.json`), the ninth write tool, on the write server only:
+  it reads the order, carries every documented parameter back unless given, its items
+  too, each under the keys the items table documents and in its position, replaced
+  whole when `items` is given, and sends the whole record, since upstream empties what
+  an update omits; `clear` sends parameters empty (`is_display_item_gross` as `false`).
+  Refused before a write: an order holding attachments, an item with allocations,
+  attachments or `isOptional` or without its account, name or unit price, and an order
+  that gives no `associateId`, `categoryId` or `date`. No refusal for a booked order:
+  upstream documents that an order's automatic book entries change through its items.
+  Recorded against demo on 2026-10-27 (order 20: created, read, updated, read, deleted;
+  the read after the update shows the item as it was but for its id, which upstream
+  stores anew), and tested live on a marked order with two items, updated without and
+  then with `items`. The items, the live carry-back check and the scope were decided by
+  Johannes on 2026-10-27 (G5 (6), (8)): no inventory articles, since an item needs no
+  article id.
+- `list_order_book_entries` (`order/bookentry/list.json`, one order's entries, the
+  order's id as `order_id`) and `list_history` (`history/list.json`, the audit log,
+  paged by `start` and `limit` with upstream's `total`, filtered by `order_id`,
+  `person_id`, `statement_id`, `query` and `filter`), read tools and HTTP routes with
+  recorded fixtures and live smoke tests (G5 (7), Johannes, 2026-10-27). The history
+  holds who made a change (`created_by`) and upstream's text of it; the history of an
+  order deleted a minute before was empty (observed).
 
 ### Changed
 
+- The write tools' descriptions name the read tools their ids come from, the discovery
+  lists included: `list_person_categories`, `list_person_titles`, `list_locations`,
+  `list_cost_centers`, `list_account_categories` and `list_custom_fields` (by module).
+- The fixture recorder accepts a POST to `order/update.json`, nine write paths, and
+  rewrites a location's `qrIban` (`qr_iban`, `qr-iban`) to `REDACTED` as it does `iban`,
+  refusing a value that survives.
 - The MCP descriptions of `list_accounts`, `list_journal_entries`, `list_persons` and
   `list_orders` no longer describe the result cap, which the cap's note carries (ADR-0016,
   conventions §8); what they say on paging stays.
