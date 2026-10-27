@@ -34,6 +34,12 @@ All notable changes to this project are documented here. The format follows
   `get_report_data` at 128 KB, since an agent needs them whole, and `list_cost_centers`
   with a note naming its filters.
 
+### Changed
+
+- The MCP descriptions of `list_accounts`, `list_journal_entries`, `list_persons` and
+  `list_orders` no longer describe the result cap, which the cap's note carries (ADR-0016,
+  conventions §8); what they say on paging stays.
+
 ### Removed
 
 - The empty reference-data scaffolding: `src/xippios/cashctrl/params.py`
