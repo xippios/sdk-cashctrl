@@ -22,6 +22,8 @@ from xippios.cashctrl.tasks import (
     list_order_categories,
     list_orders,
     list_organisations,
+    list_person_categories,
+    list_person_titles,
     list_persons,
     list_tax_codes,
 )
@@ -55,6 +57,8 @@ __all__ = [
     "list_order_categories",
     "list_orders",
     "list_organisations",
+    "list_person_categories",
+    "list_person_titles",
     "list_persons",
     "list_tax_codes",
     "update_journal_entry",

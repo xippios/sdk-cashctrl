@@ -96,11 +96,13 @@ __all__ = [
     "Person",
     "PersonAddress",
     "PersonAddressInput",
+    "PersonCategory",
     "PersonContact",
     "PersonContactInput",
     "PersonDetail",
     "PersonDetailProjection",
     "PersonProjection",
+    "PersonTitle",
     "ReadResponse",
     "Recurrence",
     "ServicePeriodInput",
@@ -1293,6 +1295,63 @@ class OrderCategory(UpstreamModel):
     is_switch_recipient: bool | None = Field(default=None, validation_alias="isSwitchRecipient")
     text: JsonValue = None
     type_name: JsonValue = Field(default=None, validation_alias="typeName")
+    value: str | None = None
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class PersonCategory(UpstreamModel):
+    """One person category, an entry of ``person/category/list.json`` (``docs/upstream/person.md``).
+
+    A group persons are filed in, possibly below a parent category. Its ``id`` is what
+    ``list_persons``, ``create_person`` and ``update_person`` take as ``category_id``.
+    Typed from the tables of ``person/category/create.json`` and ``update.json``:
+    ``name`` (localised, ``<values><de>Kunden</de><en>Customers</en>...</values>``),
+    ``discount_percentage`` (for orders), ``parent_id`` and ``sequence_nr_id`` (the
+    sequence that numbers its persons, inherited from the parent when empty). Typed from
+    observation on 2026-10-27 (CashCtrl's four default categories, all at the top level):
+    ``id`` and the ``created*``/``last_updated*`` bookkeeping fields;
+    ``sequence_nr_id_inherited``, ``discount_inherited`` and ``discount_effective`` were
+    only seen ``null`` and are kept as sent.
+    """
+
+    id: int
+    name: str
+    parent_id: int | None = Field(default=None, validation_alias="parentId")
+    sequence_nr_id: int | None = Field(default=None, validation_alias="sequenceNrId")
+    sequence_nr_id_inherited: JsonValue = Field(
+        default=None, validation_alias="sequenceNrIdInherited"
+    )
+    discount_percentage: Decimal | None = Field(default=None, validation_alias="discountPercentage")
+    discount_inherited: JsonValue = Field(default=None, validation_alias="discountInherited")
+    discount_effective: JsonValue = Field(default=None, validation_alias="discountEffective")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class PersonTitle(UpstreamModel):
+    """One title, an entry of ``person/title/list.json`` (``docs/upstream/person.md``).
+
+    A form of address with its letter salutation. Its ``id`` is what ``create_person``
+    and ``update_person`` take as ``title_id``. Typed from the tables of
+    ``person/title/create.json`` and ``update.json``: ``name`` (the title itself,
+    localised, ``<values><de>Herr</de><en>Mr.</en>...</values>``), ``gender`` (``MALE``
+    or ``FEMALE``, a string) and ``sentence`` (the letter salutation, localised). Typed
+    from observation on 2026-10-27 (CashCtrl's three default titles): ``id``, ``value``
+    (the id as text), the ``created*``/``last_updated*`` bookkeeping fields, and
+    ``text``, only seen ``null`` and kept as sent. The title without a ``gender`` had no
+    ``sentence``.
+    """
+
+    id: int
+    name: str
+    gender: str | None = None
+    sentence: str | None = None
+    text: JsonValue = None
     value: str | None = None
     created: datetime | None = None
     created_by: str | None = Field(default=None, validation_alias="createdBy")

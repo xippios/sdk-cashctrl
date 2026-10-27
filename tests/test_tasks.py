@@ -1321,6 +1321,57 @@ async def test_the_order_categories_are_on_the_read_server_and_the_router() -> N
     assert "cashctrl_list_order_categories" not in write_tools
 
 
+# The discovery lists and the reports, recorded on 2026-10-27 from the demo organisation:
+# CashCtrl's defaults (person categories and titles, the chart's account categories, the
+# report tree) and the main location made by hand with placeholder data (docs/demo-org.md).
+# The demo organisation has no custom field and no cost center, so both answers are empty.
+
+
+def test_list_person_categories_replays_the_recorded_list(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    route = replay_fixture("person_category_list", "default")
+    result = tasks.list_person_categories(DEMO)
+    assert sent_query(route) == {}, "the operation documents no parameters"
+    assert result.meta.endpoint == "person/category/list.json"
+    assert result.meta.request == {"org": DEMO}
+    assert (result.meta.tenant, result.meta.total) == (DEMO, 4)
+    assert [(c.id, c.parent_id) for c in result.data] == [
+        (1, None),
+        (2, None),
+        (3, None),
+        (4, None),
+    ]
+    customers = result.data[0]
+    assert customers.name.startswith("<values><de>Kunden</de><en>Customers</en>"), "verbatim"
+    assert (customers.sequence_nr_id, customers.discount_percentage) == (None, None)
+    assert (customers.sequence_nr_id_inherited, customers.discount_effective) == (None, None)
+    assert (customers.created, customers.created_by) == (datetime(2026, 10, 23, 7, 6, 40), "SYSTEM")
+    # The persons' category_id comes from here: customers, vendors and insurances.
+    persons = json.loads(recorded(fixtures_dir, "person_list", "default").response.body)["data"]
+    assert {p["categoryId"] for p in persons} <= {c.id for c in result.data}
+
+
+def test_list_person_titles_replays_the_recorded_list(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    route = replay_fixture("person_title_list", "default")
+    result = tasks.list_person_titles(DEMO)
+    assert sent_query(route) == {}, "the operation documents no parameters"
+    assert result.meta.endpoint == "person/title/list.json"
+    assert result.meta.request == {"org": DEMO}
+    assert (result.meta.tenant, result.meta.total) == (DEMO, 3)
+    assert [(t.id, t.gender, t.value) for t in result.data] == [
+        (3, None, "3"),
+        (2, "FEMALE", "2"),
+        (1, "MALE", "1"),
+    ], "upstream's order"
+    they, _, mr = result.data
+    assert "<en>Mr.</en>" in mr.name
+    assert "<en>Dear Mr.</en>" in (mr.sentence or "")
+    assert (they.sentence, they.text) == (None, None)
+
+
 PAGED_LISTS: dict[str, Callable[..., typing.Any]] = {
     "list_journal_entries": tasks.list_journal_entries,
     "list_persons": tasks.list_persons,
@@ -1426,6 +1477,8 @@ RECORDED_LISTS: dict[str, tuple[Callable[..., typing.Any], dict[str, typing.Any]
     "order_list/fp2026_sales": (api.order_list, {"type": "SALES", "fiscal_period_id": 1}),
     "order_list/fp2026_purchase": (api.order_list, {"type": "PURCHASE", "fiscal_period_id": 1}),
     "order_category_list/default": (api.order_category_list, {}),
+    "person_category_list/default": (api.person_category_list, {}),
+    "person_title_list/default": (api.person_title_list, {}),
 }
 
 
@@ -1476,6 +1529,8 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
     "cashctrl_list_orders": ("order_list/fp2026_sales", {"type": "SALES", "fiscal_period_id": 1}),
     "cashctrl_get_order": ("order_read/by_id", {}),
     "cashctrl_list_order_categories": ("order_category_list/default", {}),
+    "cashctrl_list_person_categories": ("person_category_list/default", {}),
+    "cashctrl_list_person_titles": ("person_title_list/default", {}),
 }
 
 

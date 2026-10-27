@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-10-27T21:28:01.296972Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/person/title/list.json"
+  },
+  "response": {
+    "body": "{\"total\":3,\"data\":[{\"id\":3,\"created\":\"2026-10-23 07:06:40.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:40.0\",\"lastUpdatedBy\":\"SYSTEM\",\"name\":\"<values><de>Divers</de><en>They</en></values>\",\"sentence\":null,\"gender\":null,\"text\":null,\"value\":\"3\"},{\"id\":2,\"created\":\"2026-10-23 07:06:40.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:40.0\",\"lastUpdatedBy\":\"SYSTEM\",\"name\":\"<values><de>Frau</de><en>Mrs.</en><fr>Mme</fr><it>Sig.ra</it></values>\",\"sentence\":\"<values><de>Sehr geehrte Frau</de><en>Dear Mrs.</en><fr>Madame</fr><it>Gentile Signora</it></values>\",\"gender\":\"FEMALE\",\"text\":null,\"value\":\"2\"},{\"id\":1,\"created\":\"2026-10-23 07:06:40.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:40.0\",\"lastUpdatedBy\":\"SYSTEM\",\"name\":\"<values><de>Herr</de><en>Mr.</en><fr>M.</fr><it>Sig.</it></values>\",\"sentence\":\"<values><de>Sehr geehrter Herr</de><en>Dear Mr.</en><fr>Monsieur</fr><it>Gentile Signor</it></values>\",\"gender\":\"MALE\",\"text\":null,\"value\":\"1\"}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 27 Oct 2026 21:28:00 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

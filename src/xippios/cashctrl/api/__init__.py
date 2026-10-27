@@ -32,10 +32,12 @@ from xippios.cashctrl.api.order_create import order_create, order_fields
 from xippios.cashctrl.api.order_delete import order_delete
 from xippios.cashctrl.api.order_list import order_list, order_list_params
 from xippios.cashctrl.api.order_read import order_read
+from xippios.cashctrl.api.person_category_list import person_category_list
 from xippios.cashctrl.api.person_create import person_create, person_fields
 from xippios.cashctrl.api.person_delete import person_delete
 from xippios.cashctrl.api.person_list import person_list, person_list_params
 from xippios.cashctrl.api.person_read import person_read
+from xippios.cashctrl.api.person_title_list import person_title_list
 from xippios.cashctrl.api.person_update import person_update
 from xippios.cashctrl.api.tax_list import tax_list
 
@@ -64,12 +66,14 @@ __all__ = [
     "order_list",
     "order_list_params",
     "order_read",
+    "person_category_list",
     "person_create",
     "person_delete",
     "person_fields",
     "person_list",
     "person_list_params",
     "person_read",
+    "person_title_list",
     "person_update",
     "tax_list",
 ]

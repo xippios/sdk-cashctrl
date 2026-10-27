@@ -1,0 +1,49 @@
+{
+  "recorded_at": "2026-10-27T21:27:45.465706Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/person/category/list.json"
+  },
+  "response": {
+    "body": "{\"total\":4,\"data\":[{\"id\":1,\"created\":\"2026-10-23 07:06:40.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:40.0\",\"lastUpdatedBy\":\"SYSTEM\",\"parentId\":null,\"sequenceNrId\":null,\"discountPercentage\":null,\"discountInherited\":null,\"name\":\"<values><de>Kunden</de><en>Customers</en><fr>Clients</fr><it>Clienti</it></values>\",\"sequenceNrIdInherited\":null,\"discountEffective\":null},{\"id\":2,\"created\":\"2026-10-23 07:06:40.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:40.0\",\"lastUpdatedBy\":\"SYSTEM\",\"parentId\":null,\"sequenceNrId\":null,\"discountPercentage\":null,\"discountInherited\":null,\"name\":\"<values><de>Lieferanten</de><en>Vendors</en><fr>Fournisseurs</fr><it>Fornitori</it></values>\",\"sequenceNrIdInherited\":null,\"discountEffective\":null},{\"id\":3,\"created\":\"2026-10-23 07:06:40.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:40.0\",\"lastUpdatedBy\":\"SYSTEM\",\"parentId\":null,\"sequenceNrId\":null,\"discountPercentage\":null,\"discountInherited\":null,\"name\":\"<values><de>Mitarbeiter:innen</de><en>Employees</en><fr>Employ\u00e9s</fr><it>Dipendenti</it></values>\",\"sequenceNrIdInherited\":null,\"discountEffective\":null},{\"id\":4,\"created\":\"2026-10-23 07:06:40.0\",\"createdBy\":\"SYSTEM\",\"lastUpdated\":\"2026-10-23 07:06:40.0\",\"lastUpdatedBy\":\"SYSTEM\",\"parentId\":null,\"sequenceNrId\":null,\"discountPercentage\":null,\"discountInherited\":null,\"name\":\"<values><de>Versicherungen</de><en>Insurances</en><fr>Assurances</fr><it>Assicurazioni</it></values>\",\"sequenceNrIdInherited\":null,\"discountEffective\":null}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 27 Oct 2026 21:27:43 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457-gzip\""
+      ],
+      [
+        "set-cookie",
+        "REDACTED"
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

@@ -75,9 +75,11 @@ from xippios.cashctrl.models import (
     OrderDetail,
     OrderType,
     Person,
+    PersonCategory,
     PersonDetail,
     PersonDetailProjection,
     PersonProjection,
+    PersonTitle,
     TaxCode,
 )
 
@@ -93,6 +95,8 @@ __all__ = [
     "list_order_categories",
     "list_orders",
     "list_organisations",
+    "list_person_categories",
+    "list_person_titles",
     "list_persons",
     "list_tax_codes",
 ]
@@ -806,6 +810,40 @@ async def list_order_categories_async(
     return Result(data=response.data, meta=meta)
 
 
+async def list_person_categories_async(org: str) -> Result[list[PersonCategory]]:
+    """List an organisation's person categories, the groups its persons are filed in.
+
+    Every category comes back with its ``id`` (the ``category_id`` of ``list_persons``,
+    ``create_person`` and ``update_person``), its ``name`` (localised,
+    ``<values><de>Kunden</de><en>Customers</en>...</values>``), ``parent_id`` (``None``
+    at the top level), ``sequence_nr_id`` (the sequence that numbers its persons) and
+    ``discount_percentage``. CashCtrl creates four in a new organisation: customers,
+    vendors, employees and insurances.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+    """
+    response = await api.person_category_list(org)
+    meta = _meta(org, "person/category/list.json", {}, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
+async def list_person_titles_async(org: str) -> Result[list[PersonTitle]]:
+    """List an organisation's titles, the forms of address a person can be given.
+
+    Every title comes back with its ``id`` (the ``title_id`` of ``create_person`` and
+    ``update_person``), its ``name`` (localised, ``<values><de>Herr</de><en>Mr.</en>
+    ...</values>``), ``gender`` (``MALE``, ``FEMALE`` or empty) and ``sentence``, the
+    letter salutation (``<values><de>Sehr geehrter Herr</de>...</values>``).
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+    """
+    response = await api.person_title_list(org)
+    meta = _meta(org, "person/title/list.json", {}, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
 LIST_ORGANISATIONS_DOC = """List the organisations this server can reach, by name.
 
 On a server that serves every declared organisation, every other tool takes one of these
@@ -830,3 +868,5 @@ get_person = sync(get_person_async)
 list_orders = sync(list_orders_async)
 get_order = sync(get_order_async)
 list_order_categories = sync(list_order_categories_async)
+list_person_categories = sync(list_person_categories_async)
+list_person_titles = sync(list_person_titles_async)
