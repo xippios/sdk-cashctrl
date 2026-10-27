@@ -119,7 +119,8 @@ Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 is deliberately not 
 1. `docs/upstream/FETCHED.md` and the files it lists: what the upstream actually offers
 2. The family conventions: `../sdk-core/docs/conventions.md` and `../sdk-core/docs/adr/`
    (also at https://github.com/xippios/sdk-core/tree/main/docs)
-3. `../sdk-core/docs/definition-of-done.md`: what a PR must satisfy
+3. `../sdk-core/docs/definition-of-done.md`: what a PR must satisfy, and
+   `../sdk-core/docs/review-checklist.md`: what the reviewer checks it against
 4. The family file `../CLAUDE.md`
 5. When a new core minor or template release comes: conventions §15, the adoption
    checklist, which `/adopt-release` walks
@@ -167,10 +168,12 @@ scripts/
 tests/
   conftest.py      core's plugin; demo-only environment, placeholder subdomain, clients reset per test, demo_org
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
+  test_family.py   core's family check, one line: namespace levels, py.typed, __version__,
+                   the adapters serving exactly the tasks, task shapes and docstrings, the
+                   README status table, the template tag, the core bound
   test_tasks.py    structural checks on every task plus per-task replay tests
-  test_tasks_write.py  the write tasks: previews send nothing, writes replay, updates fail closed
-  test_adapters.py the adapters expose exactly tasks.__all__; core's assert_write_tools
-  test_layout.py   namespace levels stay empty; py.typed ships
+  test_tasks_write.py  the write tasks: previews send nothing, writes replay, updates fail
+                   closed; the write server's own test (assert_write_tools)
   test_registry.py organisation declaration, lookup and per-organisation clients
   test_key_resolution.py  keys resolved as in production: placeholder_api_key pins nothing
   test_errors.py   classify, RequestRejected and the recorded refusals
@@ -181,14 +184,16 @@ tests/
   test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
 docs/upstream/     documentation snapshot and FETCHED.md
 docs/demo-org.md   the synthetic demo organisation: why, how to create and seed it, its books
-.github/workflows/ ci.yml (the required ci check), publish.yml (tag to PyPI), live.yml (nightly live tests)
+.github/workflows/ ci.yml (the required ci check, with the CHANGELOG and fixture-size steps),
+                   publish.yml (the release train: tag, build, PyPI), live.yml (nightly live
+                   tests), gates.yml (the merge gates as jobs, off until GATES_CALLER is 1)
 .claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep,
                    adopt-release
 ```
 
 `src/xippios/` has **no** `__init__.py`: it is a PEP 420 namespace package shared with
 `xippios-core` and every other source package.
-Never add one; `tests/test_layout.py` fails if it appears. The import path is
+Never add one; `tests/test_family.py` fails if it appears. The import path is
 `xippios.cashctrl` (ADR-0006).
 
 ## How to add an endpoint
@@ -218,7 +223,8 @@ Run `/add-endpoint <upstream operation>`. In short:
    `sent_urls(route)`, never a request from `route.calls`), a case in `TOOL_CASES` (which
    checks `meta.tenant` and snake_case keys for every tool), a live smoke test in
    `test_live.py` that takes the `demo_org` fixture.
-7. `CHANGELOG.md` under Unreleased, README status table, then the full check suite.
+7. `CHANGELOG.md` under Unreleased, README status table (the task's name first in its
+   cell, in backticks, as the family check reads it), then the full check suite.
 
 A list that documents `start` and `limit` (journal, persons, orders) pages through
 `_offset_pages` in `tasks.py` (conventions §4, ADR-0012): `limit` given is one request
@@ -245,7 +251,7 @@ raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
 
 `tasks_write.py` holds the write tasks (`create_*`, `update_*`, `delete_*` for journal
 entries, persons and orders), served by `xippios-cashctrl-mcp-write` only: never by the
-read server, never on the HTTP router (`tests/test_adapters.py` runs core's
+read server, never on the HTTP router (`tests/test_tasks_write.py` checks it with
 `assert_write_tools`). The decisions behind them were taken by Johannes in the wave 2
 interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more:
 
@@ -433,14 +439,28 @@ payload it was given, API user tags included, into the public Actions log.
   Never commit to `main`.
 - Commit small, with Conventional Commits messages (`feat(tasks): add get_balance_sheet`).
 - Open the PR with `gh pr create`; the body is the definition-of-done checklist from
-  `.github/PULL_REQUEST_TEMPLATE.md`, ticked honestly, with assumptions listed.
+  `.github/PULL_REQUEST_TEMPLATE.md`, ticked honestly, with assumptions and open
+  questions listed, the live calls the PR spent counted (keyed calls by number; `none`
+  is a count), and, after the checklist, a `## Decisions taken` block: one line per
+  decision the session made, each backed by a convention, an ADR, a coordination rule, a
+  dated decision of Johannes's or `gap, row N`. The reviewer judges the PR against
+  sdk-core's `docs/review-checklist.md`.
+- Every PR but a release, an adoption or Dependabot's adds an entry under Unreleased in
+  `CHANGELOG.md`; `ci.yml` fails without one (conventions §12).
+- Releases follow the release train (conventions §12): `/release-prep` opens a release
+  PR that changes only `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, `README.md`,
+  `CLAUDE.md` and `docs/handover.md` (and `scripts/check-siblings.sh` where the source
+  has one); its merge runs `publish.yml`, which tags the version on the merge commit,
+  and Johannes approves the `pypi` run. A reference-data refresh or a core pin's removal
+  is a PR of its own before it.
 - `ruff` leaves `docs/` alone; never reformat the upstream snapshot.
 - Template and core updates: a new sdk-template release, and the core minor it carries,
   arrive in one adoption PR, `chore/template-update-<tag>`, before the next release
-  (conventions §15); `/adopt-release <tag>` walks it, and it auto-merges after the
-  reviewer's `ready`. `uvx copier update` re-renders the files the template owns
-  (`tests/conftest.py`, `tests/test_layout.py` and `tests/test_adapters.py` among them;
-  answers are in `.copier-answers.yml`) and never overwrites the files this package fills:
+  (conventions §15); `/adopt-release <tag>` walks it, and when its merge class is `auto`
+  the session enables auto-merge after the reviewer's `ready` (ADR-0018, amendment (e)).
+  `uvx copier update` re-renders the files the template owns (`tests/conftest.py` and
+  `tests/test_family.py` among them; answers are in `.copier-answers.yml`) and never
+  overwrites the files this package fills:
   `__init__.py`, `_client.py`, `models.py`, `api/`, `tasks.py`, `tasks_write.py`,
   `params.py`, `enums.py`, `reference/`, `scripts/`, `tests/test_tasks.py`,
   `tests/test_tasks_write.py`, `tests/test_live.py`, `tests/fixtures/`, `docs/upstream/`,
@@ -467,9 +487,10 @@ payload it was given, API user tags included, into the public Actions log.
   `meta.request`, or commit one in a fixture (ADR-0017).
 - Never edit `docs/upstream/` by hand; `/refresh-upstream` fetches, a PR reviews.
 - Never add `src/xippios/__init__.py`.
-- Never tag, merge, release, force-push, or touch `gh secret`. Those are human actions;
-  the one exception is enabling auto-merge on a `chore/template-update*` or
-  `chore/release-*` PR after the reviewer's `ready` (ADR-0018).
+- Never tag, merge, release, force-push, or touch `gh secret`: a release PR's merge tags
+  through `publish.yml`, and Johannes approves the `pypi` run. The one exception is
+  enabling auto-merge on a `chore/template-update*` or `chore/release-*` PR whose merge
+  class is `auto`, after the reviewer's `ready` (ADR-0018, amendment (e)).
 - Never point fixtures, live tests or the seeder at an organisation with real data: the
   demo organisation holds synthetic books only, created and seeded as `docs/demo-org.md`
   describes.
