@@ -5,9 +5,9 @@ Accounts, currencies, tax codes, fiscal periods and every other list an organisa
 keeps for itself are per-organisation data, served live by the list tasks with ``org``.
 The only reference data this package may ship are value sets the documentation fixes,
 enumerations such as journal or order types, generated with provenance from
-``docs/upstream/`` into ``reference/`` and ``enums.py`` (through
-``xippios.core.reference.render_str_enums``), never from an organisation's API, so the
-generator needs no key and no request.
+``docs/upstream/`` into ``reference/`` and ``enums.py`` (through one
+``xippios.core.reference.render_enums`` call, then ``ruff format`` and ``ruff check --fix``),
+never from an organisation's API, so the generator needs no key and no request.
 
 No task needs such an enum yet, so this script, run without options, says so and exits
 with status 1. When the first one is needed, it becomes a generator over the snapshot,
@@ -16,21 +16,22 @@ as ``.claude/commands/refresh-reference-data.md`` describes, filling ``LISTS``::
     uv run python scripts/refresh_reference.py
 
 ``--render-only`` regenerates ``enums.py`` from the packaged ``reference/*.json`` alone,
-without a request and without a key: after a core release changes the renderers
-(conventions §15, item 6), it changes ``enums.py`` and nothing else. With nothing
-packaged it renders a module without an enum::
+without a request and without a key: after a core release changes the renderer
+(conventions §15, item 6), it changes ``enums.py`` and nothing else, committed as
+formatted. With nothing packaged it renders a module without an enum::
 
     uv run python scripts/refresh_reference.py --render-only
 """
 
 import argparse
 import json
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from xippios.core.reference import render_str_enums
+from xippios.core.reference import render_enums
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = ROOT / "src/xippios/cashctrl"
@@ -61,22 +62,36 @@ def read(name: str) -> dict[str, Any]:
     return payload
 
 
-def render(values: Mapping[str, Sequence[str]], fetched: str | None) -> str:
-    """``enums.py`` as core renders it: one ``StrEnum`` per value set, ASCII and ruff-clean."""
-    return render_str_enums(values, fetched=fetched, generator=GENERATOR)
+def render(values: Mapping[str, Sequence[str]], fetched: Mapping[str, str]) -> str:
+    """``enums.py`` as core renders it: one ``StrEnum`` per value set, ASCII-only.
+
+    ``fetched`` holds each set's fetch date, so sets fetched on different days render
+    together.
+    """
+    return render_enums(values, fetched=fetched, generator=GENERATOR)
+
+
+def format_enums() -> None:
+    """``ruff format`` and ``ruff check --fix`` on ``enums.py``, with this repository's config.
+
+    Core's renderer leaves the layout to ruff (ADR-0008, amendment 2026-10-27): the
+    module is committed as formatted.
+    """
+    config = ["--config", str(ROOT / "pyproject.toml")]
+    for command in (["format"], ["check", "--fix", "--quiet"]):
+        subprocess.run([sys.executable, "-m", "ruff", *command, *config, str(ENUMS)], check=True)
 
 
 def render_only() -> None:
-    """Regenerate ``enums.py`` from the packaged files, without a request."""
-    dates: set[str] = set()
+    """Regenerate ``enums.py`` from the packaged files, without a request, and format it."""
     values: dict[str, list[str]] = {}
+    fetched: dict[str, str] = {}
     for name in LISTS:
         payload = read(name)
         values[name] = payload["values"]
-        dates.add(payload["fetched"])
-    if len(dates) > 1:
-        raise SystemExit(f"the packaged sets come from different snapshots: {sorted(dates)}")
-    ENUMS.write_text(render(values, dates.pop() if dates else None), encoding="utf-8")
+        fetched[name] = payload["fetched"]
+    ENUMS.write_text(render(values, fetched), encoding="utf-8")
+    format_enums()
     print(f"{ENUMS.name}: {len(values)} enums, from the packaged files")  # noqa: T201
 
 

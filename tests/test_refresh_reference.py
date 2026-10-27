@@ -38,8 +38,8 @@ def test_render_only_reproduces_the_committed_enums(
 ) -> None:
     """``--render-only`` renders ``enums.py`` from the packaged files alone, ASCII-only.
 
-    Nothing is packaged, so the module holds no enum; it is committed as core's renderer
-    writes it (conventions §15, item 6).
+    Nothing is packaged, so the module holds no enum; it is committed as core's
+    ``render_enums`` writes it and ruff formats it (conventions §15, item 6).
     """
     script = load_script()
     committed = script.ENUMS.read_text(encoding="utf-8")
