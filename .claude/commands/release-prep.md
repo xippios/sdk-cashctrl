@@ -25,7 +25,8 @@ removal of a core pin (step 1) and the refresh of packaged reference data (step 
    which a release PR does not. `publish.yml` refuses to tag a pinned release as well.
 2. **Reference data.** Packaged lists that should be current in this release are
    refreshed in their own PR, `/refresh-reference-data`, merged before this one; the
-   release PR fetches nothing.
+   release PR fetches nothing. cashctrl packages none, so there is nothing to refresh
+   until a documented value set is needed.
 3. Work on a branch `chore/release-<version>` from an up-to-date `main`. If `main` moves
    while the PR is open, merge `origin/main` into the branch, never force-push; the
    squash merge flattens the merge commit.
