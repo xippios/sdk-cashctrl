@@ -248,13 +248,14 @@ live and are never packaged: a multi-tenant source packages no tenant data. Nor 
 package ship a value set `docs/upstream/` fixes, since no task needs one yet, so the
 reference-data scaffolding (`params.py`, `enums.py`, `reference/`,
 `scripts/refresh_reference.py`) is gone until a documented value set is needed; then it
-comes back from the template's scaffold (`/refresh-reference-data`). A lookup whose
-whole list an agent needs and the default result cap (200 rows or 64 KB) would cut gets
-a cap of its own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (ADR-0016);
-none has one, since each list takes filters or pages and no list must reach an agent
-whole. A task-shaped function that returns a subset of an upstream record builds its
-model with `UpstreamModel.project`; nothing is renamed or computed, parsing a value
-(`parse_decimal`) is the only override.
+comes back from the `render_enums` port deleted here, not from template v0.2.2's
+scaffold, whose script needs renderers core 0.3.0 removed (`/refresh-reference-data` says
+where). A lookup whose whole list an agent needs and the default result cap (200 rows or
+64 KB) would cut gets a cap of its own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes
+through (ADR-0016); none has one, since each list takes filters or pages and no list must
+reach an agent whole. A task-shaped function that returns a subset of an upstream record
+builds its model with `UpstreamModel.project`; nothing is renamed or computed, parsing a
+value (`parse_decimal`) is the only override.
 Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
@@ -482,11 +483,11 @@ payload it was given, API user tags included, into the public Actions log.
   Hand-apply list (`/adopt-release`). The reference-data scaffolding (`params.py`,
   `enums.py`, `reference/`, `scripts/refresh_reference.py`) does not come back, since
   cashctrl runs no further `copier update` (D35); a future value set brings the script
-  back from the template's scaffold by hand. From template v0.2.2 on every
-  template-rendered file is cashctrl's own (`ci.yml`, `publish.yml`, `gates.yml`,
-  `live.yml`, the PR template, the `.claude/commands` files, the template's parts of this
-  file), and a core adoption hand-applies the template changes the conventions version it
-  adopts needs (row 118).
+  back by hand from the `render_enums` port deleted here (`/refresh-reference-data`).
+  From template v0.2.2 on every template-rendered file is cashctrl's own (`ci.yml`,
+  `publish.yml`, `gates.yml`, `live.yml`, the PR template, the `.claude/commands` files,
+  the template's parts of this file), and a core adoption hand-applies the template
+  changes the conventions version it adopts needs (row 118).
 - cashctrl stays on template v0.2.2 after template v0.3.0 and keeps adopting core minors
   through conventions §15; `copier update` must never be run past v0.2.2: the v0.3.0
   template deletes `mcp_write.py`, `tasks_write.py` and `tests/test_tasks_write.py` and

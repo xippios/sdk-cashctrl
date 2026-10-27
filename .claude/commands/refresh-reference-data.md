@@ -1,4 +1,4 @@
-Note: cashctrl packages no reference data and has no `scripts/refresh_reference.py`, so this command does not apply here until a documented value set is needed; then the script comes back from the template's scaffold.
+Note: cashctrl packages no reference data and has no `scripts/refresh_reference.py`, so this command does not apply here until a documented value set is needed; then the script comes back from the `render_enums` port this repository deleted (below).
 
 Refresh the packaged reference data for CashCtrl: $ARGUMENTS
 
@@ -21,10 +21,14 @@ every tenant, if any.
 
 None is packaged yet, so `scripts/refresh_reference.py`, `params.py`, `enums.py` and
 `reference/` are gone (the note above). When a task needs a value set, bring them back
-from the template's scaffold (sdk-template v0.2.2, the release this repository is on)
-and make the script the generator of step 3; its `--render-only` regenerates `enums.py`
-from the packaged `reference/*.json` alone, without a request or a key, as an adoption
-does after a core release changes the renderers (`/adopt-release`). Then:
+from the `render_enums` port deleted here: `git show a963cbd:<path>` (the tip of
+sdk-cashctrl#13), or, once that is on `main`, `git show <commit>^:<path>` with
+`<commit>` from `git log --diff-filter=D -1 -- scripts/refresh_reference.py`. Not from
+template v0.2.2's scaffold: its script imports `render_str_enums` and
+`render_int_enums`, which core 0.3.0 removed. Make the script the generator of step 3;
+its `--render-only` regenerates `enums.py` from the packaged `reference/*.json` alone,
+without a request or a key, through its one `render_enums` call, as an adoption does
+after a core release changes `render_enums` (`/adopt-release`). Then:
 
 1. Work on a branch `chore/reference-<thing>`. Make sure `docs/upstream/` is current
    (`/refresh-upstream` first if it is not).
