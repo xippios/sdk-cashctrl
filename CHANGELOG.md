@@ -13,16 +13,12 @@ its `mcp`, `http` and `testing` extras likewise) and sdk-template v0.2.2, the fl
 needs, and follows conventions 1.21. The adoption of core 0.3.0 makes the organisation
 registry, the `--org` lock, the write-server check and the recorder's host, JSON and
 percent-encoded checks the package's own, copied from sdk-core (ADR-0024), and the
-empty reference-data scaffolding is gone. On a server bound with `--org`, no tool takes
-`org` any more: the lock binds it on every tool at build (G5 (1), Johannes,
-2026-10-27), and a call that still passes one is answered for the bound organisation,
-where 0.1.0 refused another organisation's name (queue row 115). Eight read tasks add
-the discovery lists the write tools' ids come from (custom fields, person categories
-and titles, account categories, cost centers, locations) and the reports
-(`get_report_tree`, `get_report_data`); `update_order`, the ninth write tool, comes
-with two reads, an order's book entries (`list_order_book_entries`) and the audit log
-(`list_history`). That makes 23 read tasks, `list_organisations` among them, and nine
-write tools.
+empty reference-data scaffolding is gone. Eight read tasks add the discovery lists the
+write tools' ids come from (custom fields, person categories and titles, account
+categories, cost centers, locations) and the reports (`get_report_tree`,
+`get_report_data`); `update_order`, the ninth write tool, comes with two reads, an
+order's book entries (`list_order_book_entries`) and the audit log (`list_history`).
+That makes 23 read tasks, `list_organisations` among them, and nine write tools.
 
 Not covered: salary (`salary/*`, which holds personal data beyond `ssn` and `iban`),
 journal imports, the fiscal period create, complete and reopen, depreciation and
@@ -92,6 +88,11 @@ characters of the API user's key) reaches agents as upstream sends it (row 129).
 - Adopted xippios-core 0.3.0, sdk-template v0.2.2 and conventions 1.21 (conventions §15);
   the organisation registry, the `--org` lock, the write-server check and the recorder's
   host, JSON and percent-encoded checks are the package's own from here (ADR-0024).
+- On a server started with `--org`, the tools no longer take `org`: it is bound on every
+  tool at build, and the organisation list shows the bound one alone, as in 0.1.0. A
+  call that still passes `org` is answered for the bound organisation, where 0.1.0
+  refused another organisation's name (ADR-0024; G5 (1), Johannes, 2026-10-27; queue
+  row 115).
 - The write tools' descriptions name the read tools their ids come from, the discovery
   lists included: `list_person_categories`, `list_person_titles`, `list_locations`,
   `list_cost_centers`, `list_account_categories` and `list_custom_fields` (by module).
