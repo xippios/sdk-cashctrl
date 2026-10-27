@@ -31,13 +31,14 @@ release changes the renderers (`/adopt-release`). When a task needs a value set:
    name to (snapshot file, operation, parameter); for each entry it reads the values from
    the snapshot, writes `reference/<name>.json` (`param`, `fetched` = the snapshot date
    in `docs/upstream/FETCHED.md`, `values`) and regenerates `enums.py` with
-   `xippios.core.reference.render_str_enums` (`member_names=` for a value with no
-   identifier to derive), or, for integer ids, `id_name_pairs` and `render_int_enums`.
+   one `xippios.core.reference.render_enums` call (`member_names=` for a value with no
+   identifier to derive; integer ids as `id_name_pairs` builds them), then `ruff format`
+   and `ruff check --fix` on it, as `--render-only` does.
    It makes no API call, and keeps `--render-only`. Add the name to `PACKAGED_LISTS` in
    `params.py`, and a test that the generator reproduces the committed files from the
    snapshot.
-4. Commit `enums.py` as rendered: core's renderers write it ASCII-only and ruff-clean,
-   so no formatting step follows (ADR-0008).
+4. Commit `enums.py` as the script leaves it: core's `render_enums` writes it ASCII-only
+   and the script's ruff step lays it out (ADR-0008, amendment 2026-10-27).
 5. Add a row to the provenance table in `reference/README.md`: file, origin (snapshot
    file, operation, parameter), snapshot date.
 6. Agents need the values to form valid calls: a parameter typed with the enum lists them

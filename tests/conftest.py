@@ -5,12 +5,12 @@ import pytest
 
 from xippios.cashctrl._client import DEMO, TENANTS
 
-# Core's plugin keeps the default run offline and free of real keys (ADR-0013); a key's
-# variable is named under xippios_placeholder_key_envs in pyproject.toml, not here. No
-# network outside a test marked live or network, no rate-limit waits, and every auth
-# object of every organisation sends PLACEHOLDER_KEY, pinned on EnvKeyAuth, with
-# CASHCTRL_DEMO_API_KEY set to it. What stays here is which organisations exist in a
-# test: demo only.
+# Core's plugin keeps the default run offline and free of real keys (ADR-0013), runs anyio
+# tests on asyncio and serves the family check in tests/test_family.py; a key's variable is
+# named under xippios_placeholder_key_envs in pyproject.toml, not here. No network outside a
+# test marked live or network, no rate-limit waits, and every auth object of every
+# organisation sends PLACEHOLDER_KEY, pinned on EnvKeyAuth, with CASHCTRL_DEMO_API_KEY set
+# to it. What stays here is which organisations exist in a test: demo only.
 pytest_plugins = ["xippios.core.testing.plugin"]
 
 DEMO_PAIR = frozenset({TENANTS.var(DEMO, "SUBDOMAIN"), TENANTS.var(DEMO, "API_KEY")})
@@ -31,11 +31,6 @@ def _strip_productive_organisations() -> None:
 
 
 _strip_productive_organisations()
-
-
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
 
 
 @pytest.fixture(autouse=True)

@@ -9,6 +9,7 @@ import httpx
 import pytest
 import respx
 from xippios.core import (
+    BODY_LIMIT,
     AuthError,
     InvalidRequestError,
     NotFoundError,
@@ -17,10 +18,9 @@ from xippios.core import (
     UpstreamError,
     XippiosError,
 )
-from xippios.core.errors import BODY_LIMIT
 from xippios.core.http import status_for
 from xippios.core.mcp import error_to_text
-from xippios.core.testing import fixture_path, load_fixture
+from xippios.core.testing import fixture_path, load_fixture, response_from_fixture, sent_query
 
 from xippios.cashctrl._client import DEMO, TENANTS, classify, client_for
 from xippios.cashctrl.errors import FieldError, RequestRejected
@@ -54,13 +54,8 @@ def refusal(path: str, payload: dict[str, object]) -> httpx.Response:
 
 
 def recorded(fixtures_dir: Path, endpoint: str, case: str) -> httpx.Response:
-    fixture = load_fixture(fixture_path(fixtures_dir, endpoint, case))
-    return httpx.Response(
-        fixture.response.status,
-        headers=fixture.response.headers,
-        content=fixture.response.content,
-        request=httpx.Request(fixture.request.method, fixture.request.url),
-    )
+    """The recorded answer with its recorded request, as core rebuilds it."""
+    return response_from_fixture(load_fixture(fixture_path(fixtures_dir, endpoint, case)))
 
 
 def test_the_documented_rejection_names_every_field() -> None:
@@ -363,7 +358,7 @@ async def test_unknown_id_replays_as_not_found(
     route = replay_fixture("account_read", "unknown_id")
     with pytest.raises(NotFoundError, match="This account does not exist"):
         await client_for(DEMO).get_json("/account/read.json", params={"id": 999999999})
-    assert route.calls.last.request.url.params["id"] == "999999999"
+    assert sent_query(route)["id"] == "999999999"
 
 
 async def test_missing_id_replays_as_request_rejected(

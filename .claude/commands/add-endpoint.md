@@ -37,7 +37,7 @@ Work on a branch `feature/<operation>`. Follow the three layers (ADR-0001) exact
 4. **Task function** in `src/xippios/cashctrl/tasks.py`: an async function shaped
    like what a person or agent wants (`get_<thing>(org, ...)`; `org` is always the first,
    required parameter, never defaulted, never a list of organisations), composing wrappers,
-   resolving pagination with `xippios.core.paginate_*` and reference lookups, and returning
+   resolving pagination with `xippios.core.paginate_offset` and reference lookups, and returning
    `Result[T]` with full `ResultMeta` through `_meta(org, ...)` (`source`, `endpoint`,
    `tenant=org`, `request`, and `published_at` / `vintage` when upstream provides them). Then:
    `get_<thing> = sync(get_<thing>_async)`, add `"get_<thing>"` to `__all__`, and
@@ -64,12 +64,14 @@ Work on a branch `feature/<operation>`. Follow the three layers (ADR-0001) exact
    fixture for key patterns and for values under `ssn` and `iban` before committing.
 
 7. **Docs.** `CHANGELOG.md` under Unreleased; the README status table gets a row
-   (upstream operation, task function, MCP tool name `cashctrl_<task>`, status).
+   (upstream operation, task function, MCP tool name `cashctrl_<task>`, status),
+   the task's name first in its cell, in backticks, as the comment above the table says.
 
 8. **Checks**, all of them:
    `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest && uv run pre-commit run --all-files`.
-   `tests/test_adapters.py` proves the new task is exposed as a tool and a route without
-   touching `mcp.py` or `http.py`.
+   `tests/test_family.py`, core's family check, proves the new task is exposed as a tool
+   and a route without touching `mcp.py` or `http.py`, returns `Result[T]` with an agent
+   docstring, and is in the README status table.
 
 9. Open the PR with `gh pr create`; body is the definition-of-done checklist, ticked
    honestly, with assumptions and open questions listed. Do not merge.

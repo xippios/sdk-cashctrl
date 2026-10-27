@@ -9,8 +9,8 @@ exactly what is named there.
 ``org: str`` is the first, required parameter of every task: the name of a declared
 organisation (``demo``, ``acme``), handed to the endpoint wrappers, which reach CashCtrl
 through ``client_for(org)``. No task spans organisations. ``tests/test_tasks.py`` checks
-every name in ``__all__``. The one exception is ``list_organisations``, core's tenant
-list (``xippios.core.tenants.list_task``, ADR-0014): no argument, the declared
+every name in ``__all__``. The one exception is ``list_organisations``, the package's
+tenant list (``_tenants.list_task``, ADR-0024): no argument, the declared
 organisations' names only, so an agent can form valid calls.
 
 Docstrings are read by agents: one sentence first, then ``Args:`` with examples of
@@ -54,10 +54,10 @@ from xippios.core import (
     paginate_offset,
     sync,
 )
-from xippios.core.tenants import list_task
 
 from xippios.cashctrl import api
 from xippios.cashctrl._client import SOURCE, TENANTS
+from xippios.cashctrl._tenants import list_task
 from xippios.cashctrl.models import (
     Account,
     AccountDetail,
@@ -808,14 +808,15 @@ async def list_order_categories_async(
 
 LIST_ORGANISATIONS_DOC = """List the organisations this server can reach, by name.
 
-Every other tool takes one of these names as ``org`` to choose the organisation it works
-on, e.g. ``demo`` or ``acme``. Only names come back, never a subdomain, a key or another
-value. On a server locked to one organisation (``--org``) only that one is listed; an
-empty list means that no organisation is declared where the server runs.
+On a server that serves every declared organisation, every other tool takes one of these
+names as ``org`` to choose the organisation it works on, e.g. ``demo`` or ``acme``; on a
+server started with ``--org`` the tools act on that one organisation and this list shows
+it alone. Only names come back, never a subdomain, a key or another value; an empty list
+means that no organisation is declared where the server runs.
 """
 
 list_organisations = list_task(TENANTS, name="list_organisations", doc=LIST_ORGANISATIONS_DOC)
-"""The declared organisations' names (ADR-0014); ``meta.tenant`` is ``None``."""
+"""The declared organisations' names (ADR-0024); ``meta.tenant`` is ``None``."""
 
 list_fiscal_periods = sync(list_fiscal_periods_async)
 list_currencies = sync(list_currencies_async)

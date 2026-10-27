@@ -1,11 +1,11 @@
 # Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
-_commit: v0.2.0
+_commit: v0.2.2
 _src_path: https://github.com/xippios/sdk-template.git
 api_base_url: https://example.cashctrl.com/api/v1
 api_key_env: CASHCTRL_API_KEY
 api_key_location: basic
 core_git_ref: ''
-core_version: 0.2.0
+core_version: 0.3.0
 domain_topic: accounting
 import_path: cashctrl
 needs_write_tools: true

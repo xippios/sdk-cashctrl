@@ -1,8 +1,9 @@
 """The organisation registry: declaration, lookup and one isolated client per organisation.
 
-The registry is core's ``Tenants`` (ADR-0014); these tests pin the semantics this package
-relies on. Where core's wording differs from the local registry's, a test asserts the
-behaviour and the variable names, not the text.
+``TENANTS`` is the package's own ``Tenants`` (``_tenants.py``, copied from core when 0.3.0
+left it to this package, ADR-0024), declared in ``_client.py``; these tests pin cashctrl's
+declaration and what ``client_for`` builds from it, and ``tests/test_tenants.py`` tests the
+copied machinery itself on a fictitious source.
 """
 
 import os

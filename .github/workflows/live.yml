@@ -4,11 +4,13 @@
 # themselves.
 # Rendered by the template (the one workflow that is): the secret it names is the source's
 # key variable, and its start time derives from the slug. Edited by hand for the
-# organisation model (ADR-0014): the live tests reach the reserved demo organisation only,
+# organisation model (ADR-0024): the live tests reach the reserved demo organisation only,
 # declared by CASHCTRL_DEMO_SUBDOMAIN and CASHCTRL_DEMO_API_KEY, so those two org secrets
 # replace the rendered CASHCTRL_API_KEY, which nothing reads; CASHCTRL_ORGS is never set.
 # Also by hand: --tb=short, since pytest's long traceback prints each frame's arguments,
 # an upstream payload among them, into this public log.
+# From template v0.2.2 on this file is cashctrl's own and is never re-rendered (D35), so
+# its pins are bumped by hand (conventions §13).
 name: Live
 
 on:
@@ -26,8 +28,10 @@ jobs:
     name: live
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
       - run: uv sync --all-extras --frozen

@@ -92,10 +92,10 @@ table below. Persons come back without the personal identifiers `ssn` and `iban`
 }
 ```
 
-`--org acme` locks the server to one organisation: it stops at startup unless `acme` is
-declared with a well-formed subdomain, its instructions name the organisation, and a
-tool call that names another organisation or leaves `org` out is refused before it
-reaches CashCtrl; `cashctrl_list_organisations` then lists `acme` only. Without
+`--org acme` binds the server to one organisation: it stops at startup unless `acme` is
+declared with a well-formed subdomain, its instructions name the organisation, and every
+tool acts on `acme` and takes no `org`, so no call reaches another organisation;
+`cashctrl_list_organisations` then lists `acme` only. Without
 `--org`, a server serves every declared organisation and the agent picks one per call,
 after `cashctrl_list_organisations` has named them. Its tools are read-only and named
 `cashctrl_<verb>_<noun>`. Results are capped at 200 rows or 64 KB with a note on how to

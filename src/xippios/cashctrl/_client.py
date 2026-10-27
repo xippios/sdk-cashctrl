@@ -6,8 +6,9 @@ there is no single client here: every task takes ``org``, the name of an organis
 declared in the environment, and ``client_for(org)`` returns that organisation's own
 client, with its own base URL, its own key, its own token bucket and no shared cache.
 
-The registry is core's ``xippios.core.Tenants`` (ADR-0014), ``TENANTS`` below; the
-environment is the contract (conventions §7):
+The registry is the package's own ``Tenants`` (``_tenants.py``, copied from xippios-core
+when 0.3.0 left it to this package, ADR-0024), ``TENANTS`` below; the environment is the
+contract (conventions §7):
 
 - ``CASHCTRL_ORGS``: comma-separated names matching ``^[a-z0-9_]+$``, e.g. ``acme,acme_test``;
 - per name, ``CASHCTRL_<NAME>_SUBDOMAIN`` and ``CASHCTRL_<NAME>_API_KEY``, the name
@@ -30,17 +31,18 @@ from typing import Any
 
 import httpx
 from xippios.core import (
+    BODY_LIMIT,
     AsyncClient,
     BasicKeyAuth,
     ClientConfig,
     NotFoundError,
     RateLimit,
-    Tenants,
     UpstreamError,
     XippiosError,
+    error_from_response,
 )
-from xippios.core.errors import BODY_LIMIT, error_from_response
 
+from xippios.cashctrl._tenants import Tenants
 from xippios.cashctrl._version import __version__
 from xippios.cashctrl.errors import FieldError, RequestRejected
 
@@ -80,7 +82,7 @@ def check_subdomain(value: str) -> str:
 
     The label before ``.cashctrl.com``: letters, digits and inner hyphens, at most 63
     characters. CashCtrl's hosts are lower-case, so the value is lower-cased first, as
-    the upstream would read it (ADR-0014).
+    the upstream would read it (ADR-0024).
 
     Raises:
         ValueError: ``value`` is not one label; the message never quotes it, and core's
@@ -100,7 +102,7 @@ TENANTS = Tenants(
     validate={"SUBDOMAIN": check_subdomain},
     hints={"SUBDOMAIN": "set the subdomain alone, one DNS label: acme for acme.cashctrl.com"},
 )
-"""CashCtrl's organisations, declared in the environment (ADR-0014)."""
+"""CashCtrl's organisations, declared in the environment (ADR-0024)."""
 
 
 NEUTRAL_HOST = "cashctrl.com"
@@ -303,10 +305,11 @@ def client_for(org: str) -> AsyncClient:
 
     Each organisation has its own client: its own base URL, key, token bucket and no
     response cache. The key is read from ``CASHCTRL_<NAME>_API_KEY`` on the first request,
-    so a declared organisation without a key fails then, with ``ConfigError``. Core keeps
-    the client under a digest of the organisation's variables: when the environment
-    changes the subdomain or the key, the next call builds a new client.
-    ``TENANTS.reset()`` drops every cached client.
+    so a declared organisation without a key fails then, with ``ConfigError``. The
+    registry keeps the client under a digest of the organisation's variables: when the
+    environment changes the subdomain or the key, the next call builds a new client and
+    closes the one it replaces (``Tenants.client_for``). ``TENANTS.reset()`` drops every
+    cached client.
 
     Raises:
         InvalidRequestError: ``org`` is not declared.
