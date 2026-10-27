@@ -879,12 +879,12 @@ async def list_history_async(
 
     Every entry comes back with ``created`` (when the change was made), ``created_by``
     (who made it; an API user shows as ``API:`` and the first four characters of its
-    key), ``type`` (the module, e.g. ``ORDER``), ``change_type`` (``CREATE``,
-    ``UPDATE`` and ``STATUS`` were seen), the record it concerns (``order_id``,
-    ``person_id``, ``statement_id``) and ``message``, upstream's text of the change
-    (``Rechnung 'EK-2026-001' created.``). ``order_id``, ``person_id`` or
-    ``statement_id`` narrow it to one record's history; the history of an order that was
-    deleted is not listed (observed: none, a minute after the delete).
+    key), ``type`` (the module, e.g. ``ORDER``), ``change_type`` (``CREATE`` and
+    ``STATUS`` were seen, ``UPDATE`` too on 2026-10-27, though in no fixture), the
+    record it concerns (``order_id``, ``person_id``, ``statement_id``) and ``message``,
+    upstream's text of the change (``Rechnung 'EK-2026-001' created.``). ``order_id``,
+    ``person_id`` or ``statement_id`` narrow it to one record's history; the history of
+    an order that was deleted is not listed (observed: none, a minute after the delete).
 
     Paging: with ``limit``, one page of at most ``limit`` entries from ``start``; without
     it, every matching entry from ``start`` on, which for a whole organisation is long:

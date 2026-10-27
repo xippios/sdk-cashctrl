@@ -61,7 +61,8 @@ Work on a branch `feature/<operation>`. Follow the three layers (ADR-0001) exact
    fixture. A replay test that checks what was sent compares
    `xippios.core.testing.sent_urls(route)`, the URLs with credentials redacted, never a
    request kept from `route.calls`, which a failure or `pytest -l` would print. Grep the
-   fixture for key patterns and for values under `ssn` and `iban` before committing.
+   fixture for key patterns and for values under `ssn`, `iban` and `qrIban` before
+   committing.
 
 7. **Docs.** `CHANGELOG.md` under Unreleased; the README status table gets a row
    (upstream operation, task function, MCP tool name `cashctrl_<task>`, status),

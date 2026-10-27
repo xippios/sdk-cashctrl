@@ -445,9 +445,9 @@ rule above
 refuses. The write stays the recorder's: core's `record` writes as soon as its own
 verify passes, before the recorder's step and final check could run. A compound name such as
 `publicHash` is not scrubbed and goes to review. Grep the file for key patterns, e-mail
-addresses, API user tags, token-like fields and values under `ssn` and `iban` before
-committing (`/record-fixture`, `tests/fixtures/README.md`). Fixtures are never typed in
-by hand.
+addresses, API user tags, token-like fields and values under `ssn`, `iban` and `qrIban`
+before committing (`/record-fixture`, `tests/fixtures/README.md`). Fixtures are never
+typed in by hand.
 
 Writes: `--method POST` is accepted for the nine write paths the write tools call only
 (`journal/create|update|delete.json`, `person/create|update|delete.json`,
@@ -544,7 +544,7 @@ payload it was given, API user tags included, into the public Actions log.
 ## Never
 
 - Never hand-write a fixture, and never commit one without grepping for key patterns
-  and for values under `ssn` and `iban`.
+  and for values under `ssn`, `iban` and `qrIban`.
 - Never record a fixture, run a live test or make a live call against any organisation
   but `demo`; never set `CASHCTRL_ORGS` with real names in a session or a test.
 - Never print, log or commit `CASHCTRL_DEMO_SUBDOMAIN` or any organisation's subdomain.
