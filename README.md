@@ -249,9 +249,11 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET order/list.json` (List orders) | `list_orders` | `cashctrl_list_orders` | available; paged; HTTP route is `POST` |
 | `GET order/read.json` (Read order) | `get_order` | `cashctrl_get_order` | available |
 | `GET order/category/list.json` (List categories) | `list_order_categories` | `cashctrl_list_order_categories` | available |
+| `GET customfield/list.json` (List custom fields) | `list_custom_fields` | `cashctrl_list_custom_fields` | available; one module (`type`) a call |
 | `GET person/category/list.json` (List categories) | `list_person_categories` | `cashctrl_list_person_categories` | available |
 | `GET person/title/list.json` (List titles) | `list_person_titles` | `cashctrl_list_person_titles` | available |
 | `GET account/category/list.json` (List categories) | `list_account_categories` | `cashctrl_list_account_categories` | available; flat, linked by `parent_id` |
+| `GET account/costcenter/list.json` (List cost centers) | `list_cost_centers` | `cashctrl_list_cost_centers` | available; HTTP route is `POST`; no balances yet |
 | `GET location/list.json` (List locations) | `list_locations` | `cashctrl_list_locations` | available; without `iban` and `qr_iban` |
 | `POST journal/create.json`, `update.json`, `delete.json` | `create_journal_entry`, `update_journal_entry`, `delete_journal_entry` | `cashctrl_create_journal_entry`, ... | available on the write server only |
 | `POST person/create.json`, `update.json`, `delete.json` | `create_person`, `update_person`, `delete_person` | `cashctrl_create_person`, ... | available on the write server only |

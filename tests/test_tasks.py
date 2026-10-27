@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 import pytest
 import respx
-from xippios.core import InvalidRequestError, NotFoundError, sync
+from xippios.core import InvalidRequestError, NotFoundError, UpstreamModel, sync
 from xippios.core.mcp import tool_name
 from xippios.core.testing import (
     Fixture,
@@ -1327,6 +1327,44 @@ async def test_the_order_categories_are_on_the_read_server_and_the_router() -> N
 # The demo organisation has no custom field and no cost center, so both answers are empty.
 
 
+def test_list_custom_fields_replays_the_recorded_list(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    route = replay_fixture("customfield_list", "person")
+    result = tasks.list_custom_fields(DEMO, "PERSON")
+    assert sent_query(route) == {"type": "PERSON"}
+    assert sent_query(route) == recorded_query(recorded(fixtures_dir, "customfield_list", "person"))
+    assert result.meta.endpoint == "customfield/list.json"
+    assert result.meta.request == {"org": DEMO, "type": "PERSON"}
+    assert (result.meta.tenant, result.meta.total, result.data) == (DEMO, 0, [])
+
+
+@pytest.mark.parametrize("value", ["person", "CONTACT", "", None])
+def test_list_custom_fields_refuses_a_type_outside_the_documented_set(
+    respx_mock: respx.MockRouter, value: object
+) -> None:
+    allowed = "JOURNAL, ACCOUNT, INVENTORY_ARTICLE, INVENTORY_ASSET, ORDER, PERSON, FILE, "
+    message = f"type must be one of {allowed}SALARY_STATEMENT, not {value!r}"
+    with pytest.raises(InvalidRequestError, match=re.escape(message)):
+        tasks.list_custom_fields(DEMO, value)  # type: ignore[arg-type]
+    assert not respx_mock.calls
+
+
+@pytest.mark.anyio
+async def test_list_custom_fields_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("customfield_list", "person")
+    payload = await mcp_call(server, "cashctrl_list_custom_fields", {"org": DEMO, "type": "PERSON"})
+    assert (payload["data"], payload["meta"]["total"]) == ([], 0)
+    assert payload["meta"]["request"] == {"org": DEMO, "type": "PERSON"}
+    refused = {"org": DEMO, "type": "person"}
+    text = await mcp_call_text(server, "cashctrl_list_custom_fields", refused)
+    assert text.startswith("error: InvalidRequestError: type: Input should be 'JOURNAL'")
+    missing = await mcp_call_text(server, "cashctrl_list_custom_fields", {"org": DEMO})
+    assert missing == "error: InvalidRequestError: type: Field required"
+
+
 def test_list_person_categories_replays_the_recorded_list(
     replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
 ) -> None:
@@ -1401,6 +1439,95 @@ def test_list_account_categories_replays_the_flat_list(
     assert (by_id[64].number, by_id[64].account_class) == ("60", "EXPENSE")
 
 
+def test_list_cost_centers_replays_the_recorded_list(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    route = replay_fixture("account_costcenter_list", "default")
+    result = tasks.list_cost_centers(DEMO)
+    assert sent_query(route) == {}
+    assert sent_query(route) == recorded_query(
+        recorded(fixtures_dir, "account_costcenter_list", "default")
+    )
+    assert result.meta.endpoint == "account/costcenter/list.json"
+    assert result.meta.request == {"org": DEMO}
+    assert (result.meta.tenant, result.meta.total, result.data) == (DEMO, 0, [])
+
+
+def test_list_cost_centers_sends_its_parameters_as_upstream_reads_them(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """What is sent; the answer is the recorded empty list, which matches any query."""
+    route = replay_fixture("account_costcenter_list", "default")
+    result = tasks.list_cost_centers(
+        DEMO,
+        query="Projekt",
+        filter=[{"comparison": "eq", "field": "number", "value": "100"}],  # type: ignore[list-item]
+        category_id=1,
+        only_active=True,
+        only_notes=True,
+        sort="name",
+        dir="DESC",
+    )
+    sent = sent_query(route)
+    assert sent == {
+        "categoryId": "1",
+        "dir": "DESC",
+        "filter": '[{"comparison":"eq","field":"number","value":"100"}]',
+        "onlyActive": "true",
+        "onlyNotes": "true",
+        "query": "Projekt",
+        "sort": "name",
+    }
+    assert result.meta.request == {"org": DEMO, **sent, "categoryId": 1}
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"dir": "up"}, "dir must be ASC or DESC, not 'up'"),
+        (
+            {"filter": [{"comparison": "equals", "field": "number", "value": "1"}]},
+            "filter[0].comparison must be one of eq, like, gt, lt, not 'equals'",
+        ),
+        ({"query": 1}, "query must be a string, not int"),
+    ],
+)
+def test_list_cost_centers_refuses_what_upstream_would_ignore(
+    respx_mock: respx.MockRouter, arguments: dict[str, typing.Any], message: str
+) -> None:
+    with pytest.raises(InvalidRequestError, match=re.escape(message)):
+        tasks.list_cost_centers(DEMO, **arguments)
+    assert not respx_mock.calls
+
+
+def test_list_cost_centers_is_a_post_route(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from xippios.cashctrl.http import router
+
+    app = FastAPI()
+    app.include_router(router)
+    replay_fixture("account_costcenter_list", "default")
+    client = TestClient(app)
+    response = client.post("/cashctrl/list_cost_centers", json={"org": DEMO, "only_active": True})
+    assert response.status_code == 200, response.text
+    assert response.json()["meta"]["request"] == {"org": DEMO, "onlyActive": "true"}
+    rejected = client.post("/cashctrl/list_cost_centers", json={"org": DEMO, "dir": "up"})
+    assert rejected.status_code == 422
+
+
+@pytest.mark.parametrize("model", [models.CustomField, models.CostCenter])
+def test_the_unobserved_models_serialise_under_snake_case_names(
+    model: type[UpstreamModel],
+) -> None:
+    """No record of these was observed (empty lists), so their field names are checked."""
+    properties = model.model_json_schema(mode="serialization")["properties"]
+    assert [name for name in properties if not SNAKE_CASE.fullmatch(name)] == []
+
+
 def test_list_locations_replays_the_main_location(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
@@ -1462,6 +1589,22 @@ async def test_list_locations_as_a_tool_leaves_out_the_bank_account_numbers(
     (main,) = payload["data"]
     assert (main["id"], main["type"], main["org_name"]) == (1, "MAIN", "Muster Handel AG (Demo)")
     assert not {"iban", "qr_iban", "qrIban"} & set(main)
+
+
+def test_every_cap_names_a_task_and_only_parameters_it_takes() -> None:
+    """A cap's note never promises a filter the tool lacks (ADR-0016)."""
+    every_parameter = {
+        name
+        for task_name in tasks.__all__
+        for name in inspect.signature(getattr(tasks, task_name)).parameters
+    }
+    assert set(tasks.MCP_CAPS) <= set(tasks.__all__)
+    for name, cap in tasks.MCP_CAPS.items():
+        named = set(re.findall(r"[a-z]+(?:_[a-z]+)*", cap.note or "")) & every_parameter
+        assert named <= set(inspect.signature(getattr(tasks, name)).parameters), name
+    assert {"query", "filter", "category_id", "only_active"} <= set(
+        re.findall(r"[a-z]+(?:_[a-z]+)*", tasks.MCP_CAPS["list_cost_centers"].note or "")
+    )
 
 
 PAGED_LISTS: dict[str, Callable[..., typing.Any]] = {
@@ -1623,11 +1766,17 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
     "cashctrl_list_orders": ("order_list/fp2026_sales", {"type": "SALES", "fiscal_period_id": 1}),
     "cashctrl_get_order": ("order_read/by_id", {}),
     "cashctrl_list_order_categories": ("order_category_list/default", {}),
+    "cashctrl_list_custom_fields": ("customfield_list/person", {"type": "PERSON"}),
     "cashctrl_list_person_categories": ("person_category_list/default", {}),
     "cashctrl_list_person_titles": ("person_title_list/default", {}),
     "cashctrl_list_account_categories": ("account_category_list/default", {}),
+    "cashctrl_list_cost_centers": ("account_costcenter_list/default", {}),
     "cashctrl_list_locations": ("location_list/default", {}),
 }
+UNOBSERVED = frozenset({"cashctrl_list_custom_fields", "cashctrl_list_cost_centers"})
+"""Tools whose recorded answer is an empty list: their snake_case names are checked on the
+models instead (``test_the_unobserved_models_serialise_under_snake_case_names``)."""
+SNAKE_CASES = {tool: case for tool, case in TOOL_CASES.items() if tool not in UNOBSERVED}
 
 
 def test_every_task_has_a_tool_case() -> None:
@@ -1655,7 +1804,7 @@ def snake_case_violations(data: object) -> list[str]:
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize(("tool", "case"), TOOL_CASES.items(), ids=TOOL_CASES.keys())
+@pytest.mark.parametrize(("tool", "case"), SNAKE_CASES.items(), ids=SNAKE_CASES.keys())
 async def test_tool_results_carry_snake_case_keys(
     replay_fixture: Callable[[str, str], respx.Route],
     fixtures_dir: Path,
@@ -1673,7 +1822,7 @@ async def test_tool_results_carry_snake_case_keys(
     assert snake_case_violations(payload["data"]) == []
 
 
-@pytest.mark.parametrize(("tool", "case"), TOOL_CASES.items(), ids=TOOL_CASES.keys())
+@pytest.mark.parametrize(("tool", "case"), SNAKE_CASES.items(), ids=SNAKE_CASES.keys())
 def test_route_results_carry_snake_case_keys(
     replay_fixture: Callable[[str, str], respx.Route],
     fixtures_dir: Path,

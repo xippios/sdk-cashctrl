@@ -71,7 +71,10 @@ __all__ = [
     "Color",
     "Comparison",
     "ContactType",
+    "CostCenter",
     "Currency",
+    "CustomField",
+    "CustomFieldType",
     "Direction",
     "Filter",
     "FiscalPeriod",
@@ -1305,6 +1308,52 @@ class OrderCategory(UpstreamModel):
     last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
 
 
+CustomFieldType = Literal[
+    "JOURNAL", "ACCOUNT", "INVENTORY_ARTICLE", "INVENTORY_ASSET", "ORDER", "PERSON", "FILE",
+    "SALARY_STATEMENT",
+]  # fmt: skip
+"""``type`` of ``customfield/list.json``, the module: "Possible values: JOURNAL, ACCOUNT, ..."."""
+
+
+class CustomField(UpstreamModel):
+    """One custom field, an entry of ``customfield/list.json`` (``docs/upstream/common.md``).
+
+    A field of the organisation's own on the records of one module (``type``); a write
+    task sets its value as ``customField<id>`` in ``custom``. Typed from the tables of
+    ``customfield/create.json`` and ``update.json`` alone: the demo organisation has no
+    custom field, and ``customfield/list.json`` for ``PERSON`` answered ``{"total": 0,
+    "data": []}`` on 2026-10-27, so no record was observed. Every field but ``id`` is
+    therefore optional, and the two whose wire type the tables leave open are kept as
+    upstream sends them: ``group_id`` (TEXT, "The ID of the custom field group") and
+    ``values`` (TEXT holding a JSON array, ``["red","green","blue"]``, the choices of a
+    ``COMBOBOX``). ``type`` and ``data_type`` (``TEXT``, ``TEXTAREA``, ``CHECKBOX``,
+    ``DATE``, ``COMBOBOX``, ``NUMBER``, ``ACCOUNT``, ``PERSON``) stay strings;
+    ``row_label``, ``field_label``, ``field_info`` and ``field_text_right`` may hold
+    localised text as ``<values><de>...</de></values>``; ``variable_name`` is the
+    optional ``$name`` used instead of ``$customField<ID>``. The ``created*`` and
+    ``last_updated*`` bookkeeping fields every other list sends are assumed here, not
+    observed.
+    """
+
+    id: int
+    type: str | None = None
+    data_type: str | None = Field(default=None, validation_alias="dataType")
+    row_label: str | None = Field(default=None, validation_alias="rowLabel")
+    field_label: str | None = Field(default=None, validation_alias="fieldLabel")
+    field_info: str | None = Field(default=None, validation_alias="fieldInfo")
+    field_text_right: str | None = Field(default=None, validation_alias="fieldTextRight")
+    group_id: JsonValue = Field(default=None, validation_alias="groupId")
+    is_inactive: bool | None = Field(default=None, validation_alias="isInactive")
+    is_multi: bool | None = Field(default=None, validation_alias="isMulti")
+    max_width: Decimal | None = Field(default=None, validation_alias="maxWidth")
+    values: JsonValue = None
+    variable_name: str | None = Field(default=None, validation_alias="variableName")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
 class PersonCategory(UpstreamModel):
     """One person category, an entry of ``person/category/list.json`` (``docs/upstream/person.md``).
 
@@ -1393,6 +1442,38 @@ class AccountCategory(UpstreamModel):
     full_name: str | None = Field(default=None, validation_alias="fullName")
     system: bool
     is_system: bool = Field(validation_alias="isSystem")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class CostCenter(UpstreamModel):
+    """One cost center, an entry of ``account/costcenter/list.json`` (``docs/upstream/account.md``).
+
+    A cost center or cost unit amounts are allocated to: its ``id`` is the
+    ``to_cost_center_id`` of an allocation (``create_journal_entry``,
+    ``update_journal_entry``, the items of ``create_order``). Typed from the tables of
+    ``account/costcenter/create.json`` and ``update.json`` alone: the demo organisation
+    has no cost center, and ``account/costcenter/list.json`` answered ``{"total": 0,
+    "data": []}`` on 2026-10-27, so no record was observed. Every field but ``id`` is
+    therefore optional: ``name`` (localised), ``category_id``, ``notes`` (HTML),
+    ``is_inactive``, ``target_min`` and ``target_max``. ``number`` is documented as the
+    account number is ("NUMBER", "Must be numeric but can contain a decimal point"),
+    which comes as text, and is kept as sent. The list documents ``fiscalPeriodId``,
+    "from which we retrieve the balances", so its records presumably carry balances;
+    never observed, they are not modelled. The ``created*``/``last_updated*``
+    bookkeeping fields every other list sends are assumed here, not observed.
+    """
+
+    id: int
+    number: JsonValue = None
+    name: str | None = None
+    category_id: int | None = Field(default=None, validation_alias="categoryId")
+    notes: str | None = None
+    is_inactive: bool | None = Field(default=None, validation_alias="isInactive")
+    target_min: Decimal | None = Field(default=None, validation_alias="targetMin")
+    target_max: Decimal | None = Field(default=None, validation_alias="targetMax")
     created: datetime | None = None
     created_by: str | None = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")

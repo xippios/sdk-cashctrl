@@ -1043,7 +1043,7 @@ def test_a_settled_token_like_field_needs_no_review(recorder: ModuleType) -> Non
 def test_every_committed_fixture_passes_the_final_check(recorder: ModuleType) -> None:
     """The recorded fixtures hold no tag, address or credential the check would refuse."""
     fixtures = sorted((Path(__file__).parent / "fixtures").glob("*/*.json"))
-    assert len(fixtures) == 42
+    assert len(fixtures) == 44
     for path in fixtures:
         assert recorder.check(path.read_text(encoding="utf-8"), "demo", "") == ([], []), path.name
 

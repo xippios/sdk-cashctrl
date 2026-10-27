@@ -50,6 +50,7 @@ from pydantic_core import ErrorDetails
 from xippios.core import (
     InvalidRequestError,
     Result,
+    ResultCap,
     ResultMeta,
     collect,
     paginate_offset,
@@ -64,7 +65,10 @@ from xippios.cashctrl.models import (
     AccountCategory,
     AccountDetail,
     Comparison,
+    CostCenter,
     Currency,
+    CustomField,
+    CustomFieldType,
     Direction,
     Filter,
     FiscalPeriod,
@@ -94,7 +98,9 @@ __all__ = [
     "get_person",
     "list_account_categories",
     "list_accounts",
+    "list_cost_centers",
     "list_currencies",
+    "list_custom_fields",
     "list_fiscal_periods",
     "list_journal_entries",
     "list_locations",
@@ -107,12 +113,32 @@ __all__ = [
     "list_tax_codes",
 ]
 
+MCP_CAPS: Mapping[str, ResultCap] = {
+    "list_cost_centers": ResultCap(
+        note="narrow the list with query, filter, category_id or only_active to see the rest"
+    ),
+    "list_custom_fields": ResultCap(
+        max_rows=500,
+        max_bytes=131_072,
+        note="the list is every custom field of the type and cannot be narrowed further",
+    ),
+}
+"""Per-tool MCP result caps (ADR-0016), which ``mcp.py`` passes to ``build_server``.
+
+Every other tool keeps the family default, 200 rows or 64 KB. ``list_custom_fields`` has
+no filter or paging beyond its ``type`` and a write needs a type's custom fields whole
+(``customField<id>``), so its bound is raised to 500 rows or 128 KB.
+``list_cost_centers`` keeps the default bound and names its filters.
+"""
+
 DIRECTIONS: tuple[str, ...] = get_args(Direction)
 """The values of ``dir`` on every list that documents it: ``ASC``, ``DESC``."""
 COMPARISONS: tuple[str, ...] = get_args(Comparison)
 """The values of ``comparison`` in a ``filter`` item: ``eq``, ``like``, ``gt``, ``lt``."""
 ORDER_TYPES: tuple[str, ...] = get_args(OrderType)
 """The values of ``type`` on ``order/list.json`` and ``order/category/list.json``."""
+CUSTOM_FIELD_TYPES: tuple[str, ...] = get_args(CustomFieldType)
+"""The values of ``type`` on ``customfield/list.json``, the modules: ``JOURNAL``, ``PERSON``, ..."""
 PAGE_SIZE = 100
 """Records per request when a list task collects every page.
 
@@ -816,6 +842,34 @@ async def list_order_categories_async(
     return Result(data=response.data, meta=meta)
 
 
+async def list_custom_fields_async(org: str, type: CustomFieldType) -> Result[list[CustomField]]:
+    """List an organisation's custom fields of one module, the fields it added to its records.
+
+    Every custom field of ``type`` comes back with its ``id``, its ``data_type``
+    (``TEXT``, ``TEXTAREA``, ``CHECKBOX``, ``DATE``, ``COMBOBOX``, ``NUMBER``, ``ACCOUNT``
+    or ``PERSON``), the labels it is shown with (``row_label``, ``field_label``,
+    localised as ``<values><de>...</de></values>``), ``is_inactive``, ``is_multi`` and,
+    for a ``COMBOBOX``, the ``values`` to choose from. A write tool sets a custom field
+    as ``customField<id>`` in its ``custom`` mapping, e.g. ``{"customField3": "Projekt
+    A"}``: ``JOURNAL`` for ``create_journal_entry``, ``PERSON`` for ``create_person``,
+    ``ORDER`` for ``create_order``. ``meta.total`` is upstream's count. ``type`` is
+    checked first, and a value outside the documented set is refused.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        type: The module whose custom fields to list: ``JOURNAL``, ``ACCOUNT``,
+            ``INVENTORY_ARTICLE``, ``INVENTORY_ASSET``, ``ORDER``, ``PERSON``, ``FILE`` or
+            ``SALARY_STATEMENT``, e.g. ``PERSON``.
+    """
+    if type not in CUSTOM_FIELD_TYPES:
+        allowed = ", ".join(CUSTOM_FIELD_TYPES)
+        raise InvalidRequestError(f"type must be one of {allowed}, not {type!r}", source=SOURCE)
+    response = await api.customfield_list(org, type)
+    sent = api.customfield_list_params(type)
+    meta = _meta(org, "customfield/list.json", sent, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
 async def list_person_categories_async(org: str) -> Result[list[PersonCategory]]:
     """List an organisation's person categories, the groups its persons are filed in.
 
@@ -869,6 +923,59 @@ async def list_account_categories_async(org: str) -> Result[list[AccountCategory
     return Result(data=response.data, meta=meta)
 
 
+async def list_cost_centers_async(
+    org: str,
+    *,
+    query: str | None = None,
+    filter: list[Filter] | None = None,
+    category_id: int | None = None,
+    only_active: bool = False,
+    only_notes: bool = False,
+    sort: str | None = None,
+    dir: Direction | None = None,
+) -> Result[list[CostCenter]]:
+    """List an organisation's cost centers, the units amounts can be allocated to.
+
+    Every matching cost center comes back with its ``id`` (the ``to_cost_center_id`` of
+    an allocation in ``create_journal_entry``, ``update_journal_entry`` and the items of
+    ``create_order``), ``number``, ``name`` (localised), ``category_id``,
+    ``is_inactive``, ``notes`` and its targets ``target_min`` and ``target_max``. No
+    cost center has been observed yet (the demo organisation has none), so balances the
+    list may carry are not returned. ``meta.total`` is upstream's count. Over MCP a long
+    list is cut at the result cap (200 rows or 64 KB) with a note: narrow it with
+    ``query``, ``filter``, ``category_id`` or ``only_active``. Upstream ignores values it
+    does not understand, so ``dir`` and the filters' ``comparison`` are checked first and
+    a wrong one is refused.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        query: Full-text search, e.g. ``"Projekt"``.
+        filter: Filters that must all match, each with ``comparison`` (``eq``, ``like``,
+            ``gt`` or ``lt``; ``like`` when left out), ``field`` (a column of the list,
+            e.g. ``number``) and ``value`` (a text, or a list of texts of which any may
+            match), e.g. ``[{"comparison": "eq", "field": "number", "value": "100"}]``.
+        category_id: Only the cost centers of one cost center category, e.g. ``1``.
+        only_active: ``true`` to leave out inactive cost centers.
+        only_notes: ``true`` to list only cost centers with notes.
+        sort: The column to sort by, e.g. ``number`` (upstream's default) or ``name``.
+        dir: ``ASC`` (upstream's default) or ``DESC``.
+    """
+    filters = _check_list_arguments(dir=dir, filter=filter, texts={"query": query, "sort": sort})
+    arguments: dict[str, Any] = {
+        "category_id": category_id,
+        "dir": dir,
+        "filter": filters,
+        "only_active": only_active or None,
+        "only_notes": only_notes or None,
+        "query": query,
+        "sort": sort,
+    }
+    sent = api.account_costcenter_list_params(**arguments)
+    response = await api.account_costcenter_list(org, **arguments)
+    meta = _meta(org, "account/costcenter/list.json", sent, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
 def _location(location: Location) -> LocationProjection:
     """A ``location/list.json`` entry without ``iban`` and ``qr_iban`` (ADR-0017)."""
     return LocationProjection.project(location)
@@ -917,7 +1024,9 @@ get_person = sync(get_person_async)
 list_orders = sync(list_orders_async)
 get_order = sync(get_order_async)
 list_order_categories = sync(list_order_categories_async)
+list_custom_fields = sync(list_custom_fields_async)
 list_person_categories = sync(list_person_categories_async)
 list_person_titles = sync(list_person_titles_async)
 list_account_categories = sync(list_account_categories_async)
+list_cost_centers = sync(list_cost_centers_async)
 list_locations = sync(list_locations_async)

@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-10-27T21:29:39.146578Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/customfield/list.json?type=PERSON"
+  },
+  "response": {
+    "body": "{\"total\":0,\"data\":[]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 27 Oct 2026 21:29:37 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}
