@@ -808,10 +808,11 @@ async def list_order_categories_async(
 
 LIST_ORGANISATIONS_DOC = """List the organisations this server can reach, by name.
 
-Every other tool takes one of these names as ``org`` to choose the organisation it works
-on, e.g. ``demo`` or ``acme``. Only names come back, never a subdomain, a key or another
-value. On a server bound to one organisation (``--org``) only that one is listed; an
-empty list means that no organisation is declared where the server runs.
+On a server that serves every declared organisation, every other tool takes one of these
+names as ``org`` to choose the organisation it works on, e.g. ``demo`` or ``acme``; on a
+server started with ``--org`` the tools act on that one organisation and this list shows
+it alone. Only names come back, never a subdomain, a key or another value; an empty list
+means that no organisation is declared where the server runs.
 """
 
 list_organisations = list_task(TENANTS, name="list_organisations", doc=LIST_ORGANISATIONS_DOC)

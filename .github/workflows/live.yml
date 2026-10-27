@@ -4,7 +4,7 @@
 # themselves.
 # Rendered by the template (the one workflow that is): the secret it names is the source's
 # key variable, and its start time derives from the slug. Edited by hand for the
-# organisation model (ADR-0014): the live tests reach the reserved demo organisation only,
+# organisation model (ADR-0024): the live tests reach the reserved demo organisation only,
 # declared by CASHCTRL_DEMO_SUBDOMAIN and CASHCTRL_DEMO_API_KEY, so those two org secrets
 # replace the rendered CASHCTRL_API_KEY, which nothing reads; CASHCTRL_ORGS is never set.
 # Also by hand: --tb=short, since pytest's long traceback prints each frame's arguments,

@@ -37,7 +37,7 @@ Work on a branch `feature/<operation>`. Follow the three layers (ADR-0001) exact
 4. **Task function** in `src/xippios/cashctrl/tasks.py`: an async function shaped
    like what a person or agent wants (`get_<thing>(org, ...)`; `org` is always the first,
    required parameter, never defaulted, never a list of organisations), composing wrappers,
-   resolving pagination with `xippios.core.paginate_*` and reference lookups, and returning
+   resolving pagination with `xippios.core.paginate_offset` and reference lookups, and returning
    `Result[T]` with full `ResultMeta` through `_meta(org, ...)` (`source`, `endpoint`,
    `tenant=org`, `request`, and `published_at` / `vintage` when upstream provides them). Then:
    `get_<thing> = sync(get_<thing>_async)`, add `"get_<thing>"` to `__all__`, and

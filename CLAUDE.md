@@ -34,9 +34,10 @@ organisation. `_client.py` is therefore a registry, not one client: `TENANTS`, a
 package imports them. Core keeps `ResultMeta.tenant`, `main`'s option hooks and the
 write server's rules.
 
-- `org` is the first, required parameter of every task and tool, the name of a declared
-  organisation (`demo`, `acme`), and every result names it as `meta.tenant` (it stays in
-  `meta.request` as well). `client_for(org)` is `TENANTS.client_for(org, _build)`: that
+- `org` is the first, required parameter of every task; the MCP tools take it too unless
+  the server is started with `--org`, which binds it so no tool takes it. It is the name
+  of a declared organisation (`demo`, `acme`), and every result names it as
+  `meta.tenant` (it stays in `meta.request` as well). `client_for(org)` is `TENANTS.client_for(org, _build)`: that
   organisation's own client, own base URL, own key, own token bucket, no shared cache,
   rebuilt when one of its variables changes (the key included); the client it replaces
   is closed through its `aclose()`, on the running event loop or, outside one, on core's
@@ -131,8 +132,8 @@ Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 is deliberately not 
 3. `../sdk-core/docs/definition-of-done.md`: what a PR must satisfy, and
    `../sdk-core/docs/review-checklist.md`: what the reviewer checks it against
 4. The family file `../CLAUDE.md`
-5. When a new core minor or template release comes: conventions §15, the adoption
-   checklist, which `/adopt-release` walks
+5. When a new core minor comes: conventions §15, the adoption checklist, which
+   `/adopt-release` walks
 
 ## The one rule: three layers (ADR-0001)
 
@@ -444,7 +445,7 @@ must reach the network `network`.
 sharing a key never start together, and on demand from the Actions tab; pull requests
 never run live tests.
 Every `live` test runs, write tests included, so a live write test acts only on data kept
-for testing (the demo organisation, ADR-0014) and cleans up after itself. Only its
+for testing (the demo organisation, ADR-0024) and cleans up after itself. Only its
 `uv run pytest -m live --tb=short` step sees the demo organisation's pair, from the org
 secrets `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`: the template renders the
 scaffold's `CASHCTRL_API_KEY`, which nothing reads, so the workflow names the pair by
@@ -474,26 +475,20 @@ payload it was given, API user tags included, into the public Actions log.
   and Johannes approves the `pypi` run. A reference-data refresh or a core pin's removal
   is a PR of its own before it.
 - `ruff` leaves `docs/` alone; never reformat the upstream snapshot.
-- Template and core updates: a new sdk-template release, and the core minor it carries,
-  arrive in one adoption PR, `chore/template-update-<tag>`, before the next release
-  (conventions §15); `/adopt-release <tag>` walks it, and when its merge class is `auto`
-  the session enables auto-merge after the reviewer's `ready` (ADR-0018, amendment (e)).
-  `uvx copier update` re-renders the files the template owns (`tests/conftest.py` and
-  `tests/test_family.py` among them; answers are in `.copier-answers.yml`) and never
-  overwrites the files this package fills:
-  `__init__.py`, `_client.py`, `models.py`, `api/`, `tasks.py`, `tasks_write.py`,
-  `params.py`, `enums.py`, `reference/`, `scripts/`, `tests/test_tasks.py`,
-  `tests/test_tasks_write.py`, `tests/test_live.py`, `tests/fixtures/`, `docs/upstream/`,
-  `README.md` and `CHANGELOG.md`. Template changes to those are listed per release under
-  "Hand-apply" in sdk-template's
-  [CHANGELOG](https://github.com/xippios/sdk-template/blob/main/CHANGELOG.md); port them
-  by hand in the same PR.
+- Core updates: a new core minor arrives in one adoption PR, a `chore/template-update*`
+  branch, before the next release (conventions §15); when its merge class is `auto` the
+  session enables auto-merge after the reviewer's `ready` (ADR-0018, amendment (e)). An
+  adoption of a later core minor runs no `copier update` (D35, D85): it raises the floor
+  to `~=X.Y.0` by hand in `pyproject.toml`, runs `uv lock` and ports that core release's
+  Hand-apply list (`/adopt-release`). From template v0.2.2 on every template-rendered
+  file is cashctrl's own (`ci.yml`, `publish.yml`, `gates.yml`, `live.yml`, the PR
+  template, the `.claude/commands` files, the template's parts of this file), and a core
+  adoption hand-applies the template changes the conventions version it adopts needs
+  (row 118).
 - cashctrl stays on template v0.2.2 after template v0.3.0 and keeps adopting core minors
   through conventions §15; `copier update` must never be run past v0.2.2: the v0.3.0
   template deletes `mcp_write.py`, `tasks_write.py` and `tests/test_tasks_write.py` and
-  rewrites `api_key_location: basic` to `query` without a conflict marker. An adoption
-  of a later core minor runs `uvx copier update --defaults --vcs-ref=v0.2.2 -d
-  core_version=<X.Y.Z> -d core_git_ref=` and ports that core release's Hand-apply list.
+  rewrites `api_key_location: basic` to `query` without a conflict marker.
 - If a convention seems wrong, say so in the PR and follow it anyway; changing it is a
   PR against `sdk-core/docs/conventions.md` plus an ADR.
 
