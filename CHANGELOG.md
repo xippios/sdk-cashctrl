@@ -10,6 +10,18 @@ All notable changes to this project are documented here. The format follows
   the organisation registry, the `--org` lock, the write-server check and the recorder's
   host, JSON and percent-encoded checks are the package's own from here (ADR-0024).
 
+### Removed
+
+- The empty reference-data scaffolding: `src/xippios/cashctrl/params.py`
+  (`PACKAGED_LISTS` was empty), `src/xippios/cashctrl/enums.py` (no enum),
+  `src/xippios/cashctrl/reference/README.md` with its directory,
+  `scripts/refresh_reference.py` (a stub that refused) and
+  `tests/test_refresh_reference.py`. There is nothing to package: a multi-tenant source
+  packages no tenant data, and no task needs a value set `docs/upstream/` fixes. Neither
+  module was part of the public API (`__init__.py`). The fixture recorder, the upstream
+  refresh and the seeder stay. `/refresh-reference-data` does not apply until a
+  documented value set is needed; then the scaffold comes back from the template.
+
 ## [0.1.0] - 2026-10-26
 
 First release. Named organisations declared in the environment, each with its own
