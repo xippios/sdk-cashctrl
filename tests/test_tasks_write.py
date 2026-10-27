@@ -1019,9 +1019,16 @@ def test_clearing_a_flag_sends_false(
     )
 
 
-@pytest.mark.parametrize(
-    "task", [tasks_write.update_journal_entry, tasks_write.update_person], ids=lambda t: t.__name__
-)
+UPDATE_TABLES: dict[str, dict[str, str]] = {
+    "update_journal_entry": tasks_write.JOURNAL_UPDATE,
+    "update_person": tasks_write.PERSON_UPDATE,
+    "update_order": tasks_write.ORDER_UPDATE,
+}
+"""Each update task's table of the parameters its ``update.json`` documents."""
+UPDATES = [getattr(tasks_write, name) for name in UPDATE_TABLES]
+
+
+@pytest.mark.parametrize("task", UPDATES, ids=lambda t: t.__name__)
 def test_clearing_a_parameter_that_is_never_sent_is_refused(
     respx_mock: respx.MockRouter, task: Callable[..., Any]
 ) -> None:
@@ -1034,23 +1041,22 @@ def test_clearing_a_parameter_that_is_never_sent_is_refused(
     assert not respx_mock.calls
 
 
-@pytest.mark.parametrize(
-    "task", [tasks_write.update_journal_entry, tasks_write.update_person], ids=lambda t: t.__name__
-)
+@pytest.mark.parametrize("task", UPDATES, ids=lambda t: t.__name__)
 def test_every_boolean_update_parameter_is_a_flag(task: Callable[..., Any]) -> None:
     """``_FLAGS`` holds every ``bool | None`` parameter of an update task, ``confirm`` aside."""
     facade: Any = task
     hints = typing.get_type_hints(facade.async_fn)
     booleans = {name for name, hint in hints.items() if hint == bool | None}
     assert booleans <= tasks_write._FLAGS
-    table = (
-        tasks_write.JOURNAL_UPDATE
-        if task is tasks_write.update_journal_entry
-        else tasks_write.PERSON_UPDATE
-    )
+    table = UPDATE_TABLES[task.__name__]
     assert tasks_write._FLAGS & set(table) == booleans
-    assert tasks_write._FLAGS.issubset(
-        set(tasks_write.JOURNAL_UPDATE) | set(tasks_write.PERSON_UPDATE)
+    assert tasks_write._FLAGS.issubset(set().union(*UPDATE_TABLES.values()))
+
+
+def test_every_update_task_has_a_table() -> None:
+    """The write tasks named ``update_*`` are exactly those with a table here."""
+    assert {name for name in tasks_write.__all__ if name.startswith("update_")} == set(
+        UPDATE_TABLES
     )
 
 

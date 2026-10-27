@@ -39,9 +39,10 @@ __all__ = ["order_create", "order_fields"]
 
 def order_fields(
     *,
-    associate_id: int | Sequence[int],
-    category_id: int,
-    date: date,
+    id: int | None = None,
+    associate_id: int | Sequence[int] | None = None,
+    category_id: int | None = None,
+    date: date | None = None,
     account_id: int | None = None,
     attachments: Sequence[AttachmentInput] | None = None,
     currency_id: int | None = None,
@@ -70,16 +71,19 @@ def order_fields(
     start_date: date | None = None,
     status_id: int | None = None,
 ) -> dict[str, str]:
-    """The form fields of ``order/create.json``, upstream's names in the order of its table.
+    """The form fields of ``order/create.json`` (``id`` unset) or ``update.json`` (set).
 
-    ``associate_id`` is one id or several, sent comma-separated (``7`` or ``7,8``); a
-    value left at ``None`` or an empty list is not sent (``api/_form.py``), and
-    ``custom`` is the XML text upstream stores.
+    Upstream's names, in the order of the create table, ``id`` first. ``associate_id`` is
+    one id or, for a create, several, sent comma-separated (``7`` or ``7,8``;
+    ``update.json`` takes one, a NUMBER); a value left at ``None`` or an empty list is
+    not sent (``api/_form.py``), and ``custom`` is the XML text upstream stores. The
+    mandatory ``associateId``, ``categoryId`` and ``date`` are the tasks' to require.
     """
-    associates = [associate_id] if isinstance(associate_id, int) else list(associate_id)
+    associates = [associate_id] if isinstance(associate_id, int) else associate_id
     return form_fields(
         {
-            "associateId": ids_csv(associates),
+            "id": id,
+            "associateId": None if associates is None else ids_csv(list(associates)),
             "categoryId": category_id,
             "date": date,
             "accountId": account_id,

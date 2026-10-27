@@ -41,6 +41,7 @@ from xippios.cashctrl.tasks_write import (
     delete_order,
     delete_person,
     update_journal_entry,
+    update_order,
     update_person,
 )
 
@@ -74,5 +75,6 @@ __all__ = [
     "list_persons",
     "list_tax_codes",
     "update_journal_entry",
+    "update_order",
     "update_person",
 ]

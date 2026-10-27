@@ -129,7 +129,7 @@ behind a gateway that authenticates.
 
 ## Write tools
 
-Eight tools create, change and delete journal entries, persons and orders. They are
+Nine tools create, change and delete journal entries, persons and orders. They are
 tasks in `xippios.cashctrl.tasks_write` (re-exported from `xippios.cashctrl`), served
 by the write server only: never by the read server, never as an HTTP route.
 
@@ -142,6 +142,7 @@ by the write server only: never by the read server, never as an HTTP route.
 | `POST person/update.json` (Update person) | `update_person` | `cashctrl_update_person` |
 | `POST person/delete.json` (Delete people) | `delete_person` | `cashctrl_delete_person` |
 | `POST order/create.json` (Create order) | `create_order` | `cashctrl_create_order` |
+| `POST order/update.json` (Update order) | `update_order` | `cashctrl_update_order` |
 | `POST order/delete.json` (Delete orders) | `delete_order` | `cashctrl_delete_order` |
 
 - **The confirm gate.** Every write tool takes `confirm`, last, `false` by default.
@@ -269,7 +270,7 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET report/element/data.json` (Read JSON data) | `get_report_data` | `cashctrl_get_report_data` | available; rows as upstream sends them |
 | `POST journal/create.json`, `update.json`, `delete.json` | `create_journal_entry`, `update_journal_entry`, `delete_journal_entry` | `cashctrl_create_journal_entry`, ... | available on the write server only |
 | `POST person/create.json`, `update.json`, `delete.json` | `create_person`, `update_person`, `delete_person` | `cashctrl_create_person`, ... | available on the write server only |
-| `POST order/create.json`, `delete.json` | `create_order`, `delete_order` | `cashctrl_create_order`, `cashctrl_delete_order` | available on the write server only |
+| `POST order/create.json`, `update.json`, `delete.json` | `create_order`, `update_order`, `delete_order` | `cashctrl_create_order`, ... | available on the write server only |
 
 `lang` (`de`, `fr`, `it`, `en`), which upstream takes on every request and which matters
 mostly for error messages and exports, is not exposed yet. `list_accounts` checks `dir`
