@@ -24,9 +24,11 @@ stay empty. Every list task sets ``meta.total`` to upstream's ``total``, its cou
 records matching the request (ADR-0012); it is never computed from ``len(data)``.
 
 The persons a task returns are projections without the personal identifiers ``ssn`` and
-``iban`` (ADR-0017, ``_person`` and its neighbours), and the locations are projections
-without their bank account numbers ``iban`` and ``qr_iban`` (``_location``); the endpoint
-wrappers' read models keep them.
+``iban`` (ADR-0017, ``_person`` and its neighbours), the locations projections without
+their bank account numbers ``iban`` and ``qr_iban`` (``_location``), and the rows of a
+report, kept as upstream sends them, lose every key named ``ssn``, ``iban`` or
+``qrIban`` in any letter case and at any depth (``_report``); the endpoint wrappers' read
+models keep them.
 
 The journal, person and order lists page by offset (``start``, ``limit``), resolved once
 in ``_offset_pages`` (conventions §4). With ``limit`` the task sends one request,
@@ -46,7 +48,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import date, datetime
 from typing import Any, TypeGuard, get_args
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from pydantic_core import ErrorDetails
 from xippios.core import (
     InvalidRequestError,
@@ -153,10 +155,11 @@ no filter or paging beyond its ``type`` and a write needs a type's custom fields
 whole: ``get_report_data``'s result is no list, so the cap replaces one over its bound
 with a note and a preview. The demo organisation's balance sheet of 2025, 25 rows with
 its totals, is about 17 KB, some 650 bytes a row, so 64 KB holds a report of about 100
-rows and 128 KB one of about 200; the note names the period parameters.
-``list_cost_centers`` keeps the default bound and names its filters, and so does
-``list_history``, whose whole log may hold far more than the bound: a cut is resumed at
-``start`` (ADR-0016, amended 2026-10-27), or narrowed to one record's history.
+rows and 128 KB one of about 200; the note names the period parameters (a raised bound
+for a tool that is no reference list: row 127). ``list_cost_centers`` keeps the default
+bound and names its filters, and so does ``list_history``, whose whole log may hold far
+more than the bound: a cut is resumed at ``start`` (ADR-0016, amended 2026-10-27), or
+narrowed to one record's history.
 """
 
 DIRECTIONS: tuple[str, ...] = get_args(Direction)
@@ -406,9 +409,8 @@ async def list_accounts_async(
     ``category_id``, ``currency_code``, ``is_inactive`` and its balances for one fiscal
     period: ``opening_amount`` and ``end_amount`` in the account's currency,
     ``default_currency_opening_amount`` and ``default_currency_end_amount`` in the default
-    currency. Without parameters every account is listed, and a large chart of accounts
-    exceeds the MCP result cap (200 rows or 64 KB): the tool result is then truncated
-    with a note, so narrow the list with ``query``, ``filter`` or ``only_active``.
+    currency. Without parameters every account is listed; narrow a large chart of
+    accounts with ``query``, ``filter`` or ``only_active``.
     Upstream ignores values it does not understand, so ``dir`` and the filters'
     ``comparison`` are checked first and a wrong one is refused.
 
@@ -504,10 +506,9 @@ async def list_journal_entries_async(
     Paging: with ``limit``, one page of at most ``limit`` entries from ``start``; without
     it, every matching entry from ``start`` on. ``meta.total`` is upstream's count of all
     matching entries. The next page starts at ``start`` plus the number of records
-    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
-    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
-    (about 20): collecting a large journal costs about 1 s per 100 entries and still
-    ends at the cap. Offset pages over a list that changes meanwhile can repeat or skip
+    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
+    should always pass ``limit`` (about 20): collecting a large journal costs about 1 s
+    per 100 entries. Offset pages over a list that changes meanwhile can repeat or skip
     entries: an entry added or removed shifts every later page by one.
 
     Upstream ignores values it does not understand, so ``dir`` and the filters'
@@ -628,10 +629,9 @@ async def list_persons_async(
     Paging: with ``limit``, one page of at most ``limit`` persons from ``start``; without
     it, every matching person from ``start`` on. ``meta.total`` is upstream's count of
     all matching persons. The next page starts at ``start`` plus the number of records
-    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
-    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
-    (about 20): collecting many persons costs about 1 s per 100 and still ends at the
-    cap. Offset pages over a list that changes meanwhile can repeat or skip persons: a
+    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
+    should always pass ``limit`` (about 20): collecting many persons costs about 1 s per
+    100. Offset pages over a list that changes meanwhile can repeat or skip persons: a
     person added or removed shifts every later page by one.
 
     Upstream ignores values it does not understand, so ``dir`` and the filters'
@@ -750,10 +750,9 @@ async def list_orders_async(
     Paging: with ``limit``, one page of at most ``limit`` orders from ``start``; without
     it, every matching order from ``start`` on. ``meta.total`` is upstream's count of all
     matching orders. The next page starts at ``start`` plus the number of records
-    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
-    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
-    (about 20): collecting many orders costs about 1 s per 100 and still ends at the
-    cap. Offset pages over a list that changes meanwhile can repeat or skip orders: an
+    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
+    should always pass ``limit`` (about 20): collecting many orders costs about 1 s per
+    100. Offset pages over a list that changes meanwhile can repeat or skip orders: an
     order added or removed shifts every later page by one.
 
     Upstream ignores values it does not understand, so ``type``, ``dir`` and the
@@ -1065,11 +1064,9 @@ async def list_cost_centers_async(
     ``create_order``), ``number``, ``name`` (localised), ``category_id``,
     ``is_inactive``, ``notes`` and its targets ``target_min`` and ``target_max``. No
     cost center has been observed yet (the demo organisation has none), so balances the
-    list may carry are not returned. ``meta.total`` is upstream's count. Over MCP a long
-    list is cut at the result cap (200 rows or 64 KB) with a note: narrow it with
-    ``query``, ``filter``, ``category_id`` or ``only_active``. Upstream ignores values it
-    does not understand, so ``dir`` and the filters' ``comparison`` are checked first and
-    a wrong one is refused.
+    list may carry are not returned. ``meta.total`` is upstream's count. Upstream ignores
+    values it does not understand, so ``dir`` and the filters' ``comparison`` are checked
+    first and a wrong one is refused.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1144,6 +1141,36 @@ async def get_report_tree_async(org: str) -> Result[list[ReportTreeNode]]:
     return Result(data=response.data, meta=meta)
 
 
+_IDENTIFIER_KEYS = frozenset({"ssn", "iban", "qriban"})
+"""Keys dropped from a report's raw rows, compared in lower case (ADR-0017, row 123)."""
+
+
+def _without_identifiers(value: JsonValue) -> JsonValue:
+    """``value`` without a key named ``ssn``, ``iban`` or ``qrIban``, in any case, at any depth."""
+    if isinstance(value, dict):
+        return {
+            key: _without_identifiers(item)
+            for key, item in value.items()
+            if key.lower() not in _IDENTIFIER_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_identifiers(item) for item in value]
+    return value
+
+
+def _report(report: ReportData) -> ReportData:
+    """``report`` without the identifier keys in its rows and ``properties`` (ADR-0017).
+
+    The rows stay upstream's JSON (``JsonValue``); dropping a nested identifier is the
+    projection rule's parsing only (ADR-0003, amendment 2026-10-26).
+    """
+    return ReportData.project(
+        report,
+        data=[_without_identifiers(row) for row in report.data],
+        properties=_without_identifiers(report.properties),
+    )
+
+
 def _check_report_arguments(
     *,
     element_id: object,
@@ -1213,8 +1240,15 @@ async def get_report_data_async(
     a row of its own); ``properties``, among them the ``columns`` the report shows (each
     a ``title`` and the row field it shows, ``dataIndex``); and ``total``, upstream's
     count of the top-level rows, which ``meta.total`` repeats. Rows keep upstream's
-    camelCase names, and amounts are JSON numbers. Over MCP a result over 128 KB comes
-    back as a note and a preview: narrow the period or read a smaller report.
+    camelCase names, and amounts are JSON numbers.
+
+    Payroll and people reports (``SALARY_LIST``, ``SETTLEMENT``,
+    ``WITHHOLDING_TAX_SETTLEMENT``, ``REVENUE_BY_PERSON``, ``OPEN_DEBTORS``, ...) carry
+    personal data under names the documentation does not give. Every key named ``ssn``,
+    ``iban`` or ``qrIban``, in any letter case and at any depth, is dropped before the
+    data comes back; nothing else is. The salary module is outside what this package
+    covers, but its reports are not refused: the answer does not say which type of
+    report it is.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1246,7 +1280,7 @@ async def get_report_data_async(
         "start_date": start_date,
     }
     sent = api.report_element_data_params(element_id, **arguments)
-    report = await api.report_element_data(org, element_id, **arguments)
+    report = _report(await api.report_element_data(org, element_id, **arguments))
     meta = _meta(org, "report/element/data.json", sent, total=report.total)
     return Result(data=report, meta=meta)
 

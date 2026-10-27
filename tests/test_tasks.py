@@ -1894,6 +1894,35 @@ def test_get_report_data_replays_the_balance_sheet_of_2025(
     ]
 
 
+def test_get_report_data_drops_identifier_keys_at_any_depth(
+    respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """On the recorded balance sheet changed in memory: no recorded report holds them.
+
+    A payroll or people report's rows may carry ``ssn`` or ``iban`` (ADR-0017; the demo
+    organisation has no payroll), so the keys are injected in three letter cases, in a
+    top-level row, in a row two levels down and in ``properties``. The task drops them
+    and changes nothing else; the wrapper keeps them (ADR-0003).
+    """
+    original = recorded_body(fixtures_dir, "report_element_data", "balance_fp2025")
+    changed = json.loads(json.dumps(original))
+    top = changed["data"][0]
+    nested = top["data"][0]["data"][0]
+    top["ssn"] = SSN
+    nested["IBAN"] = IBAN
+    nested["qrIban"] = IBAN
+    changed["properties"]["columns"][0]["Ssn"] = SSN
+    respx_mock.get(f"{BASE}/report/element/data.json").respond(200, json=changed)
+    result = tasks.get_report_data(DEMO, 1, fiscal_period=FP2025)
+    assert result.data.data == original["data"], "the keys are gone, nothing else changed"
+    assert result.data.properties == original["properties"]
+    assert result.data.total == original["total"]
+    assert SSN not in result.model_dump_json()
+    assert IBAN not in result.model_dump_json()
+    faithful = sync(api.report_element_data)(DEMO, 1, fiscal_period=FP2025)
+    assert typing.cast(dict[str, typing.Any], faithful.data[0])["ssn"] == SSN
+
+
 def test_get_report_data_sends_the_dates_as_upstream_reads_them(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:

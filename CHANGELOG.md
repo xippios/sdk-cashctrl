@@ -22,8 +22,10 @@ All notable changes to this project are documented here. The format follows
   account numbers `iban` and `qr_iban`, ADR-0017); and the reports, `get_report_tree`
   (`report/tree.json`) and `get_report_data` (`report/element/data.json` for a
   `fiscal_period` or a `start_date` and `end_date`, the two forms refused together
-  before a request, its rows kept as upstream sends them, decided by Johannes on
-  2026-10-27). Account categories come from the flat `list.json`, each with its
+  before a request; its rows kept as upstream sends them, every key named `ssn`, `iban`
+  or `qrIban` dropped from them at any depth). The six lists, the two reports and the
+  rows kept as sent were decided by Johannes on 2026-10-27 (G5 (4), (5)); the rest is
+  the session's. Account categories come from the flat `list.json`, each with its
   `parent_id`, not from `tree.json`, which nests the same 38 categories with display
   fields only and lacks `accountClass` and `fullName` (compared on the demo
   organisation on 2026-10-27). The demo organisation has no custom field and no cost
@@ -31,6 +33,12 @@ All notable changes to this project are documented here. The format follows
 - `MCP_CAPS` (ADR-0016): `list_custom_fields` at 500 rows or 128 KB and
   `get_report_data` at 128 KB, since an agent needs them whole, and `list_cost_centers`
   with a note naming its filters.
+
+### Changed
+
+- The MCP descriptions of `list_accounts`, `list_journal_entries`, `list_persons` and
+  `list_orders` no longer describe the result cap, which the cap's note carries (ADR-0016,
+  conventions §8); what they say on paging stays.
 
 ### Removed
 
