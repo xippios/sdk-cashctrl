@@ -86,10 +86,14 @@ writes nothing and exits non-zero:
    direnv exec ~/github/sdk uv run scripts/record_fixture.py <path>/create.json ok --method POST [key=value ...]
    ```
 
-   It builds the fixture in memory with core's `fixture_from_response` and `Scrub`
-   (credentials scrubbed, the demo host replaced with `demo.cashctrl.com` everywhere in
-   it, the host offline tests replay against, the key replaced with `REDACTED`, and a
-   fixture still holding either refused), replaces every e-mail address with
+   It builds the fixture in memory with core's `fixture_from_response` and
+   `Scrub(secrets=[key, its basic-auth token])` (credentials scrubbed, the key replaced
+   with `REDACTED` where it appears as given), then runs its own step, `TenantScrub`
+   (ADR-0024): the demo host replaced with `demo.cashctrl.com` everywhere in it, the host
+   offline tests replay against, in any case and percent-encoded too, the key in every
+   encoded form replaced with `REDACTED`, and a fixture still holding the host, the
+   subdomain or the key, behind a JSON escape included, refused; it replaces every
+   e-mail address with
    `user@example.com`, every API user tag in `createdBy` and `lastUpdatedBy` with
    `API:REDACTED` and the value of every token-like field (`hash`, `token`, `secret`,
    `apiKey`) and personal identifier (`ssn`, `iban`) with `REDACTED`, checks it, and only

@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+- Adopted xippios-core 0.3.0, sdk-template v0.2.2 and conventions 1.21 (conventions §15);
+  the organisation registry, the `--org` lock, the write-server check and the recorder's
+  host, JSON and percent-encoded checks are the package's own from here (ADR-0024).
+
 ## [0.1.0] - 2026-10-26
 
 First release. Named organisations declared in the environment, each with its own
