@@ -12,17 +12,16 @@ one), the subset of conventions §12; the `merge-class` check makes any other ch
 `human`. What a release needs beyond it is a PR of its own, merged before this one: the
 removal of a core pin (step 1) and the refresh of packaged reference data (step 2).
 
-1. **No git-pinned core.** If `pyproject.toml` has a `[tool.uv.sources]` block, the
-   package depends on an unreleased xippios-core and cannot be released as it is. Find
-   the core release that carries the pinned change (stop and report if there is none
-   yet): `X.Y.Z` with `Z` the patch that shipped it, or `X.Y.0` when the minor itself
-   did; still one minor. On a `chore/` branch of its own, remove the pin and raise the
-   bound to that release in one step, `xippios-core~=X.Y.Z`:
-   `uvx copier update --defaults --vcs-ref=:current: -d core_git_ref= -d core_version=X.Y.Z`
-   (`:current:` keeps the template version, so only these two answers change). Then
-   `uv lock`, the checks, a line under Unreleased in `CHANGELOG.md` (the new core
-   bound), and its PR, merged before the release PR: it changes `.copier-answers.yml`,
-   which a release PR does not. `publish.yml` refuses to tag a pinned release as well.
+1. **No git-pinned core.** cashctrl carries no `[tool.uv.sources]` pin and runs no
+   `copier update` (D35). Should a pin ever be needed, the package depends on an
+   unreleased xippios-core and cannot be released as it is: find the core release that
+   carries the pinned change (stop and report if there is none yet), `X.Y.Z` with `Z`
+   the patch that shipped it, or `X.Y.0` when the minor itself did; still one minor.
+   Its removal is a hand edit of `pyproject.toml`, the `[tool.uv.sources]` block dropped
+   and the bound raised to `xippios-core~=X.Y.Z`, its extras likewise, plus `uv lock`,
+   the checks and a line under Unreleased in `CHANGELOG.md` (the new core bound), in a
+   PR of its own on a `chore/` branch, merged before the release PR. `publish.yml`
+   refuses to tag a pinned release as well.
 2. **Reference data.** Packaged lists that should be current in this release are
    refreshed in their own PR, `/refresh-reference-data`, merged before this one; the
    release PR fetches nothing. cashctrl packages none, so there is nothing to refresh
