@@ -396,9 +396,8 @@ async def list_accounts_async(
     ``category_id``, ``currency_code``, ``is_inactive`` and its balances for one fiscal
     period: ``opening_amount`` and ``end_amount`` in the account's currency,
     ``default_currency_opening_amount`` and ``default_currency_end_amount`` in the default
-    currency. Without parameters every account is listed, and a large chart of accounts
-    exceeds the MCP result cap (200 rows or 64 KB): the tool result is then truncated
-    with a note, so narrow the list with ``query``, ``filter`` or ``only_active``.
+    currency. Without parameters every account is listed; narrow a large chart of
+    accounts with ``query``, ``filter`` or ``only_active``.
     Upstream ignores values it does not understand, so ``dir`` and the filters'
     ``comparison`` are checked first and a wrong one is refused.
 
@@ -494,10 +493,9 @@ async def list_journal_entries_async(
     Paging: with ``limit``, one page of at most ``limit`` entries from ``start``; without
     it, every matching entry from ``start`` on. ``meta.total`` is upstream's count of all
     matching entries. The next page starts at ``start`` plus the number of records
-    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
-    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
-    (about 20): collecting a large journal costs about 1 s per 100 entries and still
-    ends at the cap. Offset pages over a list that changes meanwhile can repeat or skip
+    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
+    should always pass ``limit`` (about 20): collecting a large journal costs about 1 s
+    per 100 entries. Offset pages over a list that changes meanwhile can repeat or skip
     entries: an entry added or removed shifts every later page by one.
 
     Upstream ignores values it does not understand, so ``dir`` and the filters'
@@ -618,10 +616,9 @@ async def list_persons_async(
     Paging: with ``limit``, one page of at most ``limit`` persons from ``start``; without
     it, every matching person from ``start`` on. ``meta.total`` is upstream's count of
     all matching persons. The next page starts at ``start`` plus the number of records
-    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
-    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
-    (about 20): collecting many persons costs about 1 s per 100 and still ends at the
-    cap. Offset pages over a list that changes meanwhile can repeat or skip persons: a
+    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
+    should always pass ``limit`` (about 20): collecting many persons costs about 1 s per
+    100. Offset pages over a list that changes meanwhile can repeat or skip persons: a
     person added or removed shifts every later page by one.
 
     Upstream ignores values it does not understand, so ``dir`` and the filters'
@@ -740,10 +737,9 @@ async def list_orders_async(
     Paging: with ``limit``, one page of at most ``limit`` orders from ``start``; without
     it, every matching order from ``start`` on. ``meta.total`` is upstream's count of all
     matching orders. The next page starts at ``start`` plus the number of records
-    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
-    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
-    (about 20): collecting many orders costs about 1 s per 100 and still ends at the
-    cap. Offset pages over a list that changes meanwhile can repeat or skip orders: an
+    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
+    should always pass ``limit`` (about 20): collecting many orders costs about 1 s per
+    100. Offset pages over a list that changes meanwhile can repeat or skip orders: an
     order added or removed shifts every later page by one.
 
     Upstream ignores values it does not understand, so ``type``, ``dir`` and the
@@ -959,11 +955,9 @@ async def list_cost_centers_async(
     ``create_order``), ``number``, ``name`` (localised), ``category_id``,
     ``is_inactive``, ``notes`` and its targets ``target_min`` and ``target_max``. No
     cost center has been observed yet (the demo organisation has none), so balances the
-    list may carry are not returned. ``meta.total`` is upstream's count. Over MCP a long
-    list is cut at the result cap (200 rows or 64 KB) with a note: narrow it with
-    ``query``, ``filter``, ``category_id`` or ``only_active``. Upstream ignores values it
-    does not understand, so ``dir`` and the filters' ``comparison`` are checked first and
-    a wrong one is refused.
+    list may carry are not returned. ``meta.total`` is upstream's count. Upstream ignores
+    values it does not understand, so ``dir`` and the filters' ``comparison`` are checked
+    first and a wrong one is refused.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1137,8 +1131,7 @@ async def get_report_data_async(
     a row of its own); ``properties``, among them the ``columns`` the report shows (each
     a ``title`` and the row field it shows, ``dataIndex``); and ``total``, upstream's
     count of the top-level rows, which ``meta.total`` repeats. Rows keep upstream's
-    camelCase names, and amounts are JSON numbers. Over MCP a result over 128 KB comes
-    back as a note and a preview: narrow the period or read a smaller report.
+    camelCase names, and amounts are JSON numbers.
 
     Payroll and people reports (``SALARY_LIST``, ``SETTLEMENT``,
     ``WITHHOLDING_TAX_SETTLEMENT``, ``REVENUE_BY_PERSON``, ``OPEN_DEBTORS``, ...) carry
