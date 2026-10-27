@@ -59,6 +59,7 @@ from xippios.core import UpstreamModel
 
 __all__ = [
     "Account",
+    "AccountCategory",
     "AccountDetail",
     "AddressType",
     "AllocationInput",
@@ -83,6 +84,8 @@ __all__ = [
     "JournalRow",
     "Language",
     "ListResponse",
+    "Location",
+    "LocationProjection",
     "NotifyType",
     "Order",
     "OrderBookTemplate",
@@ -1357,6 +1360,120 @@ class PersonTitle(UpstreamModel):
     created_by: str | None = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
     last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class AccountCategory(UpstreamModel):
+    """One account category, an entry of ``account/category/list.json`` (``account.md``).
+
+    A group of the chart of accounts; the groups nest by ``parent_id``. Its ``id`` is the
+    ``category_id`` an account carries and ``list_accounts`` takes. Typed from the tables
+    of ``account/category/create.json`` and ``update.json``: ``name`` (localised as
+    ``<values><de>...</de></values>``; the five top-level categories' plain,
+    ``Assets``), ``number`` (text, "Must be numeric", used for sorting: ``"1"``,
+    ``"10"``, ``"100"``) and ``parent_id`` (``None`` at the top level). Typed from
+    observation on 2026-10-27 (CashCtrl's default chart, 38 categories): ``id``,
+    ``account_class`` (seen: ``ASSET``, ``LIABILITY``, ``EXPENSE``, ``REVENUE``,
+    ``BALANCE``, one per top-level category and inherited below it), ``full_name`` (the
+    number and the name, ``"1 Assets"``), ``system`` with its ``is_system`` twin (true
+    for the five top-level categories only) and the ``created*``/``last_updated*``
+    bookkeeping fields.
+
+    ``account/category/tree.json`` answers the same 38 categories nested, each child list
+    under ``data``, and its ``total`` counts the five top-level ones; it adds only
+    display fields (``text``, the name in one language; ``cls``; ``leaf``) and lacks
+    ``account_class`` and ``full_name`` (compared on 2026-10-27), so the flat list is
+    the one wrapped.
+    """
+
+    id: int
+    number: str
+    name: str
+    parent_id: int | None = Field(default=None, validation_alias="parentId")
+    account_class: str | None = Field(default=None, validation_alias="accountClass")
+    full_name: str | None = Field(default=None, validation_alias="fullName")
+    system: bool
+    is_system: bool = Field(validation_alias="isSystem")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class _LocationFields(UpstreamModel):
+    """The fields of a ``location/list.json`` entry that ``LocationProjection`` keeps."""
+
+    id: int
+    name: str
+    type: str | None = None
+    org_name: str | None = Field(default=None, validation_alias="orgName")
+    address: str | None = None
+    street_name: str | None = Field(default=None, validation_alias="streetName")
+    street_number: str | None = Field(default=None, validation_alias="streetNumber")
+    zip: str | None = None
+    city: str | None = None
+    canton: str | None = None
+    country: str | None = None
+    full_address: str | None = Field(default=None, validation_alias="fullAddress")
+    full_address_csv: JsonValue = Field(default=None, validation_alias="fullAddressCsv")
+    email: str | None = None
+    phone_main: str | None = Field(default=None, validation_alias="phoneMain")
+    phone_salary_cert: str | None = Field(default=None, validation_alias="phoneSalaryCert")
+    url: str | None = None
+    vat_uid: str | None = Field(default=None, validation_alias="vatUid")
+    bur_nr: str | None = Field(default=None, validation_alias="burNr")
+    footer: str | None = None
+    logo_file_id: int | None = Field(default=None, validation_alias="logoFileId")
+    bank_account_id: int | None = Field(default=None, validation_alias="bankAccountId")
+    bic: JsonValue = None
+    qr_first_digits: JsonValue = Field(default=None, validation_alias="qrFirstDigits")
+    attachments: list[JsonValue] = Field(default_factory=list)
+    text: str | None = None
+    value: str | None = None
+    list_cls: str | None = Field(default=None, validation_alias="listCls")
+    inactive: bool
+    is_inactive: bool = Field(validation_alias="isInactive")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class Location(_LocationFields):
+    """One location, an entry of ``location/list.json`` (``docs/upstream/meta.md``).
+
+    A site of the organisation: its headquarters (``type`` ``MAIN``), a branch, a
+    storage site or another. Its ``id`` is what ``create_person`` and ``update_person``
+    take as ``location_id``, an employee's workplace. Typed from the tables of
+    ``location/create.json`` and ``update.json``: ``name`` (for identification only, not
+    used in an address), ``type`` (``MAIN``, ``BRANCH``, ``STORAGE``, ``OTHER``; a
+    string), ``org_name`` (the company name), ``address``, ``zip``, ``city``, ``canton``,
+    ``country`` (ISO 3166 alpha-3, ``CHE``), ``email``, ``phone_main``,
+    ``phone_salary_cert``, ``url``, ``vat_uid``, ``bur_nr``, ``footer`` (HTML),
+    ``logo_file_id``, ``bank_account_id`` and ``is_inactive``. Typed from observation on
+    2026-10-27 (the demo organisation's one location, created by hand with placeholder
+    data, ``docs/demo-org.md``): ``id``, ``street_name`` and ``street_number``
+    (``address`` split), ``full_address`` (the company name and the address as printed,
+    a line each), ``text`` (the name) and ``value`` (the id as text),
+    ``list_cls``, ``attachments`` (only seen empty, kept as sent), the twin ``inactive``
+    and the ``created*``/``last_updated*`` bookkeeping fields. Only seen ``null`` and
+    kept as sent: ``full_address_csv``, ``qr_first_digits``, ``bic``, ``iban`` and
+    ``qr_iban``. No table documents the last three: the documented link to the bank is
+    ``bank_account_id``.
+
+    This read model stays faithful; ``list_locations`` returns ``LocationProjection``,
+    which leaves out ``iban`` and ``qr_iban`` (ADR-0017).
+    """
+
+    iban: JsonValue = None
+    qr_iban: JsonValue = Field(default=None, validation_alias="qrIban")
+
+
+class LocationProjection(_LocationFields):
+    """A ``location/list.json`` entry without ``iban`` and ``qr_iban``, the bank account numbers.
+
+    What ``list_locations`` returns (ADR-0017): every field of ``Location`` but those two,
+    under the same names; ``bank_account_id`` names the bank account instead.
+    """
 
 
 # The write tools' payloads (``tasks_write.py``) and their outcomes.

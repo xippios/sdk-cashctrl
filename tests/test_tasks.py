@@ -25,7 +25,7 @@ from xippios.core.testing import (
     sent_urls,
 )
 
-from xippios.cashctrl import api, tasks, tasks_write
+from xippios.cashctrl import api, models, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, SOURCE, TENANTS
 from xippios.cashctrl.mcp import server
 from xippios.cashctrl.models import (
@@ -1372,6 +1372,98 @@ def test_list_person_titles_replays_the_recorded_list(
     assert (they.sentence, they.text) == (None, None)
 
 
+def test_list_account_categories_replays_the_flat_list(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    route = replay_fixture("account_category_list", "default")
+    result = tasks.list_account_categories(DEMO)
+    assert sent_query(route) == {}, "the operation documents no parameters"
+    assert result.meta.endpoint == "account/category/list.json"
+    assert result.meta.request == {"org": DEMO}
+    assert (result.meta.tenant, result.meta.total, len(result.data)) == (DEMO, 38, 38)
+    by_id = {category.id: category for category in result.data}
+    top = [category for category in result.data if category.parent_id is None]
+    assert [(c.number, c.name, c.account_class, c.is_system) for c in top] == [
+        ("1", "Assets", "ASSET", True),
+        ("2", "Liabilities & Equity", "LIABILITY", True),
+        ("3", "Expense", "EXPENSE", True),
+        ("4", "Revenue", "REVENUE", True),
+        ("5", "Balance", "BALANCE", True),
+    ]
+    below = [category for category in result.data if category.parent_id is not None]
+    assert all(category.parent_id in by_id for category in below), "every parent is listed"
+    assert not any(category.is_system or category.system for category in below)
+    liquid = by_id[51]
+    assert (liquid.number, liquid.parent_id, liquid.account_class) == ("100", 50, "ASSET")
+    assert "<en>Liquid funds</en>" in liquid.name
+    assert (liquid.full_name or "").startswith("100 <values><de>Flüssige Mittel</de>")
+    # Account 6900 (account_list/only_active_finanz) carries category_id 64.
+    assert (by_id[64].number, by_id[64].account_class) == ("60", "EXPENSE")
+
+
+def test_list_locations_replays_the_main_location(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    route = replay_fixture("location_list", "default")
+    result = tasks.list_locations(DEMO)
+    assert sent_query(route) == {}, "the operation documents no parameters"
+    assert result.meta.endpoint == "location/list.json"
+    assert result.meta.request == {"org": DEMO}
+    assert (result.meta.tenant, result.meta.total) == (DEMO, 1)
+    (main,) = result.data
+    assert isinstance(main, models.LocationProjection)
+    assert (main.id, main.type, main.name, main.org_name) == (
+        1,
+        "MAIN",
+        "Musterstandort",
+        "Muster Handel AG (Demo)",
+    )
+    assert (main.address, main.street_name, main.street_number) == ("Musterhof 1", "Musterhof", "1")
+    assert (main.zip, main.city, main.canton, main.country) == ("8001", "Zürich", "ZH", "CHE")
+    assert (main.full_address or "").splitlines() == [
+        "Muster Handel AG (Demo)",
+        "Musterhof 1",
+        "8001 Zürich",
+        "Schweiz",
+    ]
+    assert (main.vat_uid, main.email, main.bank_account_id, main.attachments) == (
+        None,
+        None,
+        None,
+        [],
+    )
+    assert (main.is_inactive, main.created_by) == (False, "user@example.com"), "scrubbed"
+
+
+def test_the_location_projection_leaves_out_iban_and_qr_iban_and_nothing_else() -> None:
+    assert set(models.Location.model_fields) - set(models.LocationProjection.model_fields) == {
+        "iban",
+        "qr_iban",
+    }
+    assert set(models.LocationProjection.model_fields) < set(models.Location.model_fields)
+
+
+@pytest.mark.anyio
+async def test_the_location_wrapper_stays_faithful(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("location_list", "default")
+    (location,) = (await api.location_list(DEMO)).data
+    assert isinstance(location, models.Location)
+    assert (location.iban, location.qr_iban, location.bic) == (None, None, None), "seen null"
+
+
+@pytest.mark.anyio
+async def test_list_locations_as_a_tool_leaves_out_the_bank_account_numbers(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("location_list", "default")
+    payload = await mcp_call(server, "cashctrl_list_locations", {"org": DEMO})
+    (main,) = payload["data"]
+    assert (main["id"], main["type"], main["org_name"]) == (1, "MAIN", "Muster Handel AG (Demo)")
+    assert not {"iban", "qr_iban", "qrIban"} & set(main)
+
+
 PAGED_LISTS: dict[str, Callable[..., typing.Any]] = {
     "list_journal_entries": tasks.list_journal_entries,
     "list_persons": tasks.list_persons,
@@ -1479,6 +1571,8 @@ RECORDED_LISTS: dict[str, tuple[Callable[..., typing.Any], dict[str, typing.Any]
     "order_category_list/default": (api.order_category_list, {}),
     "person_category_list/default": (api.person_category_list, {}),
     "person_title_list/default": (api.person_title_list, {}),
+    "account_category_list/default": (api.account_category_list, {}),
+    "location_list/default": (api.location_list, {}),
 }
 
 
@@ -1531,6 +1625,8 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
     "cashctrl_list_order_categories": ("order_category_list/default", {}),
     "cashctrl_list_person_categories": ("person_category_list/default", {}),
     "cashctrl_list_person_titles": ("person_title_list/default", {}),
+    "cashctrl_list_account_categories": ("account_category_list/default", {}),
+    "cashctrl_list_locations": ("location_list/default", {}),
 }
 
 

@@ -24,8 +24,9 @@ stay empty. Every list task sets ``meta.total`` to upstream's ``total``, its cou
 records matching the request (ADR-0012); it is never computed from ``len(data)``.
 
 The persons a task returns are projections without the personal identifiers ``ssn`` and
-``iban`` (ADR-0017, ``_person`` and its neighbours); the endpoint wrappers' read models
-keep them.
+``iban`` (ADR-0017, ``_person`` and its neighbours), and the locations are projections
+without their bank account numbers ``iban`` and ``qr_iban`` (``_location``); the endpoint
+wrappers' read models keep them.
 
 The journal, person and order lists page by offset (``start``, ``limit``), resolved once
 in ``_offset_pages`` (conventions §4). With ``limit`` the task sends one request,
@@ -60,6 +61,7 @@ from xippios.cashctrl._client import SOURCE, TENANTS
 from xippios.cashctrl._tenants import list_task
 from xippios.cashctrl.models import (
     Account,
+    AccountCategory,
     AccountDetail,
     Comparison,
     Currency,
@@ -70,6 +72,8 @@ from xippios.cashctrl.models import (
     JournalEntryDetail,
     JournalEntryDetailProjection,
     ListResponse,
+    Location,
+    LocationProjection,
     Order,
     OrderCategory,
     OrderDetail,
@@ -88,10 +92,12 @@ __all__ = [
     "get_journal_entry",
     "get_order",
     "get_person",
+    "list_account_categories",
     "list_accounts",
     "list_currencies",
     "list_fiscal_periods",
     "list_journal_entries",
+    "list_locations",
     "list_order_categories",
     "list_orders",
     "list_organisations",
@@ -844,6 +850,49 @@ async def list_person_titles_async(org: str) -> Result[list[PersonTitle]]:
     return Result(data=response.data, meta=meta)
 
 
+async def list_account_categories_async(org: str) -> Result[list[AccountCategory]]:
+    """List an organisation's account categories, the groups of its chart of accounts.
+
+    Every category comes back flat, with its ``id`` (the ``category_id`` an account
+    carries and ``list_accounts`` takes), ``number`` (``"1"``, ``"10"``, ``"100"``, as
+    text), ``name`` (localised as ``<values><de>...</de></values>``, plain for the five
+    top-level categories), ``full_name`` (number and name), ``account_class``
+    (``ASSET``, ``LIABILITY``, ``EXPENSE``, ``REVENUE`` or ``BALANCE``) and
+    ``parent_id``, the category it belongs to: ``None`` for the five top-level ones,
+    which are ``is_system``. The ``parent_id`` links are the hierarchy.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+    """
+    response = await api.account_category_list(org)
+    meta = _meta(org, "account/category/list.json", {}, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
+def _location(location: Location) -> LocationProjection:
+    """A ``location/list.json`` entry without ``iban`` and ``qr_iban`` (ADR-0017)."""
+    return LocationProjection.project(location)
+
+
+async def list_locations_async(org: str) -> Result[list[LocationProjection]]:
+    """List an organisation's locations: its headquarters, branches and other sites.
+
+    Every location comes back with its ``id`` (the ``location_id`` of ``create_person``
+    and ``update_person``, an employee's workplace), ``name``, ``type`` (``MAIN`` for
+    the headquarters, ``BRANCH``, ``STORAGE`` or ``OTHER``), the company name
+    ``org_name``, the address (``address``, ``zip``, ``city``, ``canton``, ``country``,
+    and ``full_address`` as printed), the contacts (``email``, ``phone_main``, ``url``),
+    ``vat_uid``, ``bur_nr``, ``bank_account_id`` and ``is_inactive``. The bank account
+    numbers ``iban`` and ``qr_iban`` are left out.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+    """
+    response = await api.location_list(org)
+    meta = _meta(org, "location/list.json", {}, total=response.total)
+    return Result(data=[_location(location) for location in response.data], meta=meta)
+
+
 LIST_ORGANISATIONS_DOC = """List the organisations this server can reach, by name.
 
 On a server that serves every declared organisation, every other tool takes one of these
@@ -870,3 +919,5 @@ get_order = sync(get_order_async)
 list_order_categories = sync(list_order_categories_async)
 list_person_categories = sync(list_person_categories_async)
 list_person_titles = sync(list_person_titles_async)
+list_account_categories = sync(list_account_categories_async)
+list_locations = sync(list_locations_async)

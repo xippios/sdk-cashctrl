@@ -15,6 +15,7 @@ would send (``tasks_write``).
 
 from xippios.cashctrl.api._filter import encode_filter
 from xippios.cashctrl.api._form import custom_xml, delete_fields, merge_custom
+from xippios.cashctrl.api.account_category_list import account_category_list
 from xippios.cashctrl.api.account_list import account_list, account_list_params
 from xippios.cashctrl.api.account_read import account_read
 from xippios.cashctrl.api.currency_list import currency_list
@@ -24,6 +25,7 @@ from xippios.cashctrl.api.journal_delete import journal_delete
 from xippios.cashctrl.api.journal_list import journal_list, journal_list_params
 from xippios.cashctrl.api.journal_read import journal_read
 from xippios.cashctrl.api.journal_update import journal_update
+from xippios.cashctrl.api.location_list import location_list
 from xippios.cashctrl.api.order_category_list import (
     order_category_list,
     order_category_list_params,
@@ -42,6 +44,7 @@ from xippios.cashctrl.api.person_update import person_update
 from xippios.cashctrl.api.tax_list import tax_list
 
 __all__ = [
+    "account_category_list",
     "account_list",
     "account_list_params",
     "account_read",
@@ -57,6 +60,7 @@ __all__ = [
     "journal_list_params",
     "journal_read",
     "journal_update",
+    "location_list",
     "merge_custom",
     "order_category_list",
     "order_category_list_params",

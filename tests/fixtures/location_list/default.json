@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-10-27T21:29:50.324817Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/location/list.json"
+  },
+  "response": {
+    "body": "{\"total\":1,\"data\":[{\"id\":1,\"created\":\"2026-10-23 10:13:38.0\",\"createdBy\":\"user@example.com\",\"lastUpdated\":\"2026-10-23 10:25:04.0\",\"lastUpdatedBy\":\"user@example.com\",\"name\":\"Musterstandort\",\"type\":\"MAIN\",\"logoFileId\":null,\"bankAccountId\":null,\"attachments\":[],\"orgName\":\"Muster Handel AG (Demo)\",\"address\":\"Musterhof 1\",\"zip\":\"8001\",\"city\":\"Z\u00fcrich\",\"canton\":\"ZH\",\"country\":\"CHE\",\"vatUid\":null,\"burNr\":null,\"phoneMain\":null,\"phoneSalaryCert\":null,\"email\":null,\"url\":null,\"footer\":null,\"fullAddress\":\"Muster Handel AG (Demo)\\nMusterhof 1\\n8001 Z\u00fcrich\\nSchweiz\",\"fullAddressCsv\":null,\"value\":\"1\",\"text\":\"Musterstandort\",\"qrFirstDigits\":null,\"qrIban\":null,\"listCls\":\"\",\"streetName\":\"Musterhof\",\"streetNumber\":\"1\",\"inactive\":false,\"iban\":null,\"bic\":null,\"isInactive\":false}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 27 Oct 2026 21:29:47 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

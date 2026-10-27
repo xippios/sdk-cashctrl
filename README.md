@@ -251,6 +251,8 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET order/category/list.json` (List categories) | `list_order_categories` | `cashctrl_list_order_categories` | available |
 | `GET person/category/list.json` (List categories) | `list_person_categories` | `cashctrl_list_person_categories` | available |
 | `GET person/title/list.json` (List titles) | `list_person_titles` | `cashctrl_list_person_titles` | available |
+| `GET account/category/list.json` (List categories) | `list_account_categories` | `cashctrl_list_account_categories` | available; flat, linked by `parent_id` |
+| `GET location/list.json` (List locations) | `list_locations` | `cashctrl_list_locations` | available; without `iban` and `qr_iban` |
 | `POST journal/create.json`, `update.json`, `delete.json` | `create_journal_entry`, `update_journal_entry`, `delete_journal_entry` | `cashctrl_create_journal_entry`, ... | available on the write server only |
 | `POST person/create.json`, `update.json`, `delete.json` | `create_person`, `update_person`, `delete_person` | `cashctrl_create_person`, ... | available on the write server only |
 | `POST order/create.json`, `delete.json` | `create_order`, `delete_order` | `cashctrl_create_order`, `cashctrl_delete_order` | available on the write server only |
