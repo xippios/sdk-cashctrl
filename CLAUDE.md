@@ -335,11 +335,16 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
 5. **Facts for docstrings.** A journal `amount` with a `tax_id` is gross, and order
    items' `unitPrice` was read as gross (observed, `docs/demo-org.md`); previews are
    free; `confirm=true` writes; ids come from `list_accounts`, `list_tax_codes`,
-   `list_persons`, `list_order_categories`. Upstream refuses with HTTP 200 and an
-   `errors` list (`RequestRejected` naming the fields); a delete of an id that no longer
-   exists answers `success: false` with `message` (`RequestRejected`, not
-   `NotFoundError`). `person.nr` is unique: a second person with the same `nr` is
-   refused.
+   `list_persons`, `list_order_categories`, `list_currencies` and the discovery lists:
+   `list_person_categories` (a person's `category_id`), `list_person_titles`
+   (`title_id`), `list_locations` (an employee's `location_id`), `list_account_categories`
+   (the `category_id` that narrows `list_accounts`), `list_cost_centers` (an
+   allocation's `to_cost_center_id`) and `list_custom_fields` (`customField<id>`, by the
+   module's `type`); each write docstring names the lists its ids come from. Upstream
+   refuses with HTTP 200 and an `errors` list (`RequestRejected` naming the fields); a
+   delete of an id that no longer exists answers `success: false` with `message`
+   (`RequestRejected`, not `NotFoundError`). `person.nr` is unique: a second person with
+   the same `nr` is refused.
 6. **Tests.** Record the create, the read the update starts from, the update, the
    delete, in that order, so every record created is deleted again; compute the
    payload offline through the task's preview and pass exactly those pairs to the

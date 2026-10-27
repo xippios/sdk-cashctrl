@@ -555,7 +555,10 @@ async def create_journal_entry_async(
     upstream then ignores those three. ``amount`` with a ``tax_id`` is the gross amount,
     VAT included (observed on the demo organisation, although the tax codes' calculation
     type reads NET). Account ids come from ``list_accounts`` (the ``id``, not the account
-    number), tax codes from ``list_tax_codes``, persons from ``list_persons``. CashCtrl
+    number; ``list_account_categories`` gives the ``category_id`` that narrows it), tax
+    codes from ``list_tax_codes``, persons from ``list_persons``, currencies from
+    ``list_currencies``, cost centers from ``list_cost_centers`` and custom field names
+    from ``list_custom_fields`` with ``type`` ``JOURNAL``. CashCtrl
     checks the entry and refuses it naming the fields, e.g. ``debitId: This field cannot
     be empty.``; nothing is checked here that upstream checks itself.
 
@@ -575,7 +578,8 @@ async def create_journal_entry_async(
             ``credit``, and optionally ``description``, ``tax_id``, ``associate_id`` and
             ``allocations``, e.g. ``[{"account_id": 3, "debit": 500},
             {"account_id": 42, "credit": 500}]``.
-        allocations: Allocations to cost centers, e.g.
+        allocations: Allocations to cost centers, each a ``share`` and a
+            ``to_cost_center_id`` from ``list_cost_centers``, e.g.
             ``[{"share": 1, "to_cost_center_id": 2}]``.
         attachments: Files to attach, e.g. ``[{"file_id": 24}]``.
         currency_id: A currency, an ``id`` from ``list_currencies``; the default currency
@@ -592,7 +596,8 @@ async def create_journal_entry_async(
         notify_email: The address notified with ``notify_type`` ``EMAIL``.
         notify_person_id: The person notified with ``notify_type`` ``PERSON``.
         notify_user_id: The user notified with ``notify_type`` ``USER``.
-        custom: Custom field values by upstream's name, e.g.
+        custom: Custom field values by upstream's name, ``customField<id>`` with an
+            ``id`` from ``list_custom_fields`` (``type`` ``JOURNAL``), e.g.
             ``{"customField1": "Projekt A"}``.
         confirm: ``true`` books the entry; ``false`` (the default) only previews it.
     """
@@ -683,7 +688,10 @@ async def update_journal_entry_async(
     booked (``order_id``, ``order_book_entry_id`` or ``salary_book_entry_id`` set); a
     simple entry that gives no ``amount``, ``debit_id`` or ``credit_id``; an entry
     holding attachments or allocations, which cannot be carried over, unless the call
-    replaces or clears them. ``amount`` with a ``tax_id`` is gross.
+    replaces or clears them. ``amount`` with a ``tax_id`` is gross. The ids come from
+    the lists ``create_journal_entry`` names: ``list_accounts``, ``list_tax_codes``,
+    ``list_persons``, ``list_currencies``, ``list_cost_centers`` and
+    ``list_custom_fields`` (``JOURNAL``).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -701,7 +709,8 @@ async def update_journal_entry_async(
         items: The lines of a collective entry, replacing the stored ones, each with
             ``account_id`` and ``debit`` or ``credit``, e.g.
             ``[{"account_id": 3, "debit": 500}, {"account_id": 42, "credit": 500}]``.
-        allocations: Allocations to cost centers, replacing the stored ones, e.g.
+        allocations: Allocations to cost centers, replacing the stored ones, each a
+            ``share`` and a ``to_cost_center_id`` from ``list_cost_centers``, e.g.
             ``[{"share": 1, "to_cost_center_id": 2}]``.
         attachments: Files to attach, replacing the stored ones, e.g. ``[{"file_id": 24}]``.
         currency_id: A currency, an ``id`` from ``list_currencies``.
@@ -716,7 +725,8 @@ async def update_journal_entry_async(
         notify_email: The address notified with ``notify_type`` ``EMAIL``.
         notify_person_id: The person notified with ``notify_type`` ``PERSON``.
         notify_user_id: The user notified with ``notify_type`` ``USER``.
-        custom: Custom field values to set by upstream's name, e.g.
+        custom: Custom field values to set by upstream's name, ``customField<id>`` with
+            an ``id`` from ``list_custom_fields`` (``type`` ``JOURNAL``), e.g.
             ``{"customField1": "Projekt B"}``; the other stored values are kept.
         clear: Parameters to send empty, by these names, e.g. ``["tax_id", "notes"]``;
             ``["custom"]`` empties every custom field. A parameter cannot be both given
@@ -1087,8 +1097,11 @@ async def create_person_async(
     one of ``company``, ``first_name`` or ``last_name`` and refuses a person without,
     naming the fields. The roles are flags (``is_customer``, ``is_vendor``, ...); a flag
     left out is not sent, so upstream applies its default. Without ``nr`` and
-    ``sequence_number_id`` upstream may number the person from a sequence itself.
-    Person categories are ids from CashCtrl's person categories.
+    ``sequence_number_id`` upstream may number the person from a sequence itself. Ids:
+    ``category_id`` from ``list_person_categories``, ``title_id`` from
+    ``list_person_titles``, an employee's ``location_id`` from ``list_locations``,
+    ``superior_id`` from ``list_persons`` and custom field names from
+    ``list_custom_fields`` with ``type`` ``PERSON``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1105,7 +1118,8 @@ async def create_person_async(
             ``EMAIL_INVOICE``, ``PHONE_WORK``, ``MOBILE_WORK``, ``WEBSITE``, ...) and
             ``address``, optionally ``notes``, e.g.
             ``[{"type": "EMAIL_WORK", "address": "info@muster.example"}]``.
-        category_id: A person category's id, e.g. ``1``.
+        category_id: A person category, an ``id`` from ``list_person_categories``,
+            e.g. ``1``.
         is_customer: ``true`` for a customer.
         is_vendor: ``true`` for a vendor.
         is_employee: ``true`` for an employee.
@@ -1115,7 +1129,8 @@ async def create_person_async(
         nr: The person number, at most 50 characters, e.g. ``"K-1001"``.
         sequence_number_id: The sequence number that generates ``nr``, e.g. ``3``.
         language: ``DE``, ``EN``, ``FR`` or ``IT``, e.g. for documents.
-        title_id: A person title's id (Mr., Mrs., Dr.), e.g. ``1``.
+        title_id: A title (Mr., Mrs., Dr.), an ``id`` from ``list_person_titles``,
+            e.g. ``1``.
         alt_name: An alternative name for the organisational chart.
         position: The job title, at most 100 characters.
         department: The department, at most 100 characters.
@@ -1130,13 +1145,13 @@ async def create_person_async(
         date_birth: The date of birth, e.g. ``1980-05-17``.
         color: The colour in the organisational chart: ``BLUE``, ``GREEN``, ``RED``,
             ``YELLOW``, ``ORANGE``, ``BLACK``, ``GRAY``, ``BROWN``, ``VIOLET``, ``PINK``.
-        superior_id: The superior, a person's id.
+        superior_id: The superior, an ``id`` from ``list_persons``.
         notes: Notes, limited HTML allowed.
         attachments: Files to attach, e.g. ``[{"file_id": 24}]``.
         user_id: The CashCtrl user linked to an employee.
         is_auto_fill_responsible_person: ``true`` fills this person in as responsible
             person on order documents (with ``user_id``).
-        location_id: The employee's workplace, a location's id.
+        location_id: The employee's workplace, an ``id`` from ``list_locations``.
         ssn: The employee's social security number; sent as given, shown as
             ``REDACTED`` in the preview and in ``meta.request``.
         children: Children of an employee or family, each with ``name``.
@@ -1147,7 +1162,9 @@ async def create_person_async(
         insurance_nr: The insurance number of an insurance.
         insurance_member_nr: The member number at an insurance.
         insurance_contracts: Insurance contracts, each with ``type_id``.
-        custom: Custom field values by upstream's name, e.g. ``{"customField2": "Gold"}``.
+        custom: Custom field values by upstream's name, ``customField<id>`` with an
+            ``id`` from ``list_custom_fields`` (``type`` ``PERSON``), e.g.
+            ``{"customField2": "Gold"}``.
         confirm: ``true`` creates the person; ``false`` (the default) only previews it.
     """
     problems: list[str] = []
@@ -1273,7 +1290,10 @@ async def update_person_async(
     an address with a title or a contact with a purpose, which cannot be carried over;
     an insurance whose read shows no ``insurance_nr`` or ``insurance_member_nr``, or an
     employee whose read shows no ``user_id`` (the read leaves empty fields out, and these
-    were never seen come back, so their absence is unknown, not empty).
+    were never seen come back, so their absence is unknown, not empty). The ids come
+    from the lists ``create_person`` names: ``list_person_categories``,
+    ``list_person_titles``, ``list_locations``, ``list_persons`` and
+    ``list_custom_fields`` (``PERSON``).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1286,7 +1306,8 @@ async def update_person_async(
             ``country`` (``CHE``), e.g. ``[{"type": "MAIN", "city": "Bern"}]``.
         contacts: Contact information replacing the stored ones, each with ``type``
             (``EMAIL_WORK``, ``PHONE_WORK``, ...) and ``address``.
-        category_id: A person category's id, e.g. ``1``.
+        category_id: A person category, an ``id`` from ``list_person_categories``,
+            e.g. ``1``.
         is_customer: ``true`` for a customer, ``false`` to drop the role.
         is_vendor: ``true`` for a vendor, ``false`` to drop the role.
         is_employee: ``true`` for an employee.
@@ -1296,7 +1317,8 @@ async def update_person_async(
         nr: The person number, at most 50 characters, e.g. ``"K-1001"``.
         sequence_number_id: The sequence number that generates ``nr``, e.g. ``3``.
         language: ``DE``, ``EN``, ``FR`` or ``IT``.
-        title_id: A person title's id (Mr., Mrs., Dr.), e.g. ``1``.
+        title_id: A title (Mr., Mrs., Dr.), an ``id`` from ``list_person_titles``,
+            e.g. ``1``.
         alt_name: An alternative name for the organisational chart.
         position: The job title, at most 100 characters.
         department: The department, at most 100 characters.
@@ -1310,13 +1332,13 @@ async def update_person_async(
         date_birth: The date of birth, e.g. ``1980-05-17``.
         color: ``BLUE``, ``GREEN``, ``RED``, ``YELLOW``, ``ORANGE``, ``BLACK``, ``GRAY``,
             ``BROWN``, ``VIOLET`` or ``PINK``.
-        superior_id: The superior, a person's id.
+        superior_id: The superior, an ``id`` from ``list_persons``.
         notes: Notes, limited HTML allowed.
         attachments: Files to attach, replacing the stored ones, e.g. ``[{"file_id": 24}]``.
         user_id: The CashCtrl user linked to an employee.
         is_auto_fill_responsible_person: ``true`` fills this person in as responsible
             person on order documents.
-        location_id: The employee's workplace, a location's id.
+        location_id: The employee's workplace, an ``id`` from ``list_locations``.
         ssn: The employee's social security number; sent as given, shown as
             ``REDACTED`` in the preview and in ``meta.request``.
         children: Children replacing the stored ones, each with ``name``.
@@ -1329,7 +1351,8 @@ async def update_person_async(
         insurance_member_nr: The member number at an insurance.
         insurance_contracts: Insurance contracts replacing the stored ones, each with
             ``type_id``.
-        custom: Custom field values to set by upstream's name, e.g.
+        custom: Custom field values to set by upstream's name, ``customField<id>`` with
+            an ``id`` from ``list_custom_fields`` (``type`` ``PERSON``), e.g.
             ``{"customField2": "Silber"}``; the other stored values are kept.
         clear: Parameters to send empty, by these names, e.g. ``["department", "notes"]``
             or ``["user_id"]``; ``["custom"]`` empties every custom field, and a flag
@@ -1495,7 +1518,9 @@ async def create_order_async(
     ``list_order_categories`` (``type`` ``SALES`` or ``PURCHASE``); without
     ``status_id`` the order gets the category's first status (Draft for the default
     invoice category, which books nothing). The partner comes from ``list_persons``,
-    accounts from ``list_accounts``, tax codes from ``list_tax_codes``. The items'
+    accounts from ``list_accounts``, tax codes from ``list_tax_codes``, currencies from
+    ``list_currencies``, cost centers from ``list_cost_centers`` and custom field names
+    from ``list_custom_fields`` with ``type`` ``ORDER``. The items'
     ``unit_price`` was read as gross, VAT included, on the demo organisation. Without
     ``nr`` upstream numbers the order from the category's sequence, if it has one, and
     refuses it otherwise.
@@ -1507,18 +1532,21 @@ async def create_order_async(
         category_id: The order category, an ``id`` from ``list_order_categories``,
             e.g. ``4`` (the default invoice category).
         date: The date of the order, e.g. ``2026-10-24``.
-        items: The items, each with ``account_id`` (revenue account for sales, expense
-            account for purchase), ``name`` and ``unit_price``, optionally ``quantity``
-            (default 1), ``tax_id``, ``description``, ``article_nr``,
-            ``discount_percentage``, ``unit_id``, ``inventory_id``, ``type`` (``ARTICLE``,
-            ``TEXT``, ``PAGEBREAK``, ``SUBTOTAL``, ``TITLE``, ``OPTIONTOTAL``) and
-            ``allocations``, e.g. ``[{"account_id": 42, "name": "Beratung",
-            "unit_price": 150, "quantity": 2, "tax_id": 9}]``.
+        items: The items, each with ``account_id`` (an ``id`` from ``list_accounts``:
+            revenue for sales, expense for purchase), ``name`` and ``unit_price``,
+            optionally ``quantity`` (default 1), ``tax_id`` (from ``list_tax_codes``),
+            ``description``, ``article_nr``, ``discount_percentage``, ``unit_id``,
+            ``inventory_id``, ``type`` (``ARTICLE``, ``TEXT``, ``PAGEBREAK``,
+            ``SUBTOTAL``, ``TITLE``, ``OPTIONTOTAL``) and ``allocations`` (each a
+            ``share`` and a ``to_cost_center_id`` from ``list_cost_centers``), e.g.
+            ``[{"account_id": 42, "name": "Beratung", "unit_price": 150, "quantity": 2,
+            "tax_id": 9}]``.
         nr: The order number, at most 50 characters, e.g. ``"RE-2026-201"``.
         description: A description of the document, at most 200 characters.
         status_id: A status of the category, an id from its ``status`` in
             ``list_order_categories``, e.g. ``12``.
-        account_id: The account, e.g. the debtors account; the category's when left out.
+        account_id: The account, e.g. the debtors account, an ``id`` from
+            ``list_accounts``; the category's when left out.
         language: The document's language: ``DE``, ``EN``, ``FR`` or ``IT``.
         due_days: Days until payment is due, e.g. ``30``.
         discount_percentage: A discount on the whole order, 0 to 100, e.g. ``2``.
@@ -1529,7 +1557,7 @@ async def create_order_async(
             when left out.
         group_id: The order group (dossier) to put the order in, e.g. ``3``.
         previous_id: The order this one continues (offer to invoice), e.g. ``2``.
-        responsible_person_id: The responsible person, a person's id.
+        responsible_person_id: The responsible person, an ``id`` from ``list_persons``.
         rounding_id: The rounding of the grand total, e.g. ``1``.
         notes: Notes, limited HTML allowed.
         attachments: Files to attach, e.g. ``[{"file_id": 24}]``.
@@ -1542,7 +1570,9 @@ async def create_order_async(
         notify_email: The address notified with ``notify_type`` ``EMAIL``.
         notify_person_id: The person notified with ``notify_type`` ``PERSON``.
         notify_user_id: The user notified with ``notify_type`` ``USER``.
-        custom: Custom field values by upstream's name, e.g. ``{"customField3": "A-17"}``.
+        custom: Custom field values by upstream's name, ``customField<id>`` with an
+            ``id`` from ``list_custom_fields`` (``type`` ``ORDER``), e.g.
+            ``{"customField3": "A-17"}``.
         confirm: ``true`` creates the order; ``false`` (the default) only previews it.
     """
     problems: list[str] = []
