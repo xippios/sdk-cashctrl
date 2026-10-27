@@ -14,7 +14,16 @@ import pytest
 import respx
 from xippios.core import InvalidRequestError, NotFoundError, sync
 from xippios.core.mcp import tool_name
-from xippios.core.testing import fixture_path, load_fixture, mcp_call, sent_urls
+from xippios.core.testing import (
+    Fixture,
+    fixture_path,
+    load_fixture,
+    mcp_call,
+    mcp_call_text,
+    recorded_query,
+    sent_query,
+    sent_urls,
+)
 
 from xippios.cashctrl import api, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, SOURCE, TENANTS
@@ -34,7 +43,7 @@ from xippios.cashctrl.models import (
 )
 
 TENANT_LIST = "list_organisations"
-"""Core's tenant list (ADR-0014): no ``org``, no async twin; tested on its own below."""
+"""The package's tenant list (``_tenants.list_task``, ADR-0024): no ``org``, no async twin."""
 ORG_TASK_NAMES = [name for name in tasks.__all__ if name != TENANT_LIST]
 EVERY_TASK: dict[str, Callable[..., object]] = {
     f"{module.__name__.rsplit('.', 1)[-1]}.{name}": getattr(module, name)
@@ -137,7 +146,7 @@ def test_list_fiscal_periods_replays_the_recorded_list(
 ) -> None:
     route = replay_fixture("fiscalperiod_list", "default")
     result = tasks.list_fiscal_periods(DEMO)
-    assert not route.calls.last.request.url.params, "the operation documents no parameters"
+    assert sent_query(route) == {}, "the operation documents no parameters"
     assert result.meta.source == "cashctrl"
     assert result.meta.endpoint == "fiscalperiod/list.json"
     assert result.meta.request == {"org": DEMO}
@@ -181,7 +190,7 @@ def test_list_currencies_replays_the_recorded_list(
 ) -> None:
     route = replay_fixture("currency_list", "default")
     result = tasks.list_currencies(DEMO)
-    assert not route.calls.last.request.url.params, "the operation documents no parameters"
+    assert sent_query(route) == {}, "the operation documents no parameters"
     assert result.meta.endpoint == "currency/list.json"
     assert result.meta.request == {"org": DEMO}
     assert result.meta.total == 3
@@ -219,7 +228,7 @@ def test_list_tax_codes_replays_the_recorded_list(
 ) -> None:
     route = replay_fixture("tax_list", "default")
     result = tasks.list_tax_codes(DEMO)
-    assert not route.calls.last.request.url.params, "the operation documents no parameters"
+    assert sent_query(route) == {}, "the operation documents no parameters"
     assert result.meta.endpoint == "tax/list.json"
     assert result.meta.request == {"org": DEMO}
     assert len(result.data) == result.meta.total == 20, "CashCtrl's default tax codes"
@@ -268,10 +277,9 @@ UNVALIDATED = Filter.model_construct(  # built without validation, so the type i
 )
 
 
-def recorded_query(fixtures_dir: Path, endpoint: str, case: str) -> dict[str, str]:
-    """The query parameters the fixture was recorded with."""
-    url = load_fixture(fixture_path(fixtures_dir, endpoint, case)).request.url
-    return dict(httpx.URL(url).params)
+def recorded(fixtures_dir: Path, endpoint: str, case: str) -> Fixture:
+    """The recorded exchange ``<endpoint>/<case>``; core's ``recorded_query`` reads its query."""
+    return load_fixture(fixture_path(fixtures_dir, endpoint, case))
 
 
 def test_list_accounts_replays_a_narrowed_list(
@@ -279,9 +287,9 @@ def test_list_accounts_replays_a_narrowed_list(
 ) -> None:
     route = replay_fixture("account_list", "only_active_finanz")
     result = tasks.list_accounts(DEMO, only_active=True, query="Finanz")
-    sent = dict(route.calls.last.request.url.params)
+    sent = sent_query(route)
     assert sent == {"onlyActive": "true", "query": "Finanz"}
-    assert sent == recorded_query(fixtures_dir, "account_list", "only_active_finanz")
+    assert sent == recorded_query(recorded(fixtures_dir, "account_list", "only_active_finanz"))
     assert result.meta.endpoint == "account/list.json"
     assert result.meta.request == {"org": DEMO, **sent}
     assert result.meta.total == 8
@@ -327,9 +335,9 @@ def test_list_accounts_sends_the_filter_as_upstream_reads_it(
 ) -> None:
     route = replay_fixture("account_list", "filter_number_eq")
     result = tasks.list_accounts(DEMO, filter=[NUMBER_1020])
-    sent = dict(route.calls.last.request.url.params)
+    sent = sent_query(route)
     assert sent == {"filter": '[{"comparison":"eq","field":"number","value":"1020"}]'}
-    assert sent == recorded_query(fixtures_dir, "account_list", "filter_number_eq")
+    assert sent == recorded_query(recorded(fixtures_dir, "account_list", "filter_number_eq"))
     assert result.meta.request == {"org": DEMO, **sent}
     (account,) = result.data
     assert (account.id, account.number, account.is_inactive) == (3, "1020", False)
@@ -346,12 +354,12 @@ def test_list_accounts_takes_filters_as_mappings_too(
     item = {"comparison": "eq", "field": "number", "value": "1020"}
     arguments: dict[str, typing.Any] = {"filter": [item]}
     result = tasks.list_accounts(DEMO, **arguments)
-    sent = dict(route.calls.last.request.url.params)
-    assert sent == recorded_query(fixtures_dir, "account_list", "filter_number_eq")
+    sent = sent_query(route)
+    assert sent == recorded_query(recorded(fixtures_dir, "account_list", "filter_number_eq"))
     assert [account.number for account in result.data] == ["1020"]
     arguments = {"filter": [{"field": "number", "value": ["1000", "1020"]}]}
     tasks.list_accounts(DEMO, **arguments)
-    assert dict(route.calls.last.request.url.params) == {
+    assert sent_query(route) == {
         "filter": '[{"comparison":"like","field":"number","value":["1000","1020"]}]'
     }, "a mapping is validated into a Filter: upstream's default comparison is sent"
 
@@ -440,15 +448,20 @@ async def test_list_accounts_as_a_tool(
     assert payload["meta"]["request"]["filter"] == (
         '[{"comparison":"eq","field":"number","value":"1020"}]'
     )
-    # Refused by the tool's schema, before the task runs: an MCP error, which core's
-    # mcp_call reports as a failed assertion.
+    # Refused by the tool's schema, before the task runs: core answers conventions §8's
+    # text (ADR-0014, amendment 2026-10-27).
     bad = {"org": DEMO, "filter": [{**item, "comparison": "equals"}]}
-    with pytest.raises(AssertionError, match=r"filter\.0\.comparison[\s\S]*literal_error"):
-        await mcp_call(server, "cashctrl_list_accounts", bad)
-    with pytest.raises(AssertionError, match=r"dir[\s\S]*literal_error"):
-        await mcp_call(server, "cashctrl_list_accounts", {"org": DEMO, "dir": "up"})
-    with pytest.raises(AssertionError, match="extra_forbidden"):  # Filter refuses unknown keys
-        await mcp_call(server, "cashctrl_list_accounts", {"org": DEMO, "filter": [{"op": "eq"}]})
+    assert await mcp_call_text(server, "cashctrl_list_accounts", bad) == (
+        "error: InvalidRequestError: filter.0.comparison: "
+        "Input should be 'eq', 'like', 'gt' or 'lt'"
+    )
+    assert await mcp_call_text(server, "cashctrl_list_accounts", {"org": DEMO, "dir": "up"}) == (
+        "error: InvalidRequestError: dir: Input should be 'ASC' or 'DESC'"
+    )
+    unknown_key = {"org": DEMO, "filter": [{**item, "op": "eq"}]}  # Filter refuses unknown keys
+    assert await mcp_call_text(server, "cashctrl_list_accounts", unknown_key) == (
+        "error: InvalidRequestError: filter.0.op: Extra inputs are not permitted"
+    )
 
 
 def test_list_accounts_is_a_post_route(
@@ -496,10 +509,12 @@ def test_get_account_replays_the_recorded_read(
     replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
 ) -> None:
     account_id = account_1020_id(fixtures_dir)
-    assert recorded_query(fixtures_dir, "account_read", "by_id") == {"id": str(account_id)}
+    assert recorded_query(recorded(fixtures_dir, "account_read", "by_id")) == {
+        "id": str(account_id)
+    }
     route = replay_fixture("account_read", "by_id")
     result = tasks.get_account(DEMO, account_id)
-    assert dict(route.calls.last.request.url.params) == {"id": str(account_id)}
+    assert sent_query(route) == {"id": str(account_id)}
     assert result.meta.endpoint == "account/read.json"
     assert result.meta.request == {"org": DEMO, "id": account_id}
     account = result.data
@@ -609,10 +624,10 @@ def test_list_journal_entries_with_limit_is_one_page_and_upstreams_total(
 ) -> None:
     route = replay_fixture("journal_list", "fp2026_start_0_limit_5")
     result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2026, limit=5)
-    sent = dict(route.calls.last.request.url.params)
+    sent = sent_query(route)
     assert route.call_count == 1, "limit given: one request"
     assert sent == {"fiscalPeriodId": "1", "start": "0", "limit": "5"}
-    assert sent == recorded_query(fixtures_dir, "journal_list", "fp2026_start_0_limit_5")
+    assert sent == recorded_query(recorded(fixtures_dir, "journal_list", "fp2026_start_0_limit_5"))
     assert result.meta.endpoint == "journal/list.json"
     assert result.meta.request == {"org": DEMO, "fiscalPeriodId": 1, "start": 0, "limit": 5}
     assert (len(result.data), result.meta.total) == (5, 38), "upstream's count, not len(data)"
@@ -646,7 +661,7 @@ def test_list_journal_entries_pages_from_start(
 ) -> None:
     route = replay_fixture("journal_list", "fp2025_start_10_limit_5")
     result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025, start=10, limit=5)
-    assert dict(route.calls.last.request.url.params) == {
+    assert sent_query(route) == {
         "fiscalPeriodId": "2",
         "start": "10",
         "limit": "5",
@@ -705,7 +720,7 @@ def test_the_default_page_size_is_upstreams_100(
     route = replay_fixture("journal_list", "fp2025_start_10_limit_5")
     tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
     assert route.call_count == 1, "a page shorter than 100 ends the collection"
-    assert route.calls.last.request.url.params["limit"] == "100", "sent explicitly"
+    assert sent_query(route)["limit"] == "100", "sent explicitly"
 
 
 def test_collecting_stops_at_upstreams_total_without_a_further_request(
@@ -760,8 +775,11 @@ async def test_list_journal_entries_as_a_tool(
     }
     first = payload["data"][0]
     assert (first["id"], first["date_added"], first["amount"]) == (48, "2026-09-30", 45)
-    with pytest.raises(AssertionError, match=r"limit[\s\S]*int_parsing"):
-        await mcp_call(server, "cashctrl_list_journal_entries", {"org": DEMO, "limit": "many"})
+    refused = {"org": DEMO, "limit": "many"}
+    assert await mcp_call_text(server, "cashctrl_list_journal_entries", refused) == (
+        "error: InvalidRequestError: limit: "
+        "Input should be a valid integer, unable to parse string as an integer"
+    )
 
 
 def collective_line_associates(fixtures_dir: Path) -> list[object]:
@@ -773,10 +791,10 @@ def collective_line_associates(fixtures_dir: Path) -> list[object]:
 def test_get_journal_entry_replays_a_taxed_entry(
     replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
 ) -> None:
-    assert recorded_query(fixtures_dir, "journal_read", "by_id") == {"id": "11"}
+    assert recorded_query(recorded(fixtures_dir, "journal_read", "by_id")) == {"id": "11"}
     route = replay_fixture("journal_read", "by_id")
     result = tasks.get_journal_entry(DEMO, 11)
-    assert dict(route.calls.last.request.url.params) == {"id": "11"}
+    assert sent_query(route) == {"id": "11"}
     assert result.meta.endpoint == "journal/read.json"
     assert result.meta.request == {"org": DEMO, "id": 11}
     assert result.meta.total is None, "a read reports no count"
@@ -898,9 +916,9 @@ def test_list_persons_replays_every_person(
 ) -> None:
     route = replay_fixture("person_list", "default")
     result = tasks.list_persons(DEMO)
-    sent = dict(route.calls.last.request.url.params)
+    sent = sent_query(route)
     assert sent == {"start": "0", "limit": "100"}, "every page: 100 a request, from 0"
-    assert sent == recorded_query(fixtures_dir, "person_list", "default")
+    assert sent == recorded_query(recorded(fixtures_dir, "person_list", "default"))
     assert route.call_count == 1, "12 < 100: the first page is the last"
     assert result.meta.endpoint == "person/list.json"
     assert result.meta.request == {"org": DEMO, "start": 0}
@@ -936,9 +954,9 @@ def test_list_persons_only_vendors(
 ) -> None:
     route = replay_fixture("person_list", "only_vendors")
     result = tasks.list_persons(DEMO, only_vendors=True)
-    sent = dict(route.calls.last.request.url.params)
+    sent = sent_query(route)
     assert sent == {"onlyVendors": "true", "start": "0", "limit": "100"}
-    assert sent == recorded_query(fixtures_dir, "person_list", "only_vendors")
+    assert sent == recorded_query(recorded(fixtures_dir, "person_list", "only_vendors"))
     assert result.meta.request == {"org": DEMO, "onlyVendors": "true", "start": 0}
     assert result.meta.total == 4
     assert [person.nr for person in result.data] == ["P-00002", "P-00003", "P-00001", "P-00004"]
@@ -958,10 +976,10 @@ async def test_list_persons_as_a_tool(
 def test_get_person_replays_the_recorded_read(
     replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
 ) -> None:
-    assert recorded_query(fixtures_dir, "person_read", "by_id") == {"id": "3"}
+    assert recorded_query(recorded(fixtures_dir, "person_read", "by_id")) == {"id": "3"}
     route = replay_fixture("person_read", "by_id")
     result = tasks.get_person(DEMO, 3)
-    assert dict(route.calls.last.request.url.params) == {"id": "3"}
+    assert sent_query(route) == {"id": "3"}
     assert result.meta.endpoint == "person/read.json"
     assert result.meta.request == {"org": DEMO, "id": 3}
     person = result.data
@@ -1118,9 +1136,9 @@ def test_list_orders_replays_the_sales_orders(
 ) -> None:
     route = replay_fixture("order_list", "fp2026_sales")
     result = tasks.list_orders(DEMO, type="SALES", fiscal_period_id=FP2026)
-    sent = dict(route.calls.last.request.url.params)
+    sent = sent_query(route)
     assert sent == {"fiscalPeriodId": "1", "type": "SALES", "start": "0", "limit": "100"}
-    assert sent == recorded_query(fixtures_dir, "order_list", "fp2026_sales")
+    assert sent == recorded_query(recorded(fixtures_dir, "order_list", "fp2026_sales"))
     assert result.meta.endpoint == "order/list.json"
     assert result.meta.request == {"org": DEMO, "fiscalPeriodId": 1, "type": "SALES", "start": 0}
     assert len(result.data) == result.meta.total == 4
@@ -1167,17 +1185,18 @@ async def test_list_orders_as_a_tool(
     payload = await mcp_call(server, "cashctrl_list_orders", arguments)
     assert payload["meta"]["total"] == 4
     assert (payload["data"][0]["nr"], payload["data"][0]["sub_total"]) == ("RE-2026-104", 832.56)
-    with pytest.raises(AssertionError, match=r"type[\s\S]*literal_error"):
-        await mcp_call(server, "cashctrl_list_orders", {"org": DEMO, "type": "sales"})
+    assert await mcp_call_text(server, "cashctrl_list_orders", {"org": DEMO, "type": "sales"}) == (
+        "error: InvalidRequestError: type: Input should be 'SALES' or 'PURCHASE'"
+    )
 
 
 def test_get_order_replays_the_recorded_read(
     replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
 ) -> None:
-    assert recorded_query(fixtures_dir, "order_read", "by_id") == {"id": "3"}
+    assert recorded_query(recorded(fixtures_dir, "order_read", "by_id")) == {"id": "3"}
     route = replay_fixture("order_read", "by_id")
     result = tasks.get_order(DEMO, 3)
-    assert dict(route.calls.last.request.url.params) == {"id": "3"}
+    assert sent_query(route) == {"id": "3"}
     assert result.meta.endpoint == "order/read.json"
     assert result.meta.request == {"org": DEMO, "id": 3}
     order = result.data
@@ -1231,7 +1250,7 @@ def test_list_order_categories_replays_the_sales_categories(
 ) -> None:
     route = replay_fixture("order_category_list", "default")
     result = tasks.list_order_categories(DEMO)
-    assert not route.calls.last.request.url.params, "upstream's default type, SALES"
+    assert sent_query(route) == {}, "upstream's default type, SALES"
     assert result.meta.endpoint == "order/category/list.json"
     assert result.meta.request == {"org": DEMO}
     assert (result.meta.tenant, result.meta.total) == (DEMO, 6)
@@ -1250,7 +1269,7 @@ def test_list_order_categories_sends_type_and_period(respx_mock: respx.MockRoute
     route = respx_mock.get("https://demo.cashctrl.com/api/v1/order/category/list.json")
     route.respond(200, json={"total": 0, "data": []})
     result = tasks.list_order_categories(DEMO, type="PURCHASE", fiscal_period_id=1)
-    assert dict(route.calls.last.request.url.params) == {"fiscalPeriodId": "1", "type": "PURCHASE"}
+    assert sent_query(route) == {"fiscalPeriodId": "1", "type": "PURCHASE"}
     assert result.meta.request == {"org": DEMO, "fiscalPeriodId": 1, "type": "PURCHASE"}
     with pytest.raises(InvalidRequestError, match="type must be SALES or PURCHASE, not 'sales'"):
         tasks.list_order_categories(DEMO, type="sales")  # type: ignore[arg-type]
@@ -1470,7 +1489,7 @@ def tool_arguments(
     """The arguments ``case`` was recorded with, as JSON: a read takes the recorded id."""
     arguments = case[1]
     if tool.startswith("cashctrl_get_"):
-        arguments = {"id": int(recorded_query(fixtures_dir, *case[0].split("/"))["id"])}
+        arguments = {"id": int(recorded_query(recorded(fixtures_dir, *case[0].split("/")))["id"])}
     return {
         key: [item.model_dump() for item in value] if key == "filter" else value
         for key, value in arguments.items()
