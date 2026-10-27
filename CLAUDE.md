@@ -359,28 +359,34 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
 
 CashCtrl documents two personal identifiers, a person's `ssn` ("Social security number
 of the employee") and the `iban` of each of a person's `bankAccounts` (the list sends an
-`iban` of its own). Decided by Johannes on 2026-10-25: exactly these two.
+`iban` of its own). The rule is `ssn` and `iban` wherever it appears: a person's
+`bankAccounts[].iban` and the organisation's locations' `iban` and `qrIban` alike, kept
+out of every projection a task returns. Johannes decided the two identifiers on
+2026-10-25; the session decided on 2026-10-27 that `iban` covers the organisation's own
+bank account numbers too, as ADR-0017's "bank account number", and gap row 123 queues the
+question against sdk-core for Johannes to confirm or overturn. The recorder refuses any
+value under `iban` in a body, so a projection that kept one could never be replay-tested
+with a real value.
 
 - The endpoint wrappers' read models stay faithful and carry them (`Person`,
-  `PersonDetail`, `JournalEntryDetail.associates`; ADR-0003).
+  `PersonDetail`, `JournalEntryDetail.associates`, `Location`; ADR-0003).
 - The tasks return projections without them, built with `UpstreamModel.project` in
   `tasks.py`: `PersonProjection` (`list_persons`), `PersonDetailProjection`
   (`get_person`; each bank account kept without its `iban`, which the projection's own
-  validator drops) and `JournalEntryDetailProjection` (`get_journal_entry`, its
-  `associates` projected). A write preview's `before` is the same projection.
+  validator drops), `JournalEntryDetailProjection` (`get_journal_entry`, its
+  `associates` projected) and `LocationProjection` (`list_locations`, without `iban` and
+  `qr_iban`, both undocumented and only seen `null`). A write preview's `before` is the
+  same projection.
 - `create_person` and `update_person` take `ssn` and, in `bank_accounts`, `iban`, and
   send them as given; a preview's `payload` and `changes` and a performed write's
   `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
   as empty.
-- Fixtures never carry their values: the recorder rewrites both to `REDACTED` by name,
-  and its final check refuses any other value (How to record a fixture).
+- Fixtures never carry their values: the recorder rewrites `ssn` and `iban` to
+  `REDACTED` by name, and its final check refuses any other value (How to record a
+  fixture). A location's `qrIban`, a compound name, is not rewritten; the recorded
+  location holds `null`.
 - A task that fetches them deliberately may return them and says so in its docstring;
   none does.
-- A location's `iban` and `qr_iban`, the organisation's own bank account numbers
-  (undocumented, only seen `null`), are left out of `LocationProjection`
-  (`list_locations`) as ADR-0017's equivalent of an identifier, a bank account number;
-  the read model `Location` keeps them, and the recorder's rule rewrites an `iban` by
-  name wherever it appears.
 
 ## How to record a fixture
 
