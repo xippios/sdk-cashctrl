@@ -19,8 +19,9 @@ Bodies that are not UTF-8 text, methods other than GET and POST, a POST to anyth
 the nine write paths the write tools call, a create without `xippios-live`, and
 endpoints other than `.json` are refused. A write's fixture holds the request body too
 (core records it), scrubbed and checked like the rest; the write fixtures of 2026-10-24
-record a journal entry, a person and an order marked `xippios-live`, created, read,
-updated and deleted again in that order. Still grep before committing:
+record a journal entry and a person marked `xippios-live`, created, read, updated and
+deleted again in that order, and those of 2026-10-27 the order 20, created, read,
+updated, read again and deleted. Still grep before committing:
 
 ```bash
 grep -rniE 'api[_-]?key|token|secret' tests/fixtures
@@ -31,6 +32,6 @@ grep -rhoiE --include='*.json' '\\?"(ssn|iban|qr[_-]?iban)\\?" *: *[^,}]*' tests
 grep -rhoiE --include='*.json' '(ssn=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
 ```
 
-The last two count, without printing them, the values of `ssn` and `iban` that are
-neither `null` nor `REDACTED`, in the JSON bodies and in a write's form body; both print
-`0`.
+The last two count, without printing them, the values of `ssn`, `iban` and `qrIban`
+that are neither `null` nor `REDACTED`, in the JSON bodies and in a write's form body;
+both print `0`.

@@ -1634,10 +1634,12 @@ class HistoryEntry(UpstreamModel):
     2026-10-27 (``tests/fixtures/history_list/order.json``, a seeded order's): ``id``,
     ``created`` (when the change was made) and ``created_by`` (who made it: an API user
     as ``API:`` and the first four characters of its key, as on every record),
-    ``type`` (the module, ``ORDER`` seen), ``change_type`` (``CREATE``, ``STATUS`` and
-    ``UPDATE`` seen), the record it concerns (``order_id``, ``person_id`` the order's
-    partner, ``statement_id`` only seen ``null``) and ``message``, upstream's text of
-    the change, naming the record (``Rechnung 'EK-2026-001' created.``).
+    ``type`` (the module, ``ORDER`` seen), ``change_type`` (``CREATE`` and ``STATUS``
+    in the fixture; ``UPDATE`` seen on 2026-10-27, not in a fixture, since the recording
+    that showed it was overwritten), the record it concerns (``order_id``,
+    ``person_id`` the order's partner, ``statement_id`` only seen ``null``) and
+    ``message``, upstream's text of the change, naming the record (``Rechnung
+    'EK-2026-001' created.``).
     """
 
     id: int
