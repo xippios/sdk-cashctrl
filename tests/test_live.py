@@ -4,7 +4,8 @@ Every task function gets a live smoke test here, next to the reachability check.
 live test takes the ``demo_org`` fixture: live runs reach the demo organisation only, whose
 books are synthetic (``scripts/seed_demo.py``). Each read test makes one call, but the
 reads, which first look an id up in a list (account 1020 by number, the first journal
-entry, person and sales order), and ``get_report_data``, which first reads the report
+entry, person and sales order), ``list_order_book_entries``, which first lists the
+purchase orders for one that books, and ``get_report_data``, which first reads the report
 tree for the balance sheet's element id. ``fiscal_periods`` looks the fiscal periods up
 once for the module: the API user's current period is 2025, and the orders are in 2026.
 
@@ -21,7 +22,8 @@ creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10
 - an update is previewed first (its ``before`` is the record as stored), confirmed,
   and the record read back: the changed field holds the new value and every other
   field the update derives is unchanged, the end-to-end proof that an update sends the
-  whole record;
+  whole record; an order's items, sent back unchanged when no ``items`` are given, come
+  back as they were but for their ids, and ``items`` given replace them;
 - it deletes what it created by id with the delete tool, and a ``finally`` deletes it
   through the endpoint wrapper should an assertion fail first. A confirmed journal
   delete reads the entry first and refuses one an order or a salary run booked.
@@ -29,16 +31,20 @@ creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10
 That refusal is checked live once, read-only: a delete without ``confirm`` of an entry a
 seeded purchase order booked, found with GET calls, is refused before any preview.
 
-The calls of one run: 26 for the reads (17, and 9 for the discovery lists and the
-reports: one each, and the tree ``get_report_data`` reads first), 4 lookups (accounts,
-tax codes, customers, the sales categories), 9 for the journal (sweep, create, the
-sweep's query seeing the new entry, the update's preview, the update as read and write,
-the read back, the delete as read and write), 7 for a person (the same without the
-query, the delete one call), 3 for an order and 2 for the refused delete of an entry an
-order booked (the list, the delete's read); 51 in all, one more per leftover swept, two
-for a journal entry.
+The calls of one run: 29 for the reads (17, 9 for the discovery lists and the reports:
+one each, and the tree ``get_report_data`` reads first, and 3 for the book entries of an
+order, with the list of purchase orders they read first, and the history), 4 lookups
+(accounts, tax codes, customers, the sales categories), 9 for the journal (sweep,
+create, the sweep's query seeing the new entry, the update's preview, the update as read
+and write, the read back, the delete as read and write), 7 for a person (the same
+without the query, the delete one call), 10 for an order (sweep, create, the update's
+preview, two updates as read and write, the first without items and the second with,
+each read back, the delete) and 2 for the refused delete of an entry an order booked
+(the list, the delete's read); 61 in all, one more per leftover swept, two for a journal
+entry.
 """
 
+import json
 from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
@@ -54,6 +60,7 @@ from xippios.cashctrl.models import (
     JournalEntryDetail,
     JournalEntryDetailProjection,
     OrderCategory,
+    OrderDetail,
     PersonDetail,
     PersonDetailProjection,
     WritePreview,
@@ -188,6 +195,33 @@ async def test_get_order(demo_org: str, fiscal_periods: dict[str, int]) -> None:
         listed.total,
     )
     assert result.data.items
+
+
+async def test_list_order_book_entries(demo_org: str, fiscal_periods: dict[str, int]) -> None:
+    # A seeded purchase order in a status that books (docs/demo-org.md: both do, each
+    # booked one entry); its id comes from the list, never from a constant.
+    period = fiscal_periods["2026"]
+    orders = await tasks.list_orders_async(
+        demo_org, type="PURCHASE", fiscal_period_id=period, limit=20
+    )
+    booked = [order for order in orders.data if order.is_book]
+    assert booked, "no purchase order of 2026 books; the seeded two do"
+    result = await tasks.list_order_book_entries_async(demo_org, booked[0].id)
+    assert result.meta.request == {"org": demo_org, "id": booked[0].id}
+    assert result.meta.total == len(result.data) > 0
+    assert all(entry.order_id == booked[0].id for entry in result.data)
+    assert all(isinstance(entry.amount, Decimal) for entry in result.data)
+    assert all(entry.rows for entry in result.data)
+
+
+async def test_list_history(demo_org: str) -> None:
+    result = await tasks.list_history_async(demo_org, limit=5)
+    assert result.meta.request == {"org": demo_org, "start": 0, "limit": 5}
+    assert 0 < len(result.data) <= 5
+    assert result.meta.total is not None
+    assert result.meta.total >= len(result.data)
+    created = [entry.created for entry in result.data if entry.created is not None]
+    assert created == sorted(created, reverse=True), "newest first, upstream's default"
 
 
 @pytest.fixture(scope="module")
@@ -326,6 +360,17 @@ def person_values(person: PersonDetailProjection) -> dict[str, Any]:
     """
     values, _, _ = tasks_write._person_values(PersonDetail.model_validate(person.model_dump()))
     return values
+
+
+def order_values(order: OrderDetail) -> dict[str, Any]:
+    """The parameters ``update_order`` derives from ``order``, its items included."""
+    values, _ = tasks_write._order_values(order)
+    return values
+
+
+def item_values(order: OrderDetail) -> list[dict[str, Any]]:
+    """The order's items as stored, every field but the id upstream gives them anew."""
+    return [item.model_dump(exclude={"id"}) for item in order.items]
 
 
 def derived_except(values: dict[str, Any], changed: str) -> dict[str, Any]:
@@ -469,7 +514,7 @@ async def test_person_create_update_delete(demo_org: str) -> None:
             await api.person_delete(demo_org, [created])
 
 
-async def test_order_create_delete(
+async def test_order_create_update_delete(
     demo_org: str, write_ids: dict[str, int], sales_categories: list[OrderCategory]
 ) -> None:
     (invoice,) = [
@@ -483,6 +528,7 @@ async def test_order_create_delete(
     for order in leftovers.data:
         if marked(order.description, order.nr):
             performed(await tasks_write.delete_order_async(demo_org, order.id, confirm=True))
+    revenue, un1 = write_ids["revenue"], write_ids["un1"]
     created: int | None = None
     try:
         result = await tasks_write.create_order_async(
@@ -495,16 +541,71 @@ async def test_order_create_delete(
             status_id=invoice.status[0].id,
             items=[
                 {  # type: ignore[list-item]
-                    "account_id": write_ids["revenue"],
+                    "account_id": revenue,
                     "name": f"{MARK} item",
                     "unit_price": Decimal("100.00"),
-                    "tax_id": write_ids["un1"],
-                }
+                    "tax_id": un1,
+                },
+                {  # type: ignore[list-item]
+                    "account_id": revenue,
+                    "name": f"{MARK} second item",
+                    "description": MARK,
+                    "unit_price": Decimal("45.50"),
+                    "quantity": Decimal(3),
+                    "tax_id": un1,
+                },
             ],
             confirm=True,
         )
         created = performed(result).insert_id
         assert isinstance(created, int)
+        description = f"{MARK} test updated"
+        planned = await tasks_write.update_order_async(demo_org, created, description=description)
+        assert isinstance(planned.data, WritePreview)
+        before = planned.data.before
+        assert isinstance(before, OrderDetail)
+        assert [item.name for item in before.items] == [f"{MARK} item", f"{MARK} second item"]
+        updated = await tasks_write.update_order_async(
+            demo_org, created, description=description, confirm=True
+        )
+        assert performed(updated).insert_id == created
+        assert json.loads(updated.meta.request["items"]) == json.loads(
+            planned.data.payload["items"]
+        ), "the stored items sent back"
+        read_back = (await tasks.get_order_async(demo_org, created)).data
+        assert read_back.description == description
+        assert item_values(read_back) == item_values(before), "every item as it was, but its id"
+        assert derived_except(order_values(read_back), "description") == derived_except(
+            order_values(before), "description"
+        )
+        assert (read_back.sub_total, read_back.tax, read_back.total) == (
+            before.sub_total,
+            before.tax,
+            before.total,
+        )
+        replacement = {
+            "account_id": revenue,
+            "name": f"{MARK} replaced",
+            "unit_price": Decimal("250.00"),
+            "quantity": Decimal(2),
+            "tax_id": un1,
+        }
+        replaced = await tasks_write.update_order_async(
+            demo_org,
+            created,
+            items=[replacement],  # type: ignore[list-item]
+            confirm=True,
+        )
+        assert performed(replaced).insert_id == created
+        after = (await tasks.get_order_async(demo_org, created)).data
+        assert [
+            (item.name, item.quantity, item.unit_price, item.account_id, item.tax_id)
+            for item in after.items
+        ] == [(f"{MARK} replaced", Decimal(2), Decimal(250), revenue, un1)]
+        assert after.total == Decimal(500), "two units at 250.00, read as gross"
+        assert derived_except(order_values(after), "items") == derived_except(
+            order_values(read_back), "items"
+        ), "the header carried back with the new items"
         deleted = await tasks_write.delete_order_async(demo_org, created, confirm=True)
         assert performed(deleted).message
         created = None
