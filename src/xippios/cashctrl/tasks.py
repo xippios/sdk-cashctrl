@@ -145,8 +145,9 @@ no filter or paging beyond its ``type`` and a write needs a type's custom fields
 whole: ``get_report_data``'s result is no list, so the cap replaces one over its bound
 with a note and a preview. The demo organisation's balance sheet of 2025, 25 rows with
 its totals, is about 17 KB, some 650 bytes a row, so 64 KB holds a report of about 100
-rows and 128 KB one of about 200; the note names the period parameters.
-``list_cost_centers`` keeps the default bound and names its filters.
+rows and 128 KB one of about 200; the note names the period parameters (a raised bound
+for a tool that is no reference list: row 127). ``list_cost_centers`` keeps the default
+bound and names its filters.
 """
 
 DIRECTIONS: tuple[str, ...] = get_args(Direction)
