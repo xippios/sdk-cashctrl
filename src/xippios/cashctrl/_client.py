@@ -82,7 +82,7 @@ def check_subdomain(value: str) -> str:
 
     The label before ``.cashctrl.com``: letters, digits and inner hyphens, at most 63
     characters. CashCtrl's hosts are lower-case, so the value is lower-cased first, as
-    the upstream would read it (ADR-0014).
+    the upstream would read it (ADR-0024).
 
     Raises:
         ValueError: ``value`` is not one label; the message never quotes it, and core's

@@ -297,9 +297,12 @@ class Tenants:
         yields; called outside any loop, it runs on core's background loop through
         ``xippios.core.sync``, the loop every sync facade uses, before this returns. A
         pool the replaced client holds on yet another loop is not reached and goes with
-        the client. Every tenant has a client of its own, and its own rate limiter and
-        cache when ``build`` creates them, as it should. ``build`` runs under the
-        registry's lock: it must not call ``client_for``. Thread-safe.
+        the client. A request still in flight on the replaced client on the same loop is
+        cut off by the close, where before it finished; only tests and notebooks that
+        change the environment inside a running process meet it. Every tenant has a
+        client of its own, and its own rate limiter and cache when ``build`` creates them,
+        as it should. ``build`` runs under the registry's lock: it must not call
+        ``client_for``. Thread-safe.
 
         Args:
             name: A declared tenant, e.g. ``"acme"``.
