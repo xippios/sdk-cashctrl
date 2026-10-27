@@ -89,7 +89,7 @@ organisation is synthetic: invented books seeded by `scripts/seed_demo.py` and d
 in `docs/demo-org.md`, never a copy of real books. So the recorder records any module and
 any amount; it still scrubs e-mail addresses to `user@example.com`, API user tags to
 `API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) and the
-personal identifiers `ssn` and `iban` to `REDACTED`, in the request body as well, and
+identifiers `ssn`, `iban` and `qrIban` to `REDACTED`, in the request body as well, and
 refuses any method but GET and POST, a POST
 to anything but the nine write paths, a create without the marker `xippios-live`, and
 any endpoint but `.json`. Writes against demo create a record marked `xippios-live`,
@@ -381,10 +381,10 @@ with a real value.
   send them as given; a preview's `payload` and `changes` and a performed write's
   `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
   as empty.
-- Fixtures never carry their values: the recorder rewrites `ssn` and `iban` to
-  `REDACTED` by name, and its final check refuses any other value (How to record a
-  fixture). A location's `qrIban`, a compound name, is not rewritten; the recorded
-  location holds `null`.
+- Fixtures never carry their values: the recorder rewrites `ssn`, `iban` and a
+  location's `qrIban` (`qr_iban`, `qr-iban`) to `REDACTED` by name, in any case, and its
+  final check refuses any other value (How to record a fixture); the recorded location
+  holds `null` for both.
 - A task that fetches them deliberately may return them and says so in its docstring;
   none does.
 
@@ -407,7 +407,8 @@ URL, the header values and both bodies: e-mail addresses to `user@example.com`,
 CashCtrl's API user tags (`API:` and the first four characters of a key, in `createdBy`
 and `lastUpdatedBy`) to `API:REDACTED` and the value of every token-like body field
 (`hash`, `token`, `secret`, `apiKey`, by name; `order/read.json` sends `hash`) and of the
-personal identifiers `ssn` and `iban` (ADR-0017; `person/list.json` sends both, only
+identifiers `ssn`, `iban` and `qrIban` (`qr_iban`, `qr-iban`; ADR-0017;
+`person/list.json` sends `ssn` and `iban`, `location/list.json` `iban` and `qrIban`, only
 ever `null`) to `REDACTED`. Its verify then refuses, in its own words, a fixture that
 still holds the demo host, the subdomain on its own or the key or its token, plain or
 percent-encoded, in the raw texts or in a decoded string of a JSON body (a value behind

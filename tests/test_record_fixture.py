@@ -913,6 +913,32 @@ def test_personal_identifiers_become_redacted(
     assert "review" not in capsys.readouterr().out
 
 
+def test_a_locations_qr_iban_becomes_redacted(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The organisation's QR-IBAN (``location/list.json``, ADR-0017), in its spellings."""
+    location = {
+        "id": 1,
+        "iban": "CH00TEST",
+        "qrIban": "CH00QRTEST",
+        "QR_IBAN": "CH00QRTEST",
+        "qr-iban": "CH00QRTEST",
+        "orgName": "Muster Handel AG Demo",
+    }
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/location/list.json")
+    route.mock(return_value=httpx.Response(200, json={"total": 1, "data": [location]}))
+    assert recorder.main(["location/list.json", "identifiers"]) == 0
+    text = (tmp_path / "tests" / "fixtures" / "location_list" / "identifiers.json").read_text()
+    assert "CH00" not in text
+    (written,) = json.loads(json.loads(text)["response"]["body"])["data"]
+    assert [written[name] for name in ("iban", "qrIban", "QR_IBAN", "qr-iban")] == ["REDACTED"] * 4
+    assert written["orgName"] == "Muster Handel AG Demo"
+    assert "review" not in capsys.readouterr().out
+
+
 def test_a_write_that_sends_an_identifier_is_not_recorded(
     recorder: ModuleType,
     tmp_path: Path,
@@ -1001,9 +1027,12 @@ def test_a_compound_name_goes_to_review(
         ({"token": {}}, True),
         ({"ssn": "756.0000.0000.00"}, True),
         ({"data": {"bankAccounts": [{"IBAN": "CH00TEST"}]}}, True),
+        ({"data": [{"qrIban": "CH00TEST"}]}, True),
+        ({"QR_IBAN": "CH00TEST"}, True),
         ({"hash": "REDACTED"}, False),
         ({"hash": None}, False),
         ({"ssn": None, "iban": "REDACTED"}, False),
+        ({"qrIban": None, "qr-iban": "REDACTED"}, False),
         ({"hashtag": TOKEN}, False),
         ({"publicHash": TOKEN}, False),
     ],
@@ -1019,9 +1048,12 @@ def test_a_compound_name_goes_to_review(
         "object",
         "ssn",
         "nested-iban",
+        "qr-iban",
+        "qr-iban-snake-upper",
         "scrubbed",
         "null",
         "identifiers-settled",
+        "qr-iban-settled",
         "other-name",
         "compound-name",
     ],

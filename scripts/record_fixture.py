@@ -57,12 +57,13 @@ never shows a value, and exits with status 1:
   right after a JSON escape. A tag the scrub cannot reach (glued to a word, or behind a
   Unicode escape) is refused by the final check.
 - No token-like fields and no personal identifiers. A body field named ``hash``,
-  ``token``, ``secret`` or ``apiKey`` (``api_key``, ``api-key``), or ``ssn`` or ``iban``,
-  the personal identifiers this package keeps out of its projections (ADR-0017), in any
-  case, has its text value replaced by ``REDACTED``. ``order/read.json`` sends ``hash``,
-  an undocumented 32-character text that may be the token of a public link to the order
-  document (observed on 2026-10-23, not verified); ``person/list.json`` sends ``ssn``
-  and ``iban``, only ever seen ``null``; the others were never seen and are scrubbed
+  ``token``, ``secret`` or ``apiKey`` (``api_key``, ``api-key``), or ``ssn``, ``iban`` or
+  ``qrIban`` (``qr_iban``, ``qr-iban``), the identifiers this package keeps out of its
+  projections (ADR-0017), in any case, has its text value replaced by ``REDACTED``.
+  ``order/read.json`` sends ``hash``, an undocumented 32-character text that may be the
+  token of a public link to the order document (observed on 2026-10-23, not verified);
+  ``person/list.json`` sends ``ssn`` and ``iban``, and ``location/list.json`` ``iban``
+  and ``qrIban``, only ever seen ``null``; the others were never seen and are scrubbed
   should they appear. The final check refuses any value under such a name but ``null``
   or ``REDACTED``, whatever its type or shape: text behind an escaped field name, a
   number, an array, an object; in a write's form body as a field (``ssn=...``) and
@@ -169,11 +170,14 @@ _EMAIL_IN_TEXT = re.compile(
 )
 _SCRUBBED_EMAILS = frozenset({SCRUBBED_EMAIL, SCRUBBED_EMAIL.replace("@", "%40")})
 
-TOKEN_FIELD_NAME = re.compile(r"hash|token|secret|api[_-]?key|ssn|iban", re.IGNORECASE)
+TOKEN_FIELD_NAME = re.compile(r"hash|token|secret|api[_-]?key|ssn|iban|qr[_-]?iban", re.IGNORECASE)
 """Body fields whose value may grant access or identify a person, by whole name in any case.
 
 ``ssn`` and ``iban`` are the documented personal identifiers this package keeps out of
-its projections (ADR-0017): fixtures never carry their values either.
+its projections (ADR-0017), and ``qrIban`` (``qr_iban``, ``qr-iban``) the QR-IBAN of the
+organisation's own bank account that ``location/list.json`` sends next to its ``iban``
+(only seen ``null``), which ``LocationProjection`` leaves out as well: fixtures never
+carry their values either.
 """
 _TOKEN_FIELD = re.compile(
     r'(?P<field>"(?:' + TOKEN_FIELD_NAME.pattern + r')"\s*:\s*)"(?:[^"\\]|\\.)*"',
