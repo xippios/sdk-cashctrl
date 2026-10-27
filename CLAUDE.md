@@ -361,12 +361,13 @@ CashCtrl documents two personal identifiers, a person's `ssn` ("Social security 
 of the employee") and the `iban` of each of a person's `bankAccounts` (the list sends an
 `iban` of its own). The rule is `ssn` and `iban` wherever it appears: a person's
 `bankAccounts[].iban` and the organisation's locations' `iban` and `qrIban` alike, kept
-out of every projection a task returns. Johannes decided the two identifiers on
+out of every projection a task returns and dropped from the raw report rows
+`get_report_data` returns. Johannes decided the two identifiers on
 2026-10-25; the session decided on 2026-10-27 that `iban` covers the organisation's own
 bank account numbers too, as ADR-0017's "bank account number", and gap row 123 queues the
-question against sdk-core for Johannes to confirm or overturn. The recorder refuses any
-value under `iban` in a body, so a projection that kept one could never be replay-tested
-with a real value.
+question against sdk-core for Johannes to confirm or overturn. The recorder rewrites any
+value under `iban` in a body to `REDACTED`, so a projection that kept one could never be
+replay-tested with a real value.
 
 - The endpoint wrappers' read models stay faithful and carry them (`Person`,
   `PersonDetail`, `JournalEntryDetail.associates`, `Location`; ADR-0003).
@@ -381,10 +382,16 @@ with a real value.
   send them as given; a preview's `payload` and `changes` and a performed write's
   `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
   as empty.
-- Fixtures never carry their values: the recorder rewrites `ssn` and `iban` to
-  `REDACTED` by name, and its final check refuses any other value (How to record a
-  fixture). A location's `qrIban`, a compound name, is not rewritten; the recorded
-  location holds `null`.
+- Fixtures never carry their values: the recorder rewrites an `ssn` or `iban` value to
+  `REDACTED` by name, and its final check refuses only a value that survives the rewrite
+  (How to record a fixture). It does nothing for a location's `qrIban` yet, a compound
+  name (PR 4 adds it); the recorded location holds `null`.
+- `get_report_data` returns a report's rows as upstream sends them and drops every key
+  named `ssn`, `iban` or `qrIban` from them and from `properties`, in any letter case
+  and at any depth (`_report`; ADR-0003, amendment 2026-10-26). Payroll and people
+  reports carry other personal data under names the documentation does not give, which
+  passes; their type cannot be told from the answer without a second request, so they
+  are not refused, though the salary module is outside this package.
 - A task that fetches them deliberately may return them and says so in its docstring;
   none does.
 

@@ -22,8 +22,10 @@ All notable changes to this project are documented here. The format follows
   account numbers `iban` and `qr_iban`, ADR-0017); and the reports, `get_report_tree`
   (`report/tree.json`) and `get_report_data` (`report/element/data.json` for a
   `fiscal_period` or a `start_date` and `end_date`, the two forms refused together
-  before a request, its rows kept as upstream sends them, decided by Johannes on
-  2026-10-27). Account categories come from the flat `list.json`, each with its
+  before a request; its rows kept as upstream sends them, every key named `ssn`, `iban`
+  or `qrIban` dropped from them at any depth). The six lists, the two reports and the
+  rows kept as sent were decided by Johannes on 2026-10-27 (G5 (4), (5)); the rest is
+  the session's. Account categories come from the flat `list.json`, each with its
   `parent_id`, not from `tree.json`, which nests the same 38 categories with display
   fields only and lacks `accountClass` and `fullName` (compared on the demo
   organisation on 2026-10-27). The demo organisation has no custom field and no cost

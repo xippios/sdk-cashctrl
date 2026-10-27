@@ -73,8 +73,9 @@ upstream's names (`onlyActive`), the organisation as `tenant`, when they were fe
 and, for a list, `total`, upstream's count of the matching records. Async twins are
 named `<task>_async` (`list_organisations` has none). The tasks are listed in the status
 table below. Persons come back without the personal identifiers `ssn` and `iban`
-(`list_persons`, `get_person`, the persons `get_journal_entry` names; ADR-0017), and
-locations without their bank account numbers `iban` and `qr_iban` (`list_locations`).
+(`list_persons`, `get_person`, the persons `get_journal_entry` names; ADR-0017),
+locations without their bank account numbers `iban` and `qr_iban` (`list_locations`),
+and report rows without any key named `ssn`, `iban` or `qrIban` (`get_report_data`).
 
 ## MCP
 
@@ -303,7 +304,10 @@ statement, a VAT settlement, ...) for `fiscal_period` or for `start_date` to
 upstream derives the dates from the period and would ignore the ones given. The report
 comes back as upstream sends it (`data`, the rows, nested; `properties`, the columns
 shown; `total`), under upstream's camelCase names and with amounts as JSON numbers: the
-documentation gives no schema, and the rows differ by report type.
+documentation gives no schema, and the rows differ by report type. Every key named
+`ssn`, `iban` or `qrIban` is dropped from it, in any letter case and at any depth;
+payroll and people reports carry other personal data under undocumented names, and the
+salary module is outside this package.
 `list_account_categories` is the flat `account/category/list.json`, each category with
 its `parent_id`; `account/category/tree.json` nests the same categories with display
 fields only. `list_custom_fields` takes the module (`type`: `JOURNAL`, `PERSON`,
