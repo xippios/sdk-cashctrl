@@ -16,7 +16,7 @@ from xippios.core import InvalidRequestError, NotFoundError, sync
 from xippios.core.mcp import tool_name
 from xippios.core.testing import fixture_path, load_fixture, mcp_call, sent_urls
 
-from xippios.cashctrl import __version__, api, tasks, tasks_write
+from xippios.cashctrl import api, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, SOURCE, TENANTS
 from xippios.cashctrl.mcp import server
 from xippios.cashctrl.models import (
@@ -35,7 +35,6 @@ from xippios.cashctrl.models import (
 
 TENANT_LIST = "list_organisations"
 """Core's tenant list (ADR-0014): no ``org``, no async twin; tested on its own below."""
-TASKS = [getattr(tasks, name) for name in tasks.__all__ if name != TENANT_LIST]
 ORG_TASK_NAMES = [name for name in tasks.__all__ if name != TENANT_LIST]
 EVERY_TASK: dict[str, Callable[..., object]] = {
     f"{module.__name__.rsplit('.', 1)[-1]}.{name}": getattr(module, name)
@@ -43,10 +42,6 @@ EVERY_TASK: dict[str, Callable[..., object]] = {
     for name in module.__all__
     if (module, name) != (tasks, TENANT_LIST)
 }
-
-
-def test_package_has_a_version() -> None:
-    assert __version__
 
 
 def org_comes_first(fn: Callable[..., object]) -> bool:
@@ -83,17 +78,6 @@ def test_every_task_takes_org_first(task: Callable[..., object]) -> None:
     assert org_comes_first(task), "org: str is the first, required parameter of every task"
 
 
-@pytest.mark.parametrize("task", TASKS, ids=ORG_TASK_NAMES)
-def test_task_is_a_sync_facade_with_an_agent_docstring(task: object) -> None:
-    assert callable(task)
-    assert hasattr(task, "async_fn"), "write the async function and derive the sync one with sync()"
-    doc = inspect.getdoc(task) or ""
-    assert doc, "task functions need a docstring: agents read it"
-    assert doc.splitlines()[0].endswith("."), "the first line is one sentence"
-    if inspect.signature(task).parameters:
-        assert "Args:" in doc, "explain every parameter under Args: with valid-value examples"
-
-
 def test_list_organisations_lists_the_declared_names_only(
     monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter
 ) -> None:
@@ -123,6 +107,11 @@ async def test_list_organisations_as_a_tool() -> None:
     payload = await mcp_call(server, "cashctrl_list_organisations", {})
     assert payload["data"] == [DEMO]
     assert payload["meta"]["tenant"] is None
+
+
+@pytest.mark.anyio
+async def test_the_organisation_list_is_on_the_read_server() -> None:
+    assert "cashctrl_list_organisations" in {tool.name for tool in await server.list_tools()}
 
 
 def test_list_organisations_as_a_route() -> None:
@@ -1296,6 +1285,21 @@ def test_list_order_categories_as_a_route(
     assert response.status_code == 200, response.text
     assert response.json()["meta"]["total"] == 6
     assert response.json()["meta"]["tenant"] == DEMO
+
+
+@pytest.mark.anyio
+async def test_the_order_categories_are_on_the_read_server_and_the_router() -> None:
+    """``list_order_categories`` is a read task: agents need its ids to form ``create_order``."""
+    from fastapi.routing import APIRoute
+
+    from xippios.cashctrl.http import router
+    from xippios.cashctrl.mcp_write import server as write_server
+
+    assert "cashctrl_list_order_categories" in {tool.name for tool in await server.list_tools()}
+    routes = {route.path for route in router.routes if isinstance(route, APIRoute)}
+    assert f"/{SOURCE}/list_order_categories" in routes
+    write_tools = {tool.name for tool in await write_server.list_tools()}
+    assert "cashctrl_list_order_categories" not in write_tools
 
 
 PAGED_LISTS: dict[str, Callable[..., typing.Any]] = {

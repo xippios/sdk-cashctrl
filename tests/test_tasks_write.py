@@ -26,10 +26,17 @@ import httpx
 import pytest
 import respx
 from xippios.core import InvalidRequestError, NotFoundError, Result
-from xippios.core.testing import ReplayFixture, load_fixture, mcp_call, mcp_call_text
+from xippios.core.mcp import tool_name
+from xippios.core.testing import (
+    ReplayFixture,
+    assert_write_tools,
+    load_fixture,
+    mcp_call,
+    mcp_call_text,
+)
 
 from xippios.cashctrl import api, tasks_write
-from xippios.cashctrl._client import DEMO
+from xippios.cashctrl._client import DEMO, SOURCE
 from xippios.cashctrl.api._form import (
     FORM_CONTENT_TYPE,
     custom_xml,
@@ -39,6 +46,8 @@ from xippios.cashctrl.api._form import (
     merge_custom,
 )
 from xippios.cashctrl.errors import FieldError, RequestRejected
+from xippios.cashctrl.http import router
+from xippios.cashctrl.mcp import server as read_server
 from xippios.cashctrl.mcp_write import server as write_server
 from xippios.cashctrl.models import (
     BankAccountInput,
@@ -130,6 +139,37 @@ def test_every_write_task_returns_a_preview_or_a_result(task: Callable[..., Any]
         OrderDetail,
     )
     assert result is WriteResult
+
+
+# The write server --------------------------------------------------------------------
+
+
+def test_the_write_server_serves_write_tasks_only() -> None:
+    """Core's check (conventions §8): a write server, its tools exactly the write tasks.
+
+    So the organisation list, a reference tool, stays on the read server (ADR-0014).
+    """
+    assert_write_tools(
+        write_server,
+        list(WRITE_TASKS.values()),
+        source=SOURCE,
+        read_server=read_server,
+        router=router,
+    )
+
+
+@pytest.mark.anyio
+async def test_write_tools_are_the_write_tasks_with_their_parameters() -> None:
+    """Each write tool takes its task's parameters, confirm among them, and says it writes."""
+    tools = {tool.name: tool for tool in await write_server.list_tools()}
+    for name, fn in WRITE_TASKS.items():
+        tool = tools[tool_name(SOURCE, fn)]
+        parameters = set(inspect.signature(fn).parameters)
+        assert set(tool.input_schema.get("properties", {})) == parameters, name
+        assert "confirm" in tool.input_schema["properties"], name
+        assert tool.description, f"{name} has no docstring; agents read it"
+        assert tool.annotations is not None
+        assert (tool.annotations.read_only_hint, tool.annotations.destructive_hint) == (False, True)
 
 
 # Journal entries ---------------------------------------------------------------------
@@ -1398,8 +1438,6 @@ async def test_write_tool_results_carry_snake_case_keys(
 
 def test_no_write_task_is_a_route() -> None:
     from fastapi.routing import APIRoute
-
-    from xippios.cashctrl.http import router
 
     paths = {route.path for route in router.routes if isinstance(route, APIRoute)}
     assert not {f"/cashctrl/{name}" for name in WRITE_TASKS} & paths
