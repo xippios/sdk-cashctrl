@@ -232,7 +232,9 @@ Run `/add-endpoint <upstream operation>`. In short:
    `xippios.core.testing.mcp_call` (and compares what was sent through
    `sent_urls(route)` or `sent_query(route)` with `recorded_query(fixture)`, never a
    request from `route.calls`), a case in `TOOL_CASES` (which
-   checks `meta.tenant` and snake_case keys for every tool), a live smoke test in
+   checks `meta.tenant` and snake_case keys for every tool; a tool whose recorded
+   answer is empty goes into `UNOBSERVED`, whose models' field names are checked
+   instead, and a field kept as upstream sends it into `AS_SENT`), a live smoke test in
    `test_live.py` that takes the `demo_org` fixture.
 7. `CHANGELOG.md` under Unreleased, README status table (the task's name first in its
    cell, in backticks, as the family check reads it), then the full check suite.
