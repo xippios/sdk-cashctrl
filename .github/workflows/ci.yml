@@ -1,3 +1,4 @@
+# cashctrl's own from template v0.2.2 on (D35): never re-rendered, changed by hand.
 # The org ruleset requires a check named `ci` on main. The matrix job is `test`;
 # the single `ci` job below aggregates it so the required check has one name.
 # Pull requests run it directly; a push to main runs it only through publish.yml, once,
@@ -41,13 +42,13 @@ jobs:
             exit 1
           fi
       # ADR-0019: the fixture files a PR adds or changes stay under 256 KiB. --no-renames
-      # lists a moved fixture as added, so one moved and grown is seen. LEVEL is warning in
-      # template v0.2.1 and error from v0.3.0, when the cap binds a source.
+      # lists a moved fixture as added, so one moved and grown is seen. LEVEL is error: the
+      # cap binds cashctrl from its core 0.3.0 adoption (conventions 1.21 §10).
       - name: Fixture files under 256 KiB
         if: github.event_name == 'pull_request'
         env:
           BASE: ${{ github.base_ref }}
-          LEVEL: warning
+          LEVEL: error
         run: |
           over=0
           while IFS= read -r -d '' path; do
