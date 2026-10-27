@@ -6,9 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-- Adopted xippios-core 0.3.0, sdk-template v0.2.2 and conventions 1.21 (conventions §15);
-  the organisation registry, the `--org` lock, the write-server check and the recorder's
-  host, JSON and percent-encoded checks are the package's own from here (ADR-0024).
+## [0.2.0] - 2026-10-27
+
+The second release. It ships on xippios-core 0.3.0 (`xippios-core~=0.3.0` from PyPI,
+its `mcp`, `http` and `testing` extras likewise) and sdk-template v0.2.2, the floor it
+needs, and follows conventions 1.21. The adoption of core 0.3.0 makes the organisation
+registry, the `--org` lock, the write-server check and the recorder's host, JSON and
+percent-encoded checks the package's own, copied from sdk-core (ADR-0024), and the
+empty reference-data scaffolding is gone. On a server bound with `--org`, no tool takes
+`org` any more: the lock binds it on every tool at build (G5 (1), Johannes,
+2026-10-27), and a call that still passes one is answered for the bound organisation,
+where 0.1.0 refused another organisation's name (queue row 115). Eight read tasks add
+the discovery lists the write tools' ids come from (custom fields, person categories
+and titles, account categories, cost centers, locations) and the reports
+(`get_report_tree`, `get_report_data`); `update_order`, the ninth write tool, comes
+with two reads, an order's book entries (`list_order_book_entries`) and the audit log
+(`list_history`). That makes 23 read tasks, `list_organisations` among them, and nine
+write tools.
+
+Not covered: salary (`salary/*`, which holds personal data beyond `ssn` and `iban`),
+journal imports, the fiscal period create, complete and reopen, depreciation and
+exchange-difference bookings, file downloads and list exports, `order/document/*`,
+`order/payment/create`, `order/continue`, and inventory articles (`inventory/article/*`),
+which neither `create_order` nor `update_order` needs: an order item's `inventory_id` is
+optional, and every item recorded from the demo organisation has none. cashctrl stays on
+template v0.2.2 and adopts later core minors by hand: template v0.3.0's update would
+delete the write server (D35).
+
+Known points, carried into 0.3.0: `CustomField` and `CostCenter` are typed from the
+snapshot's create tables alone, since the demo organisation holds neither; payroll and
+people reports pass through `get_report_data` with every key named `ssn`, `iban` or
+`qrIban` dropped, but their type is not refused, so other personal data under
+undocumented names passes (queue row 123, Johannes decides); and the API user tag
+CashCtrl writes into `created_by` and `last_updated_by` (`API:` and the first four
+characters of the API user's key) reaches agents as upstream sends it (row 129).
 
 ### Added
 
@@ -58,6 +89,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Adopted xippios-core 0.3.0, sdk-template v0.2.2 and conventions 1.21 (conventions §15);
+  the organisation registry, the `--org` lock, the write-server check and the recorder's
+  host, JSON and percent-encoded checks are the package's own from here (ADR-0024).
 - The write tools' descriptions name the read tools their ids come from, the discovery
   lists included: `list_person_categories`, `list_person_titles`, `list_locations`,
   `list_cost_centers`, `list_account_categories` and `list_custom_fields` (by module).
