@@ -47,14 +47,17 @@ of an adoption.
    (`tests/conftest.py` and `tests/test_family.py` among them). Keep the template's side
    and carry over what the source added on purpose, such as a fixture of its own in
    `conftest.py`. The files the source fills, `__init__.py`, `_client.py`, `models.py`,
-   `api/`, `tasks.py`, `tasks_write.py`, `params.py`, `enums.py`, `reference/`,
-   `scripts/`, `tests/test_tasks.py`, `tests/test_tasks_write.py`, `tests/test_live.py`,
-   `tests/fixtures/`, `docs/upstream/`, `README.md` and `CHANGELOG.md`, are never touched
-   by the update. Then `uv lock` and `uv sync --all-extras`. `pyproject.toml` depends on
-   `xippios-core~=X.Y.Z`, its `mcp`, `http` and `testing` extras likewise, with no
-   `[tool.uv.sources]` left: `~=X.Y.0`, or `~=X.Y.Z` when patch `Z` shipped what the
-   source adopts (`~=0.2.1` for template v0.2.1), still one minor (conventions §12,
-   ADR-0018 amendment (c)).
+   `api/`, `tasks.py`, `tasks_write.py`, `scripts/`, `tests/test_tasks.py`,
+   `tests/test_tasks_write.py`, `tests/test_live.py`, `tests/fixtures/`, `docs/upstream/`,
+   `README.md` and `CHANGELOG.md`, are never touched by the update. The update renders
+   the template's reference-data scaffolding again, `params.py`, `enums.py`,
+   `reference/README.md` and `scripts/refresh_reference.py`, since copier re-creates a
+   deleted file that matches the template's `_skip_if_exists`: delete those four again,
+   cashctrl packages no reference data (`/refresh-reference-data`). Then `uv lock` and
+   `uv sync --all-extras`. `pyproject.toml` depends on `xippios-core~=X.Y.Z`, its `mcp`,
+   `http` and `testing` extras likewise, with no `[tool.uv.sources]` left: `~=X.Y.0`, or
+   `~=X.Y.Z` when patch `Z` shipped what the source adopts (`~=0.2.1` for template
+   v0.2.1), still one minor (conventions §12, ADR-0018 amendment (c)).
 
 4. **Hand-apply.** Port every bullet of every Hand-apply list after `_commit` by hand:
    path, change, reason. A bullet whose file the source changed is ported in the
@@ -79,11 +82,10 @@ of an adoption.
    is never read, ADR-0014), and `tests/conftest.py` keeps no placeholder fixture of its
    own.
 
-7. **Item 6: generated enums.** Re-render `enums.py` once with the release's renderers
-   from the packaged lists, `uv run python scripts/refresh_reference.py --render-only`
-   (step 4 ports the flag where the script lacks it), and commit it as rendered: no
-   formatting step after it. An adoption fetches nothing: the packaged lists stay as
-   they are, since the PR changes nothing else, and so does `docs/upstream/FETCHED.md`,
+7. **Item 6: generated enums.** cashctrl has no generated enum file and no
+   `scripts/refresh_reference.py`, since it packages no reference data: the item stays
+   unticked with that reason, and the scaffold the update renders again is deleted
+   (step 3). An adoption fetches nothing: `docs/upstream/FETCHED.md` stays as it is,
    left to the next `/refresh-upstream`; only the capture script's changes are ported
    (conventions §15, ADR-0003 amendment).
 
