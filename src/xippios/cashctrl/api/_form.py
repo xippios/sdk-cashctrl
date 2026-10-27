@@ -36,8 +36,7 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from pydantic import BaseModel
-from xippios.core import InvalidRequestError, ValidationError
-from xippios.core.errors import BODY_LIMIT
+from xippios.core import BODY_LIMIT, InvalidRequestError, ValidationError
 
 from xippios.cashctrl._client import SOURCE, client_for
 
