@@ -2,8 +2,11 @@
 
 It also holds to its policies: GET, and POST for the write tools' create, update and
 delete operations only; .json only; no e-mail address, in the request body neither. The demo
-organisation is synthetic, so every module and every amount may be recorded. The host,
-the key and binary bodies are core's ``Scrub``; the rest is the recorder's own.
+organisation is synthetic, so every module and every amount may be recorded. The key as
+given and binary bodies are core's ``Scrub``; the host, the encoded forms, the JSON-decoded
+verify and the rest are the recorder's own (``TenantScrub``, ADR-0024), whose tests below
+follow core's at sdk-core ``cb8ecdf`` (``tests/testing/test_scrub.py``,
+``test_fixtures.py``, ``test_record_replay.py``).
 """
 
 import base64
@@ -17,6 +20,9 @@ from urllib.parse import urlencode
 import httpx
 import pytest
 import respx
+from xippios.core import AsyncClient, ClientConfig
+from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response
+from xippios.core.testing.replay import replay
 
 from xippios.cashctrl._client import DEMO, TENANTS
 
@@ -164,15 +170,22 @@ def test_a_key_the_scrub_cannot_reach_is_never_written(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Behind a JSON escape the key escapes the scrub; core's verify decodes and refuses it."""
+    """Behind a JSON escape the key escapes the scrub; the recorder's verify decodes it.
+
+    Core's verify searches plain values only since 0.3.0 (ADR-0024, decision 3), so the
+    refusal is the recorder's, in its own words.
+    """
     escaped = "\\u" + f"{ord(KEY[0]):04x}" + KEY[1:]
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(return_value=httpx.Response(200, content=f'{{"name": "{escaped}"}}'.encode()))
     assert recorder.main(["account/list.json", "escaped_key"]) == 1
     assert not (tmp_path / "tests" / "fixtures" / "account_list").exists()
     out = capsys.readouterr().out
-    assert out.startswith("not written tests/fixtures/account_list/escaped_key.json: ")
-    assert "secret value" in out
+    assert out == (
+        "not written tests/fixtures/account_list/escaped_key.json: the scrubbed fixture "
+        "still holds the value of CASHCTRL_DEMO_API_KEY or its basic-auth token in the "
+        "response body; nothing is written\n"
+    )
     assert KEY[1:] not in out
 
 
@@ -217,10 +230,11 @@ def test_a_binary_body_is_refused(
     assert recorder.main(["account/list.json", "export"]) == 1
     assert not (tmp_path / "tests" / "fixtures").exists()
     out = capsys.readouterr().out
-    assert out.startswith(
+    assert out == (
         "not written tests/fixtures/account_list/export.json: "
-        "exports are out of scope for fixtures; binary body cannot be scrubbed"
-    ), "core's refusal, after the recorder's reason"
+        "exports are out of scope for fixtures; a binary body cannot be scrubbed; the "
+        "recording is refused unless Scrub(allow_binary=True) stores it base64, flagged\n"
+    ), "core's neutral refusal, after the recorder's reason"
     assert REAL not in out
 
 
@@ -1032,3 +1046,271 @@ def test_every_committed_fixture_passes_the_final_check(recorder: ModuleType) ->
     assert len(fixtures) == 38
     for path in fixtures:
         assert recorder.check(path.read_text(encoding="utf-8"), "demo", "") == ([], []), path.name
+
+
+# The recorder's own step: the host, the encoded forms, the JSON-decoded verify (ADR-0024).
+
+HOST = f"{REAL}.cashctrl.com"
+ENCODED_KEY = "".join(f"%{ord(char):02X}" for char in KEY)
+"""The key with every character percent-encoded: no plain form for core to find."""
+
+
+def step(recorder: ModuleType, url: str, **overrides: Any) -> Any:
+    arguments: dict[str, Any] = {"subdomain": REAL, "secrets": recorder.secrets_of(KEY)}
+    arguments.update(overrides)
+    return recorder.TenantScrub(httpx.URL(url), **arguments)
+
+
+def test_the_placeholder_host_leaves_no_trace_of_the_organisation(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """In the URL, the headers and the bodies: any case, percent-encoded, ``\\/`` escaped."""
+    route = respx_mock.post(f"https://{HOST}/api/v1/journal/create.json")
+    route.mock(
+        return_value=httpx.Response(
+            200,
+            headers={
+                "Location": f"https://{HOST}/next",
+                "Content-Location": f"https://{HOST.upper()}/x",
+                "Link": f"<https://{HOST}/a>; rel=next",
+            },
+            content=(
+                f'{{"self": "https://{HOST}/api/v1/x",'
+                f' "escaped": "https:\\/\\/{HOST}\\/y",'
+                f' "encoded": "https%3A%2F%2F{REAL}%2ecashctrl%2Ecom%2Fz"}}'
+            ).encode(),
+        )
+    )
+    pairs = ["title=xippios-live fixture", f"notes=see https://{HOST.title()}/hook"]
+    assert recorder.main(["journal/create.json", "ok", "--method", "POST", *pairs]) == 0
+    text = (tmp_path / "tests" / "fixtures" / "journal_create" / "ok.json").read_text()
+    assert REAL not in text.lower()
+    fixture = json.loads(text)
+    assert fixture["request"]["url"] == "https://demo.cashctrl.com/api/v1/journal/create.json"
+    assert "notes=see+https%3A%2F%2Fdemo.cashctrl.com%2Fhook" in fixture["request"]["body"]
+    headers = dict(map(tuple, fixture["response"]["headers"]))
+    assert headers["location"] == "https://demo.cashctrl.com/next"
+    assert headers["content-location"] == "https://demo.cashctrl.com/x"
+    assert headers["link"] == "<https://demo.cashctrl.com/a>; rel=next"
+    assert json.loads(fixture["response"]["body"]) == {
+        "self": "https://demo.cashctrl.com/api/v1/x",
+        "escaped": "https://demo.cashctrl.com/y",
+        "encoded": "https%3A%2F%2Fdemo.cashctrl.com%2Fz",
+    }
+    assert REAL not in capsys.readouterr().out
+
+
+def test_a_recorded_fixture_replays_on_the_placeholder_host(
+    recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter
+) -> None:
+    """Recorded from the organisation's host, replayed on ``demo.cashctrl.com``."""
+    respx_mock.get(f"https://{HOST}/api/v1/account/list.json").respond(
+        200, json={"data": [{"id": 1, "link": f"https://{HOST}/a/1"}]}
+    )
+    assert recorder.main(["account/list.json", "one"]) == 0
+    written = tmp_path / "tests" / "fixtures" / "account_list" / "one.json"
+    assert not {"truncated", "original_bytes", "original_count", "sha256"} & set(
+        json.loads(written.read_text())["response"]
+    ), "no cut markers on a fixture that was not cut, as core writes one"
+    respx_mock.routes.clear()
+    route = replay(respx_mock, written)
+    config = ClientConfig(
+        source="cashctrl", version="1", base_url="https://demo.cashctrl.com/api/v1"
+    )
+    rows = recorder.sync(AsyncClient(config).get_json)("/account/list.json")
+    assert rows == {"data": [{"id": 1, "link": "https://demo.cashctrl.com/a/1"}]}
+    assert route.call_count == 1
+
+
+def test_a_percent_encoded_key_is_redacted_and_goes_to_review(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Core redacts the key as given only; the recorder's step takes every encoded form."""
+    route = respx_mock.get(f"https://{HOST}/api/v1/account/list.json")
+    route.mock(
+        return_value=httpx.Response(
+            200,
+            json={"next": f"https://x.example/?k={ENCODED_KEY}"},
+            headers={"X-Echo": ENCODED_KEY.lower()},
+        )
+    )
+    assert recorder.main(["account/list.json", "encoded"]) == 1, "review"
+    text = (tmp_path / "tests" / "fixtures" / "account_list" / "encoded.json").read_text()
+    assert ENCODED_KEY not in text
+    assert ENCODED_KEY.lower() not in text
+    fixture = json.loads(text)
+    assert json.loads(fixture["response"]["body"]) == {"next": f"https://x.example/?k={REDACTED}"}
+    assert ["x-echo", REDACTED] in fixture["response"]["headers"]
+    out = capsys.readouterr().out
+    assert "the response carried the value of CASHCTRL_DEMO_API_KEY" in out
+    assert KEY not in out
+
+
+def test_secrets_are_redacted_plain_and_percent_encoded(recorder: ModuleType) -> None:
+    """Core's plain scrub first, then the step: every form ends as ``REDACTED``."""
+    secret = "s3cr3t value/x+y"  # pragma: allowlist secret
+    request = httpx.Request(
+        "POST",
+        f"https://{HOST}/api/v1/s3cr3t%20value%2Fx+y",
+        params={"q": secret},
+        data={"note": secret},
+    )
+    response = httpx.Response(
+        200,
+        headers={"X-Org": secret, "Location": f"https://{HOST}/x?q=s3cr3t%20value%2fx%2by"},
+        content=(
+            b'{"plain": "s3cr3t value/x+y", "encoded": "s3cr3t%20value%2Fx%2By",'
+            b' "form": "s3cr3t+value%2Fx%2By", "escaped": "s3cr3t value\\/x+y"}'
+        ),
+        request=request,
+    )
+    core = fixture_from_response(response, scrub=Scrub(secrets=[secret]))
+    fixture = step(recorder, str(request.url), secrets=[secret]).apply(core)
+    assert "s3cr3t" not in fixture.model_dump_json()
+    assert fixture.request.url == f"https://demo.cashctrl.com/api/v1/{REDACTED}?q={REDACTED}"
+    assert fixture.request.body == f"note={REDACTED}"
+    headers = dict(fixture.response.headers)
+    assert headers["x-org"] == REDACTED
+    assert headers["location"] == f"https://demo.cashctrl.com/x?q={REDACTED}"
+    assert json.loads(fixture.response.body) == dict.fromkeys(
+        ("plain", "encoded", "form", "escaped"), REDACTED
+    )
+
+
+def test_the_host_then_the_secrets_then_the_rewrite(recorder: ModuleType) -> None:
+    """The rewrite sees the URL, the header values and both bodies after the host and keys."""
+    seen: list[str] = []
+
+    def spy(text: str) -> str:
+        seen.append(text)
+        return text.replace("signed", "neutral")
+
+    request = httpx.Request("POST", f"https://{HOST}/api/v1/x.json?u=signed", data={"k": KEY})
+    response = httpx.Response(
+        302,
+        headers={"Location": f"https://{HOST}/signed"},
+        content=f'{{"home": "https://{HOST}/", "k": "{ENCODED_KEY}"}}'.encode(),
+        request=request,
+    )
+    core = fixture_from_response(response, scrub=recorder.scrub(KEY))
+    fixture = step(recorder, str(request.url), text_rewrite=spy).apply(core)
+    assert fixture.request.url == "https://demo.cashctrl.com/api/v1/x.json?u=neutral"
+    assert fixture.request.body == f"k={REDACTED}"
+    assert dict(fixture.response.headers)["location"] == "https://demo.cashctrl.com/neutral"
+    assert json.loads(fixture.response.body) == {
+        "home": "https://demo.cashctrl.com/",
+        "k": REDACTED,
+    }
+    assert seen, "the rewrite ran"
+    assert all(REAL not in text and KEY not in text and ENCODED_KEY not in text for text in seen)
+    assert "https://demo.cashctrl.com/api/v1/x.json?u=signed" in seen, "the URL, host set first"
+
+
+@pytest.mark.parametrize(
+    ("content", "kind"),
+    [
+        (b'{"link": "https://\\u0072ealsub.cashctrl.com/x"}', "the demo organisation's host"),
+        (b'{"name": "\\u0072ealsub ltd"}', "the value of CASHCTRL_DEMO_SUBDOMAIN"),
+        (b'{"name": "%72ealsub ltd"}', "the value of CASHCTRL_DEMO_SUBDOMAIN"),
+        (b'{"name": "%52EALSUB ltd"}', "the value of CASHCTRL_DEMO_SUBDOMAIN"),
+    ],
+    ids=["host-escaped", "subdomain-escaped", "subdomain-percent-encoded", "upper-case"],
+)
+def test_the_verify_finds_what_the_scrub_cannot_see(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    content: bytes,
+    kind: str,
+) -> None:
+    """Behind a JSON escape or percent-encoded, the host and the subdomain are refused."""
+    route = respx_mock.get(f"https://{HOST}/api/v1/account/list.json")
+    route.mock(return_value=httpx.Response(200, content=content))
+    assert recorder.main(["account/list.json", "hidden"]) == 1
+    assert not (tmp_path / "tests" / "fixtures" / "account_list").exists()
+    out = capsys.readouterr().out
+    assert out == (
+        f"not written tests/fixtures/account_list/hidden.json: the scrubbed fixture still "
+        f"holds {kind} in the response body; nothing is written\n"
+    )
+    assert REAL not in out.lower()
+
+
+def test_the_verify_names_the_header_a_rewrite_put_a_secret_back_into(
+    recorder: ModuleType,
+) -> None:
+    request = httpx.Request("GET", f"https://{HOST}/api/v1/x.json")
+    response = httpx.Response(200, headers={"Location": "/next"}, content=b"", request=request)
+    scrub_step = step(
+        recorder,
+        str(request.url),
+        text_rewrite=lambda text: f"{text} {KEY}" if text == "/next" else text,
+    )
+    with pytest.raises(ValueError, match=r"token in the response header 'location'; ") as info:
+        scrub_step.apply(fixture_from_response(response))
+    assert KEY not in str(info.value)
+
+
+def test_the_verify_passes_a_clean_fixture(recorder: ModuleType) -> None:
+    """``REDACTED`` and the placeholder are masked first: a secret inside them never counts."""
+    request = httpx.Request("GET", f"https://{HOST}/api/v1/x?next=https://{HOST}/y")
+    response = httpx.Response(
+        200,
+        headers={"Location": f"https://{HOST}/next"},
+        content=f'{{"name": "Caf\\u00e9 ACT", "home": "https://{HOST}/"}}'.encode(),
+        request=request,
+    )
+    core = fixture_from_response(response, scrub=Scrub(secrets=["ACT"]))
+    fixture: Fixture = step(recorder, str(request.url), secrets=["ACT"], subdomain="demo").apply(
+        core
+    )
+    assert json.loads(fixture.response.body) == {
+        "name": f"Caf\u00e9 {REDACTED}",
+        "home": "https://demo.cashctrl.com/",
+    }
+    assert dict(fixture.response.headers)["location"] == "https://demo.cashctrl.com/next"
+
+
+@pytest.mark.parametrize(
+    ("url", "overrides", "match"),
+    [
+        ("https://demo.cashctrl.com/v1/x", {}, "^the replay host is the request's own host"),
+        ("https://DEMO.cashctrl.com/v1/x", {}, "^the replay host is the request's own host"),
+        (f"https://{HOST}/v1/x", {"host": "demo.cashctrl.com:8443"}, "plain host name"),
+        (f"https://{HOST}/v1/x", {"secrets": [KEY, ""]}, "empty string"),
+        (f"https://{HOST}/v1/x", {"secrets": ["CashCtrl"]}, "^the replay host contains one"),
+    ],
+    ids=["own-host", "own-host-upper-case", "not-a-host-name", "empty-secret", "secret-in-host"],
+)
+def test_the_step_refuses_what_would_write_a_value(
+    recorder: ModuleType, url: str, overrides: dict[str, Any], match: str
+) -> None:
+    with pytest.raises(ValueError, match=match) as info:
+        step(recorder, url, **overrides)
+    assert REAL not in str(info.value)
+    assert "CashCtrl" not in str(info.value)
+
+
+def test_an_own_host_refusal_is_printed_and_nothing_written(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A demo subdomain that is the placeholder's would be written as it is: refused."""
+    monkeypatch.setenv(TENANTS.var(DEMO, "SUBDOMAIN"), "DEMO")
+    respx_mock.get("https://demo.cashctrl.com/api/v1/account/list.json").respond(200, json={})
+    assert recorder.main(["account/list.json", "own_host"]) == 1
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    assert capsys.readouterr().out.startswith(
+        "not written tests/fixtures/account_list/own_host.json: the replay host is the "
+        "request's own host"
+    )
