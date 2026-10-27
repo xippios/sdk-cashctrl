@@ -111,6 +111,8 @@ __all__ = [
     "PersonTitle",
     "ReadResponse",
     "Recurrence",
+    "ReportData",
+    "ReportTreeNode",
     "ServicePeriodInput",
     "TaxCode",
     "TaxComponent",
@@ -1555,6 +1557,77 @@ class LocationProjection(_LocationFields):
     What ``list_locations`` returns (ADR-0017): every field of ``Location`` but those two,
     under the same names; ``bank_account_id`` names the bank account instead.
     """
+
+
+class ReportTreeNode(UpstreamModel):
+    """One node of ``report/tree.json``, a report collection or a report element.
+
+    ``docs/upstream/report.md``: "A report collection is a collection of report elements
+    which are grouped together and form one document"; "A report element is the actual
+    report, for example the balance sheet or profit and loss statement." The answer is
+    ``{"total": ..., "data": [...]}``, ``total`` counting the top-level nodes. The
+    documentation describes no field; typed from observation on 2026-10-27 (CashCtrl's
+    default reports: six collections and two elements at the top level, 44 nodes, every
+    field but ``data`` on every node).
+
+    ``id`` is the tree's own text key (``collection-1``, ``element-1``), which no other
+    operation takes. An element is a ``leaf`` with ``element_id``, the ``element_id`` of
+    ``get_report_data``, and its report ``type`` (``BALANCE``, ``PLS``,
+    ``OPEN_DEBTORS``, ...: the types of ``report/element/create.json``, a string),
+    ``type_name`` and ``xclass``; a collection has ``element_id``, ``type``,
+    ``type_name`` and ``xclass`` ``None`` and its elements in ``data``. Both carry
+    ``collection_id`` (``None`` for an element outside a collection), ``text`` (the name,
+    seen in German and in English), ``set_id``, ``expanded``, ``cls``, ``qtip`` and the
+    flags ``system``, ``pro`` and ``beta`` with their ``is_*`` twins.
+    """
+
+    id: str
+    text: str | None = None
+    type: str | None = None
+    type_name: str | None = Field(default=None, validation_alias="typeName")
+    element_id: int | None = Field(default=None, validation_alias="elementId")
+    collection_id: int | None = Field(default=None, validation_alias="collectionId")
+    set_id: int | None = Field(default=None, validation_alias="setId")
+    xclass: str | None = None
+    qtip: str | None = None
+    cls: str | None = None
+    leaf: bool
+    expanded: bool
+    system: bool
+    is_system: bool = Field(validation_alias="isSystem")
+    pro: bool
+    is_pro: bool = Field(validation_alias="isPro")
+    beta: bool
+    is_beta: bool = Field(validation_alias="isBeta")
+    data: list["ReportTreeNode"] = Field(default_factory=list)
+
+
+class ReportData(UpstreamModel):
+    """The answer of ``report/element/data.json``: one report's data for a period.
+
+    ``docs/upstream/report.md``, "Read JSON data": "Returns the JSON data of a single
+    element by ID for the given time period." The documentation gives no schema, and
+    the rows differ by report type (``report/element/create.json`` lists 41), so ``data``
+    and ``properties`` are kept as upstream sends them (``JsonValue``; decided by
+    Johannes on 2026-10-27, ADR-0003): rows under upstream's camelCase names
+    (``endAmount``), amounts as JSON numbers, not ``Decimal``.
+
+    Observed on 2026-10-27 for the balance sheet (``BALANCE``) of fiscal period 2025:
+    ``{"total": 2, "data": [...], "properties": {"columns": [...]}}``. ``total`` counts
+    the top-level rows (assets, liabilities and equity). Each row is a node with its
+    child rows in ``data``: ``text`` (the label, ``1020 Bank account``), ``level``,
+    ``leaf``, ``accountId`` (an account's id, ``null`` on a category or a total),
+    ``cls`` (``category level-0``, ``account level-3``, ``total level-3``), the amounts
+    (``openingAmount``, ``endAmount``, ``previousAmount``, ``changeAmount``, ... and
+    their ``dc*`` twins) and the flags ``isTotal`` and ``isForeignCurrency``; a
+    category's total is a row of its own. ``properties.columns`` lists the columns the
+    report shows, each with its ``title`` (``01/01/2025``) and ``dataIndex``, the row
+    field it shows (``dcOpeningAmount``).
+    """
+
+    total: int
+    data: list[JsonValue]
+    properties: JsonValue = None
 
 
 # The write tools' payloads (``tasks_write.py``) and their outcomes.

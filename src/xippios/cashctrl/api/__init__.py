@@ -46,6 +46,11 @@ from xippios.cashctrl.api.person_list import person_list, person_list_params
 from xippios.cashctrl.api.person_read import person_read
 from xippios.cashctrl.api.person_title_list import person_title_list
 from xippios.cashctrl.api.person_update import person_update
+from xippios.cashctrl.api.report_element_data import (
+    report_element_data,
+    report_element_data_params,
+)
+from xippios.cashctrl.api.report_tree import report_tree
 from xippios.cashctrl.api.tax_list import tax_list
 
 __all__ = [
@@ -88,5 +93,8 @@ __all__ = [
     "person_read",
     "person_title_list",
     "person_update",
+    "report_element_data",
+    "report_element_data_params",
+    "report_tree",
     "tax_list",
 ]

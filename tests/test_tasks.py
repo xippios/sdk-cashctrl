@@ -1,5 +1,6 @@
 """Structural checks every task must satisfy. Per-task tests with recorded fixtures go below."""
 
+import dataclasses
 import inspect
 import json
 import re
@@ -13,7 +14,7 @@ import httpx
 import pytest
 import respx
 from xippios.core import InvalidRequestError, NotFoundError, UpstreamModel, sync
-from xippios.core.mcp import tool_name
+from xippios.core.mcp import build_server, tool_name
 from xippios.core.testing import (
     Fixture,
     fixture_path,
@@ -1591,6 +1592,192 @@ async def test_list_locations_as_a_tool_leaves_out_the_bank_account_numbers(
     assert not {"iban", "qr_iban", "qrIban"} & set(main)
 
 
+def report_nodes(nodes: list[models.ReportTreeNode]) -> Iterator[models.ReportTreeNode]:
+    """Every node of a report tree, depth first."""
+    for node in nodes:
+        yield node
+        yield from report_nodes(node.data)
+
+
+def test_get_report_tree_replays_the_default_reports(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    route = replay_fixture("report_tree", "default")
+    result = tasks.get_report_tree(DEMO)
+    assert sent_query(route) == {}, "the operation documents no parameters"
+    assert result.meta.endpoint == "report/tree.json"
+    assert result.meta.request == {"org": DEMO}
+    assert (result.meta.tenant, result.meta.total) == (DEMO, 8), "upstream's top-level count"
+    assert [node.id for node in result.data] == [
+        "collection-1",
+        "collection-3",
+        "collection-5",
+        "collection-6",
+        "collection-7",
+        "collection-8",
+        "element-3",
+        "element-14",
+    ]
+    annual = result.data[0]
+    assert (annual.text, annual.leaf, annual.element_id, annual.type) == (
+        "Jahresbericht",
+        False,
+        None,
+        None,
+    )
+    balance, profit_loss = annual.data
+    assert (balance.id, balance.element_id, balance.collection_id) == ("element-1", 1, 1)
+    assert (balance.type, balance.type_name, balance.text, balance.leaf) == (
+        "BALANCE",
+        "Balance",
+        "Bilanz",
+        True,
+    )
+    assert (profit_loss.element_id, profit_loss.type) == (2, "PLS")
+    nodes = list(report_nodes(result.data))
+    elements = [node for node in nodes if node.leaf]
+    assert (len(nodes), len(elements)) == (44, 38)
+    assert all(node.element_id is not None and node.type for node in elements)
+    assert len({node.element_id for node in elements}) == 38, "an element id names one report"
+    statements = result.data[-2]
+    assert (statements.type, statements.collection_id, statements.data) == ("STATEMENTS", None, [])
+
+
+def test_get_report_data_replays_the_balance_sheet_of_2025(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    route = replay_fixture("report_element_data", "balance_fp2025")
+    result = tasks.get_report_data(DEMO, 1, fiscal_period=FP2025)
+    sent = sent_query(route)
+    assert sent == {"elementId": "1", "fiscalPeriod": str(FP2025)}
+    assert sent == recorded_query(recorded(fixtures_dir, "report_element_data", "balance_fp2025"))
+    assert result.meta.endpoint == "report/element/data.json"
+    assert result.meta.request == {"org": DEMO, "elementId": 1, "fiscalPeriod": FP2025}
+    assert (result.meta.tenant, result.meta.total, result.data.total) == (DEMO, 2, 2)
+    rows = result.data.data
+    assert all(isinstance(row, dict) for row in rows)
+    assets, liabilities = typing.cast(list[dict[str, typing.Any]], rows)
+    assert (assets["text"], liabilities["text"]) == ("Assets", "Liabilities & Equity")
+    assert assets["endAmount"] == liabilities["endAmount"] == 101709.56, "the sheet balances"
+    assert "end_amount" not in assets, "kept as upstream sends it: camelCase, JSON numbers"
+
+    def rows_below(row: dict[str, typing.Any]) -> Iterator[dict[str, typing.Any]]:
+        yield row
+        for child in row["data"]:
+            yield from rows_below(child)
+
+    every = [row for top in (assets, liabilities) for row in rows_below(top)]
+    assert len(every) == 25
+    # Account 1020, id 3, ends 2025 at 101'230.00 (docs/demo-org.md).
+    (bank,) = [row for row in every if row["accountId"] == 3]
+    assert (bank["text"], bank["endAmount"], bank["leaf"]) == ("1020 Bank account", 101230, True)
+    properties = typing.cast(dict[str, typing.Any], result.data.properties)
+    assert [column["title"] for column in properties["columns"]] == [
+        "Label",
+        "01/01/2025",
+        "31/12/2025 (II)",
+        "±%",
+    ]
+
+
+def test_get_report_data_sends_the_dates_as_upstream_reads_them(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """What is sent; the answer is the recorded one, which matches any query on the path."""
+    route = replay_fixture("report_element_data", "balance_fp2025")
+    result = tasks.get_report_data(
+        DEMO,
+        1,
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 6, 30),
+        language="en",
+        sort="text",
+    )
+    sent = sent_query(route)
+    assert sent == {
+        "elementId": "1",
+        "startDate": "2025-01-01",
+        "endDate": "2025-06-30",
+        "language": "en",
+        "sort": "text",
+    }
+    assert result.meta.request == {"org": DEMO, **sent, "elementId": 1}
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (
+            {"fiscal_period": 2, "start_date": date(2025, 1, 1)},
+            "give fiscal_period or start_date and end_date, not both",
+        ),
+        (
+            {"fiscal_period": 2, "end_date": date(2025, 12, 31)},
+            "upstream derives the dates from the fiscal period and would ignore the ones given",
+        ),
+        ({"element_id": "1"}, "element_id must be a whole number, not '1'"),
+        ({"element_id": True}, "element_id must be a whole number, not True"),
+        ({"fiscal_period": "2"}, "fiscal_period must be a whole number, not '2'"),
+        ({"start_date": "2025-01-01"}, "start_date must be a date (YYYY-MM-DD), not str"),
+        (
+            {"end_date": datetime(2025, 12, 31)},
+            "end_date must be a date (YYYY-MM-DD), not datetime",
+        ),
+        ({"language": 1}, "language must be a string, not int"),
+        ({"sort": ["text"]}, "sort must be a string, not list"),
+    ],
+)
+def test_get_report_data_refuses_before_anything_is_sent(
+    respx_mock: respx.MockRouter, arguments: dict[str, typing.Any], message: str
+) -> None:
+    arguments = {"element_id": 1, **arguments}
+    with pytest.raises(InvalidRequestError, match=re.escape(message)):
+        tasks.get_report_data(DEMO, **arguments)
+    assert not respx_mock.calls
+
+
+@pytest.mark.anyio
+async def test_get_report_data_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("report_element_data", "balance_fp2025")
+    arguments = {"org": DEMO, "element_id": 1, "fiscal_period": FP2025}
+    payload = await mcp_call(server, "cashctrl_get_report_data", arguments)
+    assert payload["meta"]["total"] == payload["data"]["total"] == 2
+    assert [row["text"] for row in payload["data"]["data"]] == ["Assets", "Liabilities & Equity"]
+    both = {**arguments, "start_date": "2025-01-01"}
+    text = await mcp_call_text(server, "cashctrl_get_report_data", both)
+    assert text.startswith("error: InvalidRequestError: ")
+    assert "give fiscal_period or start_date and end_date, not both" in text
+    bad_date = {**arguments, "fiscal_period": None, "end_date": "31.12.2025"}
+    text = await mcp_call_text(server, "cashctrl_get_report_data", bad_date)
+    assert text.startswith("error: InvalidRequestError: end_date: ")
+
+
+@pytest.mark.anyio
+async def test_a_report_over_its_cap_is_a_note_naming_the_period_parameters(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """``MCP_CAPS``'s note for ``get_report_data``, on the recorded sheet with a smaller bound.
+
+    The recorded balance sheet, about 17 KB, fits the 128 KB the tool has, so the bound is
+    lowered here and the note kept; the cut is core's (``cap_result``).
+    """
+    replay_fixture("report_element_data", "balance_fp2025")
+    cap = dataclasses.replace(tasks.MCP_CAPS["get_report_data"], max_bytes=2_000)
+    capped = build_server(SOURCE, [tasks.get_report_data], caps={"get_report_data": cap})
+    arguments = {"org": DEMO, "element_id": 1, "fiscal_period": FP2025}
+    payload = json.loads(await mcp_call_text(capped, "cashctrl_get_report_data", arguments))
+    assert set(payload) == {"note", "preview"}
+    assert payload["note"].startswith("result is ")
+    assert payload["note"].endswith(
+        "bytes, over the cap of 2000; narrow the period (fiscal_period, or start_date and "
+        "end_date) or read a smaller report of get_report_tree to see the rest"
+    )
+    whole = await mcp_call(server, "cashctrl_get_report_data", arguments)
+    assert "note" not in whole, "the tool's own cap, 128 KB, holds the recorded sheet"
+
+
 def test_every_cap_names_a_task_and_only_parameters_it_takes() -> None:
     """A cap's note never promises a filter the tool lacks (ADR-0016)."""
     every_parameter = {
@@ -1605,6 +1792,33 @@ def test_every_cap_names_a_task_and_only_parameters_it_takes() -> None:
     assert {"query", "filter", "category_id", "only_active"} <= set(
         re.findall(r"[a-z]+(?:_[a-z]+)*", tasks.MCP_CAPS["list_cost_centers"].note or "")
     )
+
+
+@pytest.mark.anyio
+async def test_the_discovery_lists_and_reports_are_read_tools_and_routes() -> None:
+    """Agents need their ids to form write calls: on the read server, never the write one."""
+    from fastapi.routing import APIRoute
+
+    from xippios.cashctrl.http import router
+    from xippios.cashctrl.mcp_write import server as write_server
+
+    new = [
+        "list_custom_fields",
+        "list_person_categories",
+        "list_person_titles",
+        "list_account_categories",
+        "list_cost_centers",
+        "list_locations",
+        "get_report_tree",
+        "get_report_data",
+    ]
+    read_tools = {tool.name for tool in await server.list_tools()}
+    write_tools = {tool.name for tool in await write_server.list_tools()}
+    routes = {route.path for route in router.routes if isinstance(route, APIRoute)}
+    for name in new:
+        assert f"cashctrl_{name}" in read_tools
+        assert f"cashctrl_{name}" not in write_tools
+        assert f"/{SOURCE}/{name}" in routes
 
 
 PAGED_LISTS: dict[str, Callable[..., typing.Any]] = {
@@ -1716,6 +1930,7 @@ RECORDED_LISTS: dict[str, tuple[Callable[..., typing.Any], dict[str, typing.Any]
     "person_title_list/default": (api.person_title_list, {}),
     "account_category_list/default": (api.account_category_list, {}),
     "location_list/default": (api.location_list, {}),
+    "report_tree/default": (api.report_tree, {}),
 }
 
 
@@ -1772,10 +1987,18 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
     "cashctrl_list_account_categories": ("account_category_list/default", {}),
     "cashctrl_list_cost_centers": ("account_costcenter_list/default", {}),
     "cashctrl_list_locations": ("location_list/default", {}),
+    "cashctrl_get_report_tree": ("report_tree/default", {}),
+    "cashctrl_get_report_data": (
+        "report_element_data/balance_fp2025",
+        {"element_id": 1, "fiscal_period": FP2025},
+    ),
 }
 UNOBSERVED = frozenset({"cashctrl_list_custom_fields", "cashctrl_list_cost_centers"})
 """Tools whose recorded answer is an empty list: their snake_case names are checked on the
 models instead (``test_the_unobserved_models_serialise_under_snake_case_names``)."""
+AS_SENT: dict[str, frozenset[str]] = {"cashctrl_get_report_data": frozenset({"data", "properties"})}
+"""Fields of a tool's ``data`` that hold upstream's JSON as sent (``JsonValue``, decided by
+Johannes on 2026-10-27): their own names are snake_case, the keys inside them upstream's."""
 SNAKE_CASES = {tool: case for tool, case in TOOL_CASES.items() if tool not in UNOBSERVED}
 
 
@@ -1786,18 +2009,25 @@ def test_every_task_has_a_tool_case() -> None:
 def tool_arguments(
     tool: str, case: tuple[str, dict[str, typing.Any]], fixtures_dir: Path
 ) -> dict[str, typing.Any]:
-    """The arguments ``case`` was recorded with, as JSON: a read takes the recorded id."""
+    """The arguments ``case`` was recorded with, as JSON: a read by id takes the recorded id."""
     arguments = case[1]
-    if tool.startswith("cashctrl_get_"):
-        arguments = {"id": int(recorded_query(recorded(fixtures_dir, *case[0].split("/")))["id"])}
+    query = recorded_query(recorded(fixtures_dir, *case[0].split("/")))
+    if tool.startswith("cashctrl_get_") and "id" in query:
+        arguments = {"id": int(query["id"])}
     return {
         key: [item.model_dump() for item in value] if key == "filter" else value
         for key, value in arguments.items()
     }
 
 
-def snake_case_violations(data: object) -> list[str]:
-    """The keys of ``data``, at any depth, that are not snake_case; none must be."""
+def snake_case_violations(data: object, as_sent: frozenset[str] = frozenset()) -> list[str]:
+    """The keys of ``data``, at any depth, that are not snake_case; none must be.
+
+    ``as_sent`` names fields of ``data`` that hold upstream's JSON as sent (``AS_SENT``):
+    their names are checked, the keys inside them are not.
+    """
+    if isinstance(data, dict) and as_sent:
+        data = {name: None if name in as_sent else value for name, value in data.items()}
     found = sorted(set(keys(data)))
     assert found, "a result without keys proves nothing"
     return [key for key in found if not SNAKE_CASE.fullmatch(key)]
@@ -1819,7 +2049,7 @@ async def test_tool_results_carry_snake_case_keys(
     replay_fixture(*case[0].split("/"))
     arguments = tool_arguments(tool, case, fixtures_dir)
     payload = await mcp_call(server, tool, {"org": DEMO, **arguments})
-    assert snake_case_violations(payload["data"]) == []
+    assert snake_case_violations(payload["data"], AS_SENT.get(tool, frozenset())) == []
 
 
 @pytest.mark.parametrize(("tool", "case"), SNAKE_CASES.items(), ids=SNAKE_CASES.keys())
@@ -1848,7 +2078,8 @@ def test_route_results_carry_snake_case_keys(
     else:
         response = client.get(path, params=arguments)
     assert response.status_code == 200, response.text
-    assert snake_case_violations(response.json()["data"]) == []
+    data = response.json()["data"]
+    assert snake_case_violations(data, AS_SENT.get(tool, frozenset())) == []
 
 
 @pytest.mark.parametrize(("tool", "case"), TOOL_CASES.items(), ids=TOOL_CASES.keys())

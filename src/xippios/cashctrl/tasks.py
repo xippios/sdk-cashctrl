@@ -43,6 +43,7 @@ collect the same records again.
 """
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from datetime import date, datetime
 from typing import Any, TypeGuard, get_args
 
 from pydantic import ValidationError
@@ -88,6 +89,8 @@ from xippios.cashctrl.models import (
     PersonDetailProjection,
     PersonProjection,
     PersonTitle,
+    ReportData,
+    ReportTreeNode,
     TaxCode,
 )
 
@@ -96,6 +99,8 @@ __all__ = [
     "get_journal_entry",
     "get_order",
     "get_person",
+    "get_report_data",
+    "get_report_tree",
     "list_account_categories",
     "list_accounts",
     "list_cost_centers",
@@ -114,6 +119,13 @@ __all__ = [
 ]
 
 MCP_CAPS: Mapping[str, ResultCap] = {
+    "get_report_data": ResultCap(
+        max_bytes=131_072,
+        note=(
+            "narrow the period (fiscal_period, or start_date and end_date) or read a "
+            "smaller report of get_report_tree to see the rest"
+        ),
+    ),
     "list_cost_centers": ResultCap(
         note="narrow the list with query, filter, category_id or only_active to see the rest"
     ),
@@ -127,7 +139,11 @@ MCP_CAPS: Mapping[str, ResultCap] = {
 
 Every other tool keeps the family default, 200 rows or 64 KB. ``list_custom_fields`` has
 no filter or paging beyond its ``type`` and a write needs a type's custom fields whole
-(``customField<id>``), so its bound is raised to 500 rows or 128 KB.
+(``customField<id>``), so its bound is raised to 500 rows or 128 KB. A report is read
+whole: ``get_report_data``'s result is no list, so the cap replaces one over its bound
+with a note and a preview. The demo organisation's balance sheet of 2025, 25 rows with
+its totals, is about 17 KB, some 650 bytes a row, so 64 KB holds a report of about 100
+rows and 128 KB one of about 200; the note names the period parameters.
 ``list_cost_centers`` keeps the default bound and names its filters.
 """
 
@@ -1000,6 +1016,133 @@ async def list_locations_async(org: str) -> Result[list[LocationProjection]]:
     return Result(data=[_location(location) for location in response.data], meta=meta)
 
 
+async def get_report_tree_async(org: str) -> Result[list[ReportTreeNode]]:
+    """Get an organisation's report tree: its report collections and the reports in them.
+
+    Every top-level node comes back with its children in ``data``. A collection
+    (``Jahresbericht``, ``Mehrwertsteuer``, ...) holds report elements; an element, a
+    ``leaf``, is one report: its ``element_id`` is the ``element_id`` of
+    ``get_report_data``, its ``type`` the kind of report (``BALANCE`` for the balance
+    sheet, ``PLS`` for profit and loss, ``OPEN_DEBTORS``, ``VAT_SETTLEMENT``, ...) and
+    its ``text`` its name. ``id`` is the tree's own key (``element-1``), not an id other
+    tools take. ``meta.total`` is upstream's count of the top-level nodes, not of every
+    report.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+    """
+    response = await api.report_tree(org)
+    meta = _meta(org, "report/tree.json", {}, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
+def _check_report_arguments(
+    *,
+    element_id: object,
+    fiscal_period: object,
+    start_date: object,
+    end_date: object,
+    language: object,
+    sort: object,
+) -> None:
+    """Refuse a ``get_report_data`` call upstream would answer for another period (ADR-0007).
+
+    ``docs/upstream/report.md``, "Read JSON data": ``fiscalPeriod`` "overrides the
+    ``startDate`` and ``endDate`` parameter, as these are derived from the fiscal
+    period", so upstream would silently ignore dates given with it: the two forms are
+    refused together. The rest is for Python callers, whose arguments nothing else
+    validates (the MCP and HTTP adapters refuse a wrong type before the task runs): the
+    ids are whole numbers, the dates ``date`` objects (not a ``datetime``, whose text
+    would carry a time), ``language`` and ``sort`` strings. Whether one date may be
+    given without the other, and what a start after the end answers, is not documented,
+    so neither is checked.
+
+    Raises:
+        InvalidRequestError: Naming every problem found.
+    """
+    problems: list[str] = []
+    if not _whole(element_id):
+        problems.append(f"element_id must be a whole number, not {element_id!r}")
+    if fiscal_period is not None and not _whole(fiscal_period):
+        problems.append(f"fiscal_period must be a whole number, not {fiscal_period!r}")
+    for name, value in (("start_date", start_date), ("end_date", end_date)):
+        if value is not None and (not isinstance(value, date) or isinstance(value, datetime)):
+            problems.append(f"{name} must be a date (YYYY-MM-DD), not {type(value).__name__}")
+    for name, value in (("language", language), ("sort", sort)):
+        if value is not None and not isinstance(value, str):
+            problems.append(f"{name} must be a string, not {type(value).__name__}")
+    if fiscal_period is not None and (start_date is not None or end_date is not None):
+        problems.append(
+            "give fiscal_period or start_date and end_date, not both: upstream derives "
+            "the dates from the fiscal period and would ignore the ones given"
+        )
+    if problems:
+        raise InvalidRequestError("; ".join(problems), source=SOURCE)
+
+
+async def get_report_data_async(
+    org: str,
+    element_id: int,
+    *,
+    fiscal_period: int | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    language: str | None = None,
+    sort: str | None = None,
+) -> Result[ReportData]:
+    """Read one report's data for a period, such as a balance sheet or a profit and loss.
+
+    The report is the element ``element_id`` of ``get_report_tree``, for the fiscal
+    period ``fiscal_period`` or for ``start_date`` to ``end_date``; passing the fiscal
+    period and a date is refused before anything is sent, since upstream derives the
+    dates from the period and would ignore the ones given. Pass one of the two for a
+    reproducible answer: which period upstream uses without either is not documented.
+
+    The data comes back as upstream sends it, since the documentation gives no schema
+    and the rows differ by report type: ``data``, the rows, each with its child rows in
+    ``data`` (a balance sheet's are categories and accounts, with ``text``,
+    ``accountId`` and the amounts ``openingAmount``, ``endAmount`` and more; a total is
+    a row of its own); ``properties``, among them the ``columns`` the report shows (each
+    a ``title`` and the row field it shows, ``dataIndex``); and ``total``, upstream's
+    count of the top-level rows, which ``meta.total`` repeats. Rows keep upstream's
+    camelCase names, and amounts are JSON numbers. Over MCP a result over 128 KB comes
+    back as a note and a preview: narrow the period or read a smaller report.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        element_id: The report, an ``element_id`` from ``get_report_tree``, e.g. ``1``.
+        fiscal_period: The fiscal period, an ``id`` from ``list_fiscal_periods``, e.g.
+            ``2``; not together with ``start_date`` or ``end_date``.
+        start_date: The first day of the report period, ``YYYY-MM-DD``, e.g.
+            ``2025-01-01``.
+        end_date: The last day of the report period, ``YYYY-MM-DD``, e.g.
+            ``2025-12-31``.
+        language: The language of the report, e.g. ``en``; upstream lists no values,
+            and the language codes ``de``, ``fr``, ``it`` and ``en`` are assumed.
+        sort: The column to sort the rows by, a ``dataIndex`` of
+            ``properties.columns``, e.g. ``text``.
+    """
+    _check_report_arguments(
+        element_id=element_id,
+        fiscal_period=fiscal_period,
+        start_date=start_date,
+        end_date=end_date,
+        language=language,
+        sort=sort,
+    )
+    arguments: dict[str, Any] = {
+        "end_date": end_date,
+        "fiscal_period": fiscal_period,
+        "language": language,
+        "sort": sort,
+        "start_date": start_date,
+    }
+    sent = api.report_element_data_params(element_id, **arguments)
+    report = await api.report_element_data(org, element_id, **arguments)
+    meta = _meta(org, "report/element/data.json", sent, total=report.total)
+    return Result(data=report, meta=meta)
+
+
 LIST_ORGANISATIONS_DOC = """List the organisations this server can reach, by name.
 
 On a server that serves every declared organisation, every other tool takes one of these
@@ -1030,3 +1173,5 @@ list_person_titles = sync(list_person_titles_async)
 list_account_categories = sync(list_account_categories_async)
 list_cost_centers = sync(list_cost_centers_async)
 list_locations = sync(list_locations_async)
+get_report_tree = sync(get_report_tree_async)
+get_report_data = sync(get_report_data_async)
