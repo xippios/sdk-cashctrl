@@ -1366,6 +1366,29 @@ async def test_list_custom_fields_as_a_tool(
     assert missing == "error: InvalidRequestError: type: Field required"
 
 
+def test_list_custom_fields_as_a_route(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """A ``GET``, ``type`` a query parameter the route requires and checks as the tool does."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from xippios.cashctrl.http import router
+
+    app = FastAPI()
+    app.include_router(router)
+    replay_fixture("customfield_list", "person")
+    client = TestClient(app)
+    response = client.get("/cashctrl/list_custom_fields", params={"org": DEMO, "type": "PERSON"})
+    assert response.status_code == 200, response.text
+    assert (response.json()["data"], response.json()["meta"]["total"]) == ([], 0)
+    assert response.json()["meta"]["tenant"] == DEMO
+    refused = client.get("/cashctrl/list_custom_fields", params={"org": DEMO, "type": "person"})
+    assert refused.status_code == 422
+    missing = client.get("/cashctrl/list_custom_fields", params={"org": DEMO})
+    assert missing.status_code == 422
+
+
 def test_list_person_categories_replays_the_recorded_list(
     replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
 ) -> None:
