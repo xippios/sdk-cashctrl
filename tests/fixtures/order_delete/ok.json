@@ -1,7 +1,7 @@
 {
-  "recorded_at": "2026-10-24T08:50:58.466778Z",
+  "recorded_at": "2026-10-27T22:22:02.048083Z",
   "request": {
-    "body": "ids=7",
+    "body": "ids=20",
     "body_base64": false,
     "content_type": "application/x-www-form-urlencoded; charset=UTF-8",
     "method": "POST",
@@ -21,11 +21,11 @@
       ],
       [
         "date",
-        "Sat, 24 Oct 2026 08:50:57 GMT"
+        "Tue, 27 Oct 2026 22:22:00 GMT"
       ],
       [
         "etag",
-        "\"1792306289900\""
+        "\"1792835062457\""
       ],
       [
         "via",
