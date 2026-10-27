@@ -10,6 +10,28 @@ All notable changes to this project are documented here. The format follows
   the organisation registry, the `--org` lock, the write-server check and the recorder's
   host, JSON and percent-encoded checks are the package's own from here (ADR-0024).
 
+### Added
+
+- Eight read tasks, each an MCP tool and an HTTP route, with recorded fixtures and live
+  smoke tests: the discovery lists the write tools' ids come from,
+  `list_custom_fields` (`customfield/list.json`, one module's `type` a call, checked
+  against the documented set), `list_person_categories` (`person/category/list.json`),
+  `list_person_titles` (`person/title/list.json`), `list_account_categories`
+  (`account/category/list.json`), `list_cost_centers` (`account/costcenter/list.json`,
+  with its filters) and `list_locations` (`location/list.json`, without the bank
+  account numbers `iban` and `qr_iban`, ADR-0017); and the reports, `get_report_tree`
+  (`report/tree.json`) and `get_report_data` (`report/element/data.json` for a
+  `fiscal_period` or a `start_date` and `end_date`, the two forms refused together
+  before a request, its rows kept as upstream sends them, decided by Johannes on
+  2026-10-27). Account categories come from the flat `list.json`, each with its
+  `parent_id`, not from `tree.json`, which nests the same 38 categories with display
+  fields only and lacks `accountClass` and `fullName` (compared on the demo
+  organisation on 2026-10-27). The demo organisation has no custom field and no cost
+  center, so those two models are typed from the create tables alone.
+- `MCP_CAPS` (ADR-0016): `list_custom_fields` at 500 rows or 128 KB and
+  `get_report_data` at 128 KB, since an agent needs them whole, and `list_cost_centers`
+  with a note naming its filters.
+
 ### Removed
 
 - The empty reference-data scaffolding: `src/xippios/cashctrl/params.py`

@@ -162,7 +162,8 @@ src/xippios/cashctrl/
                    projections tasks return without ssn and iban (ADR-0017)
   api/             endpoint wrappers, one module per upstream operation; _form.py encodes and posts writes
   tasks.py         task functions and list_organisations; __all__ is what the adapters register,
-                   MCP_CAPS any per-tool result caps (none)
+                   MCP_CAPS the per-tool result caps (list_custom_fields, list_cost_centers,
+                   get_report_data)
   tasks_write.py   confirm-gated write tasks for the separate write server (Write tools below)
   mcp_write.py     xippios-cashctrl-mcp-write entry point
   mcp.py           xippios-cashctrl-mcp entry point
@@ -242,19 +243,27 @@ for the page at `start` (default 0); `limit` omitted collects every page from `s
 through core's `paginate_offset`, `PAGE_SIZE` (100, upstream's documented default) a
 request. `meta.total` is upstream's `total` on every list task, never `len(data)`.
 
-Lookups (accounts, currencies, tax codes, fiscal periods) are tasks too, named
-`list_<thing>`, so agents can form valid calls; they serve the organisation's own data
+Lookups (accounts, currencies, tax codes, fiscal periods, account and person categories,
+titles, cost centers, locations, custom fields) are tasks too, named `list_<thing>`, so
+agents can form valid calls; they serve the organisation's own data
 live and are never packaged: a multi-tenant source packages no tenant data. Nor does the
 package ship a value set `docs/upstream/` fixes, since no task needs one yet, so the
 reference-data scaffolding (`params.py`, `enums.py`, `reference/`,
 `scripts/refresh_reference.py`) is gone until a documented value set is needed; then it
 comes back from the template's scaffold (`/refresh-reference-data`). A lookup whose
 whole list an agent needs and the default result cap (200 rows or 64 KB) would cut gets
-a cap of its own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (ADR-0016);
-none has one, since each list takes filters or pages and no list must reach an agent
-whole. A task-shaped function that returns a subset of an upstream record builds its
-model with `UpstreamModel.project`; nothing is renamed or computed, parsing a value
-(`parse_decimal`) is the only override.
+a cap of its own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (ADR-0016):
+`list_custom_fields` (500 rows or 128 KB; no filter but `type`, and a write needs a
+type's custom fields whole) and `get_report_data` (128 KB; a report is read whole, and
+its result, no list, is cut to a note and a preview); `list_cost_centers` keeps the
+default bound with a note naming its filters. Every other list takes filters or pages,
+or is short. Where the documentation gives no schema and the shape differs by kind, as
+the rows of `report/element/data.json` differ by report type, the task returns
+upstream's JSON as sent (`JsonValue`, camelCase keys included) and says so in its
+docstring (decided by Johannes on 2026-10-27); `AS_SENT` in `tests/test_tasks.py` names
+those fields for the snake_case check. A task-shaped function that returns a subset of
+an upstream record builds its model with `UpstreamModel.project`; nothing is renamed or
+computed, parsing a value (`parse_decimal`) is the only override.
 Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
@@ -363,6 +372,11 @@ of the employee") and the `iban` of each of a person's `bankAccounts` (the list 
   and its final check refuses any other value (How to record a fixture).
 - A task that fetches them deliberately may return them and says so in its docstring;
   none does.
+- A location's `iban` and `qr_iban`, the organisation's own bank account numbers
+  (undocumented, only seen `null`), are left out of `LocationProjection`
+  (`list_locations`) as ADR-0017's equivalent of an identifier, a bank account number;
+  the read model `Location` keeps them, and the recorder's rule rewrites an `iban` by
+  name wherever it appears.
 
 ## How to record a fixture
 
