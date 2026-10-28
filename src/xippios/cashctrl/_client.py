@@ -115,7 +115,8 @@ _REJECTED = re.compile(rb'"success"\s*:\s*false')
 _BODY_HEADERS = frozenset(
     {"content-encoding", "content-length", "content-type", "transfer-encoding"}
 )
-_READ_ONE_PARAMS = frozenset({"id", "lang"})
+_READS_BY_ID = {"/read.json": "id", "/read.pdf": "ids"}
+"""The reads by id: a path's end and the parameter that names the record or records."""
 
 
 def _field_errors(items: Any) -> list[FieldError]:
@@ -135,14 +136,16 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _reads_one_record(url: httpx.URL) -> bool:
-    """``<...>/read.json`` asked for one record: a non-empty ``id``, at most ``lang`` besides."""
+def _reads_by_id(url: httpx.URL) -> bool:
+    """A read by id: ``<...>/read.json`` by ``id``, or ``<...>/read.pdf`` by ``ids``.
+
+    The parameter non-empty, and at most ``lang`` besides.
+    """
     params = url.params
-    return (
-        url.path.endswith("/read.json")
-        and set(params.keys()) <= _READ_ONE_PARAMS
-        and _text(params.get("id")) is not None
-    )
+    for end, name in _READS_BY_ID.items():
+        if url.path.endswith(end):
+            return set(params.keys()) <= {name, "lang"} and _text(params.get(name)) is not None
+    return False
 
 
 def _full_text(response: httpx.Response) -> str:
@@ -255,11 +258,17 @@ def classify(response: httpx.Response) -> XippiosError | None:
       id there stays a ``RequestRejected``. ``account``, ``currency`` and ``journal``
       (``"This book entry does not exist."``) were observed; the other operations are
       assumed to refuse alike.
+    - A ``<...>/read.pdf`` asked for records by non-empty ``ids`` (``order/document/read.pdf``,
+      the one this package downloads) reads by id too: its refusal with a message and no
+      field list raises ``NotFoundError``, assumed alike and not observed. A download's
+      answer reaches ``classify`` unread; ``api/_download.py`` hands it a JSON answer's
+      head (queue row 142).
 
     Everything else falls through (``None``): a 200 that is not a JSON object with
-    ``"success": false`` (data, the CSV, Excel and PDF exports, malformed JSON) and every
-    other 2xx or 3xx. There is no content-type check: a byte pre-check for
-    ``"success": false`` and a tolerant JSON parse decide, as ``get_json`` does.
+    ``"success": false`` (data, malformed JSON), a download's 200, whose body core leaves
+    unread (``httpx.ResponseNotRead``, counted as ``None``), and every other 2xx or 3xx.
+    There is no content-type check here: a byte pre-check for ``"success": false`` and a
+    tolerant JSON parse decide, as ``get_json`` does.
     """
     if response.status_code >= 400:
         return _status_error(response)
@@ -274,7 +283,7 @@ def classify(response: httpx.Response) -> XippiosError | None:
     errors = _field_errors(payload.get("errors"))
     message = _text(payload.get("errorMessage")) or _text(payload.get("message"))
     url = response.request.url
-    if not errors and message and _reads_one_record(url):
+    if not errors and message and _reads_by_id(url):
         return NotFoundError(
             f"CashCtrl: {message} ({url.path.rsplit('/api/v1', 1)[-1]})", source=SOURCE
         )

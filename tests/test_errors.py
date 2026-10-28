@@ -128,9 +128,16 @@ def test_a_top_level_message_is_read_when_error_message_is_absent(
 
 @pytest.mark.parametrize(
     "path",
-    ["/account/read.json?id=7", "/account/read.json?id=7&lang=de", "/fiscalperiod/read.json?id=3"],
+    [
+        "/account/read.json?id=7",
+        "/account/read.json?id=7&lang=de",
+        "/fiscalperiod/read.json?id=3",
+        "/order/document/read.pdf?ids=3",
+        "/order/document/read.pdf?ids=3%2C5&lang=de",
+    ],
 )
 def test_reading_one_record_by_id_is_not_found(path: str) -> None:
+    """A ``read.json`` by ``id``, and a ``read.pdf`` by ``ids`` (assumed alike, not observed)."""
     error = classify(refusal(path, {"success": False, "errorMessage": "Gone.", "data": None}))
     assert isinstance(error, NotFoundError)
 
@@ -146,6 +153,10 @@ def test_reading_one_record_by_id_is_not_found(path: str) -> None:
         "/setting/read.json",
         "/order/category/read_status.json?id=7",
         "/account/balance?id=7",
+        "/order/document/read.pdf?ids=",
+        "/order/document/read.pdf?id=3",
+        "/order/document/read.zip?ids=3",
+        "/journal/list.csv?limit=5",
     ],
 )
 def test_anything_but_a_read_by_id_is_a_rejection(path: str) -> None:
