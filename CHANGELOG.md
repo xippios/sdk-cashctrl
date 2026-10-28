@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-10-27
+## [0.2.0] - 2026-10-28
 
 The second release. It ships on xippios-core 0.3.0 (`xippios-core~=0.3.0` from PyPI,
 its `mcp`, `http` and `testing` extras likewise) and sdk-template v0.2.2, the floor it
