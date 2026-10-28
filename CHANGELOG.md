@@ -26,8 +26,9 @@ All notable changes to this project are documented here. The format follows
   caller names them; the other exports send `columns` as given (Johannes, 2026-10-28).
   One wrapper per endpoint, `<module>_list_csv|xlsx|pdf` and `order_document_read_pdf`
   (D95, conventions 1.22 §2), none with a fixture directory, since the recorder records
-  no binary body: the tests mount synthetic bytes with respx, and a live test downloads
-  one order document and one journal export (G5 (7)).
+  no binary body: the tests mount synthetic bytes with respx, and the live tests download
+  one order document, the journal and the persons as CSV, and expect the refusal of an
+  unknown order's document (G5 (7); queue row 235).
 - A download refused with HTTP 200 and `success: false` is raised, never kept as the
   file: core writes a 2xx body unread (queue row 142), so `api/_download.py` streams to a
   temporary file beside `dest` and reads `Content-Type` first. JSON goes through

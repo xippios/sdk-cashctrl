@@ -441,7 +441,8 @@ cached. Core writes a 2xx body unread (row 142), so `download` reads `Content-Ty
 first: JSON is a refusal sent as HTTP 200, whose head goes through `classify`; the file
 is removed and `dest` left as it was. The recorder never records a binary body or a
 file endpoint, so a file wrapper has no fixture directory: `tests/test_downloads.py`
-mounts synthetic bytes, and `test_live.py` downloads one order document and one export.
+mounts synthetic bytes; `test_live.py` downloads one order document and two exports
+and expects an unknown order's refusal.
 
 ### How to record a fixture
 

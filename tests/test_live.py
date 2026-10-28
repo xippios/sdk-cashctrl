@@ -1,6 +1,6 @@
 """Live smoke tests: skipped unless XIPPIOS_LIVE_TESTS=1 (conventions §10).
 
-Every task function gets a live smoke test here, next to the reachability check, three
+Every task function gets a live smoke test here, next to the reachability check, two
 list exports excepted (below). Every live test takes the ``demo_org`` fixture: live runs
 reach the demo organisation only, whose books are synthetic (``scripts/seed_demo.py``).
 Each read test makes one call, but the reads, which first look an id up in a list
@@ -35,21 +35,26 @@ seeded purchase order booked, found with GET calls, is refused before any previe
 
 The file tasks tested live write into pytest's temporary directory and assert the
 file's size and content type only: one seeded sales order's document, its id from the
-list, and the journal of 2025 as CSV, five entries. That one export stands for the four,
-which share one download path (G5 (7) of 2026-10-28): ``export_accounts``,
-``export_persons`` and ``export_orders`` have no live test of their own.
+list, the journal of 2025 as CSV, five entries, and the persons as CSV with the columns
+``export_persons`` names by default, which upstream must accept (queue row 235). The two
+exports stand for the four, which share one download path (G5 (7) of 2026-10-28):
+``export_accounts`` and ``export_orders`` have no live test of their own. One more asks
+for the document of an order that does not exist and expects ``NotFoundError`` and no
+file: CashCtrl's refusal sent as HTTP 200 with JSON, which core would write as the file
+(queue row 142).
 
 The calls of one run: 29 for the reads (17, 9 for the discovery lists and the reports:
 one each, and the tree ``get_report_data`` reads first, and 3 for the book entries of an
-order, with the list of purchase orders they read first, and the history), 3 for the
-files (the list of sales orders, the order's PDF, the journal export), 4 lookups
+order, with the list of purchase orders they read first, and the history), 5 for the
+files (the list of sales orders, the order's PDF, the refused PDF of an unknown order,
+the journal export, the person export), 4 lookups
 (accounts, tax codes, customers, the sales categories), 9 for the journal (sweep,
 create, the sweep's query seeing the new entry, the update's preview, the update as read
 and write, the read back, the delete as read and write), 7 for a person (the same
 without the query, the delete one call), 10 for an order (sweep, create, the update's
 preview, two updates as read and write, the first without items and the second with,
 each read back, the delete) and 2 for the refused delete of an entry an order booked
-(the list, the delete's read); 64 in all, one more per leftover swept, two for a journal
+(the list, the delete's read); 66 in all, one more per leftover swept, two for a journal
 entry.
 """
 
@@ -61,7 +66,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from xippios.core import InvalidRequestError
+from xippios.core import InvalidRequestError, NotFoundError
 
 from xippios.cashctrl import api, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
@@ -265,6 +270,25 @@ async def test_export_journal_entries(
     assert result.data.bytes == dest.stat().st_size > 0
     assert media_type(result.data.content_type) == "text/csv"
     assert result.meta.endpoint == "journal/list.csv"
+
+
+async def test_export_persons_with_the_default_columns(demo_org: str, tmp_path: Path) -> None:
+    # No columns: the task names PersonProjection's 74 fields, which upstream must accept.
+    dest = tmp_path / "persons.csv"
+    result = await tasks.export_persons_async(demo_org, "csv", dest)
+    assert result.data.bytes == dest.stat().st_size > 0
+    assert media_type(result.data.content_type) == "text/csv"
+    assert result.meta.request["columns"] == ",".join(tasks.PERSON_COLUMNS)
+
+
+async def test_the_document_of_an_unknown_order_is_not_found(demo_org: str, tmp_path: Path) -> None:
+    # Upstream refuses with HTTP 200 and JSON (queue row 142); anything else fails here:
+    # a file written, another error, or no error.
+    dest = tmp_path / "missing.pdf"
+    with pytest.raises(NotFoundError) as info:
+        await tasks.download_order_document_async(demo_org, [999999], dest)
+    assert str(info.value).endswith("(/order/document/read.pdf)")
+    assert list(tmp_path.iterdir()) == [], "no file, no temporary file"
 
 
 @pytest.fixture(scope="module")
