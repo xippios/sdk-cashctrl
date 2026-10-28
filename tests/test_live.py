@@ -32,16 +32,21 @@ creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10
 That refusal is checked live once, read-only: a delete without ``confirm`` of an entry a
 seeded purchase order booked, found with GET calls, is refused before any preview.
 
+The two file tasks tested live write into pytest's temporary directory and assert the
+file's size and content type only: one seeded sales order's document, its id from the
+list, and the journal of 2025 as CSV, five entries.
+
 The calls of one run: 29 for the reads (17, 9 for the discovery lists and the reports:
 one each, and the tree ``get_report_data`` reads first, and 3 for the book entries of an
-order, with the list of purchase orders they read first, and the history), 4 lookups
+order, with the list of purchase orders they read first, and the history), 3 for the
+files (the list of sales orders, the order's PDF, the journal export), 4 lookups
 (accounts, tax codes, customers, the sales categories), 9 for the journal (sweep,
 create, the sweep's query seeing the new entry, the update's preview, the update as read
 and write, the read back, the delete as read and write), 7 for a person (the same
 without the query, the delete one call), 10 for an order (sweep, create, the update's
 preview, two updates as read and write, the first without items and the second with,
 each read back, the delete) and 2 for the refused delete of an entry an order booked
-(the list, the delete's read); 61 in all, one more per leftover swept, two for a journal
+(the list, the delete's read); 64 in all, one more per leftover swept, two for a journal
 entry.
 """
 
@@ -49,6 +54,7 @@ import json
 from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -223,6 +229,39 @@ async def test_list_history(demo_org: str) -> None:
     assert result.meta.total >= len(result.data)
     created = [entry.created for entry in result.data if entry.created is not None]
     assert created == sorted(created, reverse=True), "newest first, upstream's default"
+
+
+def media_type(content_type: str | None) -> str:
+    """``application/pdf`` of ``application/pdf;charset=UTF-8``; empty when none was sent."""
+    return (content_type or "").split(";", 1)[0].strip().lower()
+
+
+async def test_download_order_document(
+    demo_org: str, fiscal_periods: dict[str, int], tmp_path: Path
+) -> None:
+    # A seeded sales order of 2026; its id comes from the list, never from a constant.
+    period = fiscal_periods["2026"]
+    orders = await tasks.list_orders_async(demo_org, type="SALES", fiscal_period_id=period, limit=1)
+    (listed,) = orders.data
+    dest = tmp_path / "order.pdf"
+    result = await tasks.download_order_document_async(demo_org, [listed.id], dest)
+    assert result.data.path == dest
+    assert result.data.bytes == dest.stat().st_size > 0
+    assert media_type(result.data.content_type) == "application/pdf"
+    assert result.meta.request == {"org": demo_org, "ids": str(listed.id)}
+
+
+async def test_export_journal_entries(
+    demo_org: str, fiscal_periods: dict[str, int], tmp_path: Path
+) -> None:
+    period = fiscal_periods["2025"]
+    dest = tmp_path / "journal.csv"
+    result = await tasks.export_journal_entries_async(
+        demo_org, "csv", dest, fiscal_period_id=period, limit=5
+    )
+    assert result.data.bytes == dest.stat().st_size > 0
+    assert media_type(result.data.content_type) == "text/csv"
+    assert result.meta.endpoint == "journal/list.csv"
 
 
 @pytest.fixture(scope="module")
