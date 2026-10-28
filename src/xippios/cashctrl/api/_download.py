@@ -28,7 +28,13 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import httpx
-from xippios.core import BODY_LIMIT, Downloaded, ValidationError, XippiosError
+from xippios.core import (
+    BODY_LIMIT,
+    Downloaded,
+    InvalidRequestError,
+    ValidationError,
+    XippiosError,
+)
 
 from xippios.cashctrl._client import NEUTRAL_HOST, SOURCE, classify, client_for
 
@@ -99,8 +105,9 @@ async def download(
         The file at ``dest``, as core's ``download`` describes it.
 
     Raises:
-        ValueError: ``dest`` is a directory, or its directory does not exist; nothing
-            is sent.
+        InvalidRequestError: ``dest`` is a directory, or its directory does not exist,
+            a bad argument (conventions §5) where core's ``download`` raises
+            ``ValueError``; nothing is sent.
         RequestRejected: Upstream answered HTTP 200 with ``"success": false``.
         NotFoundError: The same, for an unknown id of a read by ids
             (``order/document/read.pdf``).
@@ -110,9 +117,9 @@ async def download(
     client = client_for(org)
     target = Path(dest)
     if target.is_dir():
-        raise ValueError("dest is a directory; name the file to write")
+        raise InvalidRequestError("dest is a directory; name the file to write", source=SOURCE)
     if not target.parent.is_dir():
-        raise ValueError("dest's directory does not exist; create it first")
+        raise InvalidRequestError("dest's directory does not exist; create it first", source=SOURCE)
     handle, name = tempfile.mkstemp(
         dir=target.parent, prefix=f".{target.name}.", suffix=".download"
     )

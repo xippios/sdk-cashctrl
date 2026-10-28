@@ -504,9 +504,9 @@ def test_a_status_error_writes_nothing(
 def test_dest_names_a_file_in_a_directory_that_exists(
     respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
-    with pytest.raises(ValueError, match="dest is a directory"):
+    with pytest.raises(InvalidRequestError, match="dest is a directory"):
         tasks.export_accounts(DEMO, "csv", tmp_path)
-    with pytest.raises(ValueError, match="dest's directory does not exist"):
+    with pytest.raises(InvalidRequestError, match="dest's directory does not exist"):
         tasks.download_order_document(DEMO, [3], tmp_path / "missing" / "x.pdf")
     assert not respx_mock.calls
     assert files(tmp_path) == []
