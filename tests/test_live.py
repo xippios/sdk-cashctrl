@@ -4,8 +4,9 @@ Every task function gets a live smoke test here, next to the reachability check.
 live test takes the ``demo_org`` fixture: live runs reach the demo organisation only, whose
 books are synthetic (``scripts/seed_demo.py``). Each read test makes one call, but the
 reads, which first look an id up in a list (account 1020 by number, the first journal
-entry, person and sales order). ``fiscal_periods`` looks the fiscal periods up once for
-the module: the API user's current period is 2025, and the orders are in 2026.
+entry, person and sales order), and ``get_report_data``, which first reads the report
+tree for the balance sheet's element id. ``fiscal_periods`` looks the fiscal periods up
+once for the module: the API user's current period is 2025, and the orders are in 2026.
 
 The write tools are tested live per resource, one test that calls each of its write
 tools once with ``confirm=True`` (create, update, delete), so that every record a test
@@ -28,12 +29,14 @@ creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10
 That refusal is checked live once, read-only: a delete without ``confirm`` of an entry a
 seeded purchase order booked, found with GET calls, is refused before any preview.
 
-The calls of one run: 17 for the reads, 4 lookups (accounts, tax codes, customers, the
-sales categories), 9 for the journal (sweep, create, the sweep's query seeing the new
-entry, the update's preview, the update as read and write, the read back, the delete as
-read and write), 7 for a person (the same without the query, the delete one call), 3
-for an order and 2 for the refused delete of an entry an order booked (the list, the
-delete's read); 42 in all, one more per leftover swept, two for a journal entry.
+The calls of one run: 26 for the reads (17, and 9 for the discovery lists and the
+reports: one each, and the tree ``get_report_data`` reads first), 4 lookups (accounts,
+tax codes, customers, the sales categories), 9 for the journal (sweep, create, the
+sweep's query seeing the new entry, the update's preview, the update as read and write,
+the read back, the delete as read and write), 7 for a person (the same without the
+query, the delete one call), 3 for an order and 2 for the refused delete of an entry an
+order booked (the list, the delete's read); 51 in all, one more per leftover swept, two
+for a journal entry.
 """
 
 from collections.abc import Sequence
@@ -226,6 +229,76 @@ def test_list_order_categories(demo_org: str, sales_categories: list[OrderCatego
     assert sales_categories
     assert {category.type for category in sales_categories} == {"SALES"}
     assert all(category.status for category in sales_categories if not category.is_inactive)
+
+
+async def test_list_custom_fields(demo_org: str) -> None:
+    result = await tasks.list_custom_fields_async(demo_org, "PERSON")
+    assert result.meta.request == {"org": demo_org, "type": "PERSON"}
+    assert result.meta.tenant == demo_org
+    assert result.meta.total == len(result.data), "the demo organisation has none (2026-10-27)"
+
+
+async def test_list_person_categories(demo_org: str) -> None:
+    result = await tasks.list_person_categories_async(demo_org)
+    assert result.data
+    assert result.meta.total == len(result.data)
+    ids = {category.id for category in result.data}
+    assert all(category.parent_id in ids for category in result.data if category.parent_id)
+
+
+async def test_list_person_titles(demo_org: str) -> None:
+    result = await tasks.list_person_titles_async(demo_org)
+    assert result.data
+    assert result.meta.total == len(result.data)
+    assert {title.gender for title in result.data} <= {"MALE", "FEMALE", None}
+
+
+async def test_list_account_categories(demo_org: str) -> None:
+    result = await tasks.list_account_categories_async(demo_org)
+    assert result.meta.total == len(result.data) > 0
+    ids = {category.id for category in result.data}
+    assert all(category.parent_id in ids for category in result.data if category.parent_id)
+    assert any(category.parent_id is None for category in result.data)
+
+
+async def test_list_cost_centers(demo_org: str) -> None:
+    result = await tasks.list_cost_centers_async(demo_org, only_active=True)
+    assert result.meta.request == {"org": demo_org, "onlyActive": "true"}
+    assert result.meta.total == len(result.data), "the demo organisation has none (2026-10-27)"
+
+
+async def test_list_locations(demo_org: str) -> None:
+    result = await tasks.list_locations_async(demo_org)
+    assert result.meta.total == len(result.data) > 0
+    assert "MAIN" in {location.type for location in result.data}
+    assert all(not hasattr(location, "iban") for location in result.data)
+
+
+async def test_get_report_tree(demo_org: str) -> None:
+    result = await tasks.get_report_tree_async(demo_org)
+    assert result.data
+    assert result.meta.total == len(result.data), "upstream counts the top-level nodes"
+    elements = [node for top in result.data for node in [top, *top.data] if node.leaf]
+    assert all(node.element_id is not None for node in elements)
+
+
+async def test_get_report_data(demo_org: str, fiscal_periods: dict[str, int]) -> None:
+    # The balance sheet of 2025, as report_element_data/balance_fp2025.json recorded it;
+    # its element id comes from the tree, never from a constant.
+    tree = await tasks.get_report_tree_async(demo_org)
+    (balance, *_) = [
+        node for top in tree.data for node in [top, *top.data] if node.type == "BALANCE"
+    ]
+    assert balance.element_id is not None
+    period = fiscal_periods["2025"]
+    result = await tasks.get_report_data_async(demo_org, balance.element_id, fiscal_period=period)
+    assert result.meta.request == {
+        "org": demo_org,
+        "elementId": balance.element_id,
+        "fiscalPeriod": period,
+    }
+    assert result.meta.total == result.data.total == len(result.data.data) > 0
+    assert all(isinstance(row, dict) and "text" in row for row in result.data.data)
 
 
 def marked(text: str | None, nr: str | None = None) -> bool:

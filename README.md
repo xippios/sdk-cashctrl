@@ -67,12 +67,15 @@ invoices = tasks.list_orders("demo", type="SALES", fiscal_period_id=current.id)
 
 Every task returns `Result[T]`: `data` holds models that mirror CashCtrl's payloads
 under upstream's names in snake_case (`is_current`, `end_amount`), in Python and in every
-tool and route result alike, `meta` the upstream operation, the parameters as sent under
+tool and route result alike (the report rows of `get_report_data` excepted, which come
+as upstream sends them), `meta` the upstream operation, the parameters as sent under
 upstream's names (`onlyActive`), the organisation as `tenant`, when they were fetched
 and, for a list, `total`, upstream's count of the matching records. Async twins are
 named `<task>_async` (`list_organisations` has none). The tasks are listed in the status
 table below. Persons come back without the personal identifiers `ssn` and `iban`
-(`list_persons`, `get_person`, the persons `get_journal_entry` names; ADR-0017).
+(`list_persons`, `get_person`, the persons `get_journal_entry` names; ADR-0017),
+locations without their bank account numbers `iban` and `qr_iban` (`list_locations`),
+and report rows without any key named `ssn`, `iban` or `qrIban` (`get_report_data`).
 
 ## MCP
 
@@ -99,7 +102,9 @@ tool acts on `acme` and takes no `org`, so no call reaches another organisation;
 `--org`, a server serves every declared organisation and the agent picks one per call,
 after `cashctrl_list_organisations` has named them. Its tools are read-only and named
 `cashctrl_<verb>_<noun>`. Results are capped at 200 rows or 64 KB with a note on how to
-narrow the query. `--http` serves streamable HTTP instead of stdio.
+narrow the query; `cashctrl_list_custom_fields` at 500 rows or 128 KB and
+`cashctrl_get_report_data` at 128 KB, since an agent needs them whole. `--http` serves
+streamable HTTP instead of stdio.
 
 Write tools run in a separate server, `xippios-cashctrl-mcp-write` (see Write tools
 below); every write tool previews its change unless called with `confirm=true`. It
@@ -177,20 +182,25 @@ by the write server only: never by the read server, never as an HTTP route.
   booked; an unknown id is `NotFoundError` there. A person or an order that no longer
   exists, or an entry deleted between that read and the delete, is refused by upstream
   (`RequestRejected`).
-- **Custom fields**: `custom` maps upstream's names (`customField1`, `customField<ID>`)
-  to text, sent as `<values><customField1>...</customField1></values>`, values escaped.
-  An update keeps every stored value it is not given.
+- **Custom fields**: `custom` maps upstream's names (`customField1`, `customField<ID>`,
+  the ids from `cashctrl_list_custom_fields`) to text, sent as
+  `<values><customField1>...</customField1></values>`, values escaped. An update keeps
+  every stored value it is not given.
 - **Amounts.** A journal `amount` with a `tax_id` is the gross amount, VAT included, and
   order items' `unit_price` was read as gross too (observed on the demo organisation,
   although the tax codes' calculation type reads NET; `docs/demo-org.md`).
 - **Ids** come from the read tools: account ids from `cashctrl_list_accounts` (the
   `id`, not the account number), tax codes from `cashctrl_list_tax_codes`, persons from
   `cashctrl_list_persons`, order categories and their statuses from
-  `cashctrl_list_order_categories`, currencies from `cashctrl_list_currencies`; the
-  record to update or delete from `cashctrl_list_journal_entries`,
-  `cashctrl_list_persons` or `cashctrl_list_orders` (the `id`, not the `nr`). A journal
-  `associate_id` is a person's id; create a new person with `cashctrl_create_person`
-  first (upstream would create one from a name, which the tools do not send).
+  `cashctrl_list_order_categories`, currencies from `cashctrl_list_currencies`, a
+  person's `category_id` from `cashctrl_list_person_categories`, its `title_id` from
+  `cashctrl_list_person_titles` and an employee's `location_id` from
+  `cashctrl_list_locations`, an allocation's `to_cost_center_id` from
+  `cashctrl_list_cost_centers`; the record to update or delete from
+  `cashctrl_list_journal_entries`, `cashctrl_list_persons` or `cashctrl_list_orders`
+  (the `id`, not the `nr`). A journal `associate_id` is a person's id; create a new
+  person with `cashctrl_create_person` first (upstream would create one from a name,
+  which the tools do not send).
 - CashCtrl checks every write and refuses with the fields it objects to, e.g.
   `error: RequestRejected: CashCtrl rejected the request: debitId: This field cannot be
   empty.`; a refused write changed nothing. A write that meets a server error or a
@@ -226,8 +236,9 @@ every route but `GET /cashctrl/list_organisations` takes `org`, and the consumer
 it explicitly on each request. A deployment that must reach one organisation only
 declares only that one. A task whose
 parameters are all scalars is a `GET /cashctrl/<task>` with query parameters; the list
-tasks that take a `filter`, a list (`list_accounts`, `list_journal_entries`,
-`list_persons`, `list_orders`), are a `POST` with a JSON body keyed by parameter name.
+tasks that take a `filter`, a list (`list_accounts`, `list_cost_centers`,
+`list_journal_entries`, `list_persons`, `list_orders`), are a `POST` with a JSON body
+keyed by parameter name.
 The MCP entry points quiet httpx's request log; the router does not, so a consumer that
 logs at INFO logs httpx's request lines, whose URLs carry the organisation's host (its
 subdomain): set the `httpx` logger to WARNING.
@@ -249,6 +260,14 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET order/list.json` (List orders) | `list_orders` | `cashctrl_list_orders` | available; paged; HTTP route is `POST` |
 | `GET order/read.json` (Read order) | `get_order` | `cashctrl_get_order` | available |
 | `GET order/category/list.json` (List categories) | `list_order_categories` | `cashctrl_list_order_categories` | available |
+| `GET customfield/list.json` (List custom fields) | `list_custom_fields` | `cashctrl_list_custom_fields` | available; one module (`type`) a call |
+| `GET person/category/list.json` (List categories) | `list_person_categories` | `cashctrl_list_person_categories` | available |
+| `GET person/title/list.json` (List titles) | `list_person_titles` | `cashctrl_list_person_titles` | available |
+| `GET account/category/list.json` (List categories) | `list_account_categories` | `cashctrl_list_account_categories` | available; flat, linked by `parent_id` |
+| `GET account/costcenter/list.json` (List cost centers) | `list_cost_centers` | `cashctrl_list_cost_centers` | available; HTTP route is `POST`; no balances yet |
+| `GET location/list.json` (List locations) | `list_locations` | `cashctrl_list_locations` | available; without `iban` and `qr_iban` |
+| `GET report/tree.json` (Get tree of reports) | `get_report_tree` | `cashctrl_get_report_tree` | available |
+| `GET report/element/data.json` (Read JSON data) | `get_report_data` | `cashctrl_get_report_data` | available; rows as upstream sends them |
 | `POST journal/create.json`, `update.json`, `delete.json` | `create_journal_entry`, `update_journal_entry`, `delete_journal_entry` | `cashctrl_create_journal_entry`, ... | available on the write server only |
 | `POST person/create.json`, `update.json`, `delete.json` | `create_person`, `update_person`, `delete_person` | `cashctrl_create_person`, ... | available on the write server only |
 | `POST order/create.json`, `delete.json` | `create_order`, `delete_order` | `cashctrl_create_order`, `cashctrl_delete_order` | available on the write server only |
@@ -277,6 +296,23 @@ The journal and order lists answer for the API user's current fiscal period unle
 answered, so pass `fiscal_period_id` (an id from `list_fiscal_periods`) for a
 reproducible answer. Without `type` (`SALES`, `PURCHASE`), `list_orders` returns both;
 `list_order_categories` lists `SALES` (upstream's default) unless given `PURCHASE`.
+
+`get_report_tree` lists the organisation's reports, collections of report elements;
+`get_report_data` reads one element (`element_id`, a balance sheet, a profit and loss
+statement, a VAT settlement, ...) for `fiscal_period` or for `start_date` to
+`end_date`. Giving the fiscal period and a date is refused before anything is sent:
+upstream derives the dates from the period and would ignore the ones given. The report
+comes back as upstream sends it (`data`, the rows, nested; `properties`, the columns
+shown; `total`), under upstream's camelCase names and with amounts as JSON numbers: the
+documentation gives no schema, and the rows differ by report type. Every key named
+`ssn`, `iban` or `qrIban` is dropped from it, in any letter case and at any depth;
+payroll and people reports carry other personal data under undocumented names, and the
+salary module is outside this package.
+`list_account_categories` is the flat `account/category/list.json`, each category with
+its `parent_id`; `account/category/tree.json` nests the same categories with display
+fields only. `list_custom_fields` takes the module (`type`: `JOURNAL`, `PERSON`,
+`ORDER`, ...) and refuses any other value; `list_cost_centers` checks `dir` and the
+filters as `list_accounts` does.
 
 ## Upstream terms and attribution
 

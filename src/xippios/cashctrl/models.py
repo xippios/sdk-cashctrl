@@ -14,16 +14,20 @@ generated into ``enums.py`` would be a ``StrEnum``, and one of integer ids an ``
 upstream concept, and nothing is renamed or computed.
 
 These read models stay faithful, documented personal identifiers included: ``ssn`` and
-``iban`` (``Person``, ``PersonDetail``, and ``JournalEntryDetail.associates``). The
-projections tasks return leave those out (``PersonProjection``,
-``PersonDetailProjection``, ``JournalEntryDetailProjection``), a write task does not
-echo one in ``meta.request`` and its preview shows one as ``REDACTED``, and fixtures
-never carry their values (ADR-0017).
+``iban`` (``Person``, ``PersonDetail``, and ``JournalEntryDetail.associates``), and a
+location's ``iban`` and ``qrIban`` (``Location``, row 123). The projections tasks return
+leave those out (``PersonProjection``, ``PersonDetailProjection``,
+``JournalEntryDetailProjection``, ``LocationProjection``), as ``get_report_data`` drops
+them from its raw rows (``ReportData`` itself keeps what upstream sends), a write task
+does not echo one in ``meta.request`` and its preview shows one as ``REDACTED``, and
+fixtures never carry their values (ADR-0017).
 
 ``docs/upstream/`` shows no response bodies. Field types come from the create and update
 parameter tables where they describe the field, and from the answers recorded against the
-demo organisation on 2026-10-23 where they do not; the latter are named in each model's
-docstring as typed from observation. Two demo organisations answered that day: the
+demo organisation where they do not: on 2026-10-23 and 2026-10-24 for the ledger,
+journal, person and order models, on 2026-10-27 for the custom field, category, title,
+cost center, location and report models. The latter fields are named in each model's
+docstring as typed from observation. Two demo organisations answered on 2026-10-23: the
 first, a copy of real books, since retired, and the synthetic one seeded by
 ``scripts/seed_demo.py``; the committed fixtures come from the synthetic one only. What
 those answers showed:
@@ -59,6 +63,7 @@ from xippios.core import UpstreamModel
 
 __all__ = [
     "Account",
+    "AccountCategory",
     "AccountDetail",
     "AddressType",
     "AllocationInput",
@@ -70,7 +75,10 @@ __all__ = [
     "Color",
     "Comparison",
     "ContactType",
+    "CostCenter",
     "Currency",
+    "CustomField",
+    "CustomFieldType",
     "Direction",
     "Filter",
     "FiscalPeriod",
@@ -83,6 +91,8 @@ __all__ = [
     "JournalRow",
     "Language",
     "ListResponse",
+    "Location",
+    "LocationProjection",
     "NotifyType",
     "Order",
     "OrderBookTemplate",
@@ -96,13 +106,17 @@ __all__ = [
     "Person",
     "PersonAddress",
     "PersonAddressInput",
+    "PersonCategory",
     "PersonContact",
     "PersonContactInput",
     "PersonDetail",
     "PersonDetailProjection",
     "PersonProjection",
+    "PersonTitle",
     "ReadResponse",
     "Recurrence",
+    "ReportData",
+    "ReportTreeNode",
     "ServicePeriodInput",
     "TaxCode",
     "TaxComponent",
@@ -1298,6 +1312,336 @@ class OrderCategory(UpstreamModel):
     created_by: str | None = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
     last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+CustomFieldType = Literal[
+    "JOURNAL", "ACCOUNT", "INVENTORY_ARTICLE", "INVENTORY_ASSET", "ORDER", "PERSON", "FILE",
+    "SALARY_STATEMENT",
+]  # fmt: skip
+"""``type`` of ``customfield/list.json``, the module: "Possible values: JOURNAL, ACCOUNT, ..."."""
+
+
+class CustomField(UpstreamModel):
+    """One custom field, an entry of ``customfield/list.json`` (``docs/upstream/common.md``).
+
+    A field of the organisation's own on the records of one module (``type``); a write
+    task sets its value as ``customField<id>`` in ``custom``. Typed from the tables of
+    ``customfield/create.json`` and ``update.json`` alone: the demo organisation has no
+    custom field, and ``customfield/list.json`` for ``PERSON`` answered ``{"total": 0,
+    "data": []}`` on 2026-10-27, so no record was observed. Every field but ``id`` is
+    therefore optional, and the two whose wire type the tables leave open are kept as
+    upstream sends them: ``group_id`` (TEXT, "The ID of the custom field group") and
+    ``values`` (TEXT holding a JSON array, ``["red","green","blue"]``, the choices of a
+    ``COMBOBOX``). ``type`` and ``data_type`` (``TEXT``, ``TEXTAREA``, ``CHECKBOX``,
+    ``DATE``, ``COMBOBOX``, ``NUMBER``, ``ACCOUNT``, ``PERSON``) stay strings;
+    ``row_label``, ``field_label``, ``field_info`` and ``field_text_right`` may hold
+    localised text as ``<values><de>...</de></values>``; ``variable_name`` is the
+    optional ``$name`` used instead of ``$customField<ID>``. The ``created*`` and
+    ``last_updated*`` bookkeeping fields every other list sends are assumed here, not
+    observed.
+    """
+
+    id: int
+    type: str | None = None
+    data_type: str | None = Field(default=None, validation_alias="dataType")
+    row_label: str | None = Field(default=None, validation_alias="rowLabel")
+    field_label: str | None = Field(default=None, validation_alias="fieldLabel")
+    field_info: str | None = Field(default=None, validation_alias="fieldInfo")
+    field_text_right: str | None = Field(default=None, validation_alias="fieldTextRight")
+    group_id: JsonValue = Field(default=None, validation_alias="groupId")
+    is_inactive: bool | None = Field(default=None, validation_alias="isInactive")
+    is_multi: bool | None = Field(default=None, validation_alias="isMulti")
+    max_width: Decimal | None = Field(default=None, validation_alias="maxWidth")
+    values: JsonValue = None
+    variable_name: str | None = Field(default=None, validation_alias="variableName")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class PersonCategory(UpstreamModel):
+    """One person category, an entry of ``person/category/list.json`` (``docs/upstream/person.md``).
+
+    A group persons are filed in, possibly below a parent category. Its ``id`` is what
+    ``list_persons``, ``create_person`` and ``update_person`` take as ``category_id``.
+    Typed from the tables of ``person/category/create.json`` and ``update.json``:
+    ``name`` (localised, ``<values><de>Kunden</de><en>Customers</en>...</values>``),
+    ``discount_percentage`` (for orders), ``parent_id`` and ``sequence_nr_id`` (the
+    sequence that numbers its persons, inherited from the parent when empty). Typed from
+    observation on 2026-10-27 (CashCtrl's four default categories, all at the top level):
+    ``id`` and the ``created*``/``last_updated*`` bookkeeping fields;
+    ``sequence_nr_id_inherited``, ``discount_inherited`` and ``discount_effective`` were
+    only seen ``null`` and are kept as sent.
+    """
+
+    id: int
+    name: str
+    parent_id: int | None = Field(default=None, validation_alias="parentId")
+    sequence_nr_id: int | None = Field(default=None, validation_alias="sequenceNrId")
+    sequence_nr_id_inherited: JsonValue = Field(
+        default=None, validation_alias="sequenceNrIdInherited"
+    )
+    discount_percentage: Decimal | None = Field(default=None, validation_alias="discountPercentage")
+    discount_inherited: JsonValue = Field(default=None, validation_alias="discountInherited")
+    discount_effective: JsonValue = Field(default=None, validation_alias="discountEffective")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class PersonTitle(UpstreamModel):
+    """One title, an entry of ``person/title/list.json`` (``docs/upstream/person.md``).
+
+    A form of address with its letter salutation. Its ``id`` is what ``create_person``
+    and ``update_person`` take as ``title_id``. Typed from the tables of
+    ``person/title/create.json`` and ``update.json``: ``name`` (the title itself,
+    localised, ``<values><de>Herr</de><en>Mr.</en>...</values>``), ``gender`` (``MALE``
+    or ``FEMALE``, a string) and ``sentence`` (the letter salutation, localised). Typed
+    from observation on 2026-10-27 (CashCtrl's three default titles): ``id``, ``value``
+    (the id as text), the ``created*``/``last_updated*`` bookkeeping fields, and
+    ``text``, only seen ``null`` and kept as sent. The title without a ``gender`` had no
+    ``sentence``.
+    """
+
+    id: int
+    name: str
+    gender: str | None = None
+    sentence: str | None = None
+    text: JsonValue = None
+    value: str | None = None
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class AccountCategory(UpstreamModel):
+    """One account category, an entry of ``account/category/list.json`` (``account.md``).
+
+    A group of the chart of accounts; the groups nest by ``parent_id``. Its ``id`` is the
+    ``category_id`` an account carries and ``list_accounts`` takes. Typed from the tables
+    of ``account/category/create.json`` and ``update.json``: ``name`` (localised as
+    ``<values><de>...</de></values>``; the five top-level categories' plain,
+    ``Assets``), ``number`` (optional text, "Must be numeric", used for sorting: ``"1"``,
+    ``"10"``, ``"100"``; every recorded category has one) and ``parent_id`` (``None`` at
+    the top level). Typed from
+    observation on 2026-10-27 (CashCtrl's default chart, 38 categories): ``id``,
+    ``account_class`` (seen: ``ASSET``, ``LIABILITY``, ``EXPENSE``, ``REVENUE``,
+    ``BALANCE``, one per top-level category and inherited below it), ``full_name`` (the
+    number and the name, ``"1 Assets"``), ``system`` with its ``is_system`` twin (true
+    for the five top-level categories only) and the ``created*``/``last_updated*``
+    bookkeeping fields.
+
+    ``account/category/tree.json`` answers the same 38 categories nested, each child list
+    under ``data``, and its ``total`` counts the five top-level ones; it adds only
+    display fields (``text``, the name in one language; ``cls``; ``leaf``) and lacks
+    ``account_class`` and ``full_name`` (compared on 2026-10-27), so the flat list is
+    the one wrapped.
+    """
+
+    id: int
+    number: str | None = None
+    name: str
+    parent_id: int | None = Field(default=None, validation_alias="parentId")
+    account_class: str | None = Field(default=None, validation_alias="accountClass")
+    full_name: str | None = Field(default=None, validation_alias="fullName")
+    system: bool
+    is_system: bool = Field(validation_alias="isSystem")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class CostCenter(UpstreamModel):
+    """One cost center, an entry of ``account/costcenter/list.json`` (``docs/upstream/account.md``).
+
+    A cost center or cost unit amounts are allocated to: its ``id`` is the
+    ``to_cost_center_id`` of an allocation (``create_journal_entry``,
+    ``update_journal_entry``, the items of ``create_order``). Typed from the tables of
+    ``account/costcenter/create.json`` and ``update.json`` alone: the demo organisation
+    has no cost center, and ``account/costcenter/list.json`` answered ``{"total": 0,
+    "data": []}`` on 2026-10-27, so no record was observed. Every field but ``id`` is
+    therefore optional: ``name`` (localised), ``category_id``, ``notes`` (HTML),
+    ``is_inactive``, ``target_min`` and ``target_max``, and ``attachments``, documented
+    as a list of ``{fileId}`` and kept as sent, as ``Location``'s are. ``number`` is
+    documented as the account number is ("NUMBER", "Must be numeric but can contain a
+    decimal point"), which comes as text, and is kept as sent. The list documents
+    ``fiscalPeriodId``, "from which we retrieve the balances", so its records presumably
+    carry balances; never observed, they are not modelled. The ``created*`` and
+    ``last_updated*`` bookkeeping fields every other list sends are assumed here, not
+    observed.
+    """
+
+    id: int
+    number: JsonValue = None
+    name: str | None = None
+    category_id: int | None = Field(default=None, validation_alias="categoryId")
+    notes: str | None = None
+    is_inactive: bool | None = Field(default=None, validation_alias="isInactive")
+    target_min: Decimal | None = Field(default=None, validation_alias="targetMin")
+    target_max: Decimal | None = Field(default=None, validation_alias="targetMax")
+    attachments: list[JsonValue] = Field(default_factory=list)
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class _LocationFields(UpstreamModel):
+    """The fields of a ``location/list.json`` entry that ``LocationProjection`` keeps."""
+
+    id: int
+    name: str
+    type: str | None = None
+    org_name: str | None = Field(default=None, validation_alias="orgName")
+    address: str | None = None
+    street_name: str | None = Field(default=None, validation_alias="streetName")
+    street_number: str | None = Field(default=None, validation_alias="streetNumber")
+    zip: str | None = None
+    city: str | None = None
+    canton: str | None = None
+    country: str | None = None
+    full_address: str | None = Field(default=None, validation_alias="fullAddress")
+    full_address_csv: JsonValue = Field(default=None, validation_alias="fullAddressCsv")
+    email: str | None = None
+    phone_main: str | None = Field(default=None, validation_alias="phoneMain")
+    phone_salary_cert: str | None = Field(default=None, validation_alias="phoneSalaryCert")
+    url: str | None = None
+    vat_uid: str | None = Field(default=None, validation_alias="vatUid")
+    bur_nr: str | None = Field(default=None, validation_alias="burNr")
+    footer: str | None = None
+    logo_file_id: int | None = Field(default=None, validation_alias="logoFileId")
+    bank_account_id: int | None = Field(default=None, validation_alias="bankAccountId")
+    bic: JsonValue = None
+    qr_first_digits: JsonValue = Field(default=None, validation_alias="qrFirstDigits")
+    attachments: list[JsonValue] = Field(default_factory=list)
+    text: str | None = None
+    value: str | None = None
+    list_cls: str | None = Field(default=None, validation_alias="listCls")
+    inactive: bool
+    is_inactive: bool = Field(validation_alias="isInactive")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
+class Location(_LocationFields):
+    """One location, an entry of ``location/list.json`` (``docs/upstream/meta.md``).
+
+    A site of the organisation: its headquarters (``type`` ``MAIN``), a branch, a
+    storage site or another. Its ``id`` is what ``create_person`` and ``update_person``
+    take as ``location_id``, an employee's workplace. Typed from the tables of
+    ``location/create.json`` and ``update.json``: ``name`` (for identification only, not
+    used in an address), ``type`` (``MAIN``, ``BRANCH``, ``STORAGE``, ``OTHER``; a
+    string), ``org_name`` (the company name), ``address``, ``zip``, ``city``, ``canton``,
+    ``country`` (ISO 3166 alpha-3, ``CHE``), ``email``, ``phone_main``,
+    ``phone_salary_cert``, ``url``, ``vat_uid``, ``bur_nr``, ``footer`` (HTML),
+    ``logo_file_id``, ``bank_account_id`` and ``is_inactive``. Typed from observation on
+    2026-10-27 (the demo organisation's one location, created by hand with placeholder
+    data, ``docs/demo-org.md``): ``id``, ``street_name`` and ``street_number``
+    (``address`` split), ``full_address`` (the company name and the address as printed,
+    a line each), ``text`` (the name) and ``value`` (the id as text),
+    ``list_cls``, ``attachments`` (only seen empty, kept as sent), the twin ``inactive``
+    and the ``created*``/``last_updated*`` bookkeeping fields. Only seen ``null`` and
+    kept as sent: ``full_address_csv``, ``qr_first_digits``, ``bic``, ``iban`` and
+    ``qr_iban``. No table documents the last three: the documented link to the bank is
+    ``bank_account_id``.
+
+    This read model stays faithful; ``list_locations`` returns ``LocationProjection``,
+    which leaves out ``iban`` and ``qr_iban`` (ADR-0017).
+    """
+
+    iban: JsonValue = None
+    qr_iban: JsonValue = Field(default=None, validation_alias="qrIban")
+
+
+class LocationProjection(_LocationFields):
+    """A ``location/list.json`` entry without ``iban`` and ``qr_iban``, the bank account numbers.
+
+    What ``list_locations`` returns (ADR-0017): every field of ``Location`` but those two,
+    under the same names; ``bank_account_id`` names the bank account instead.
+    """
+
+
+class ReportTreeNode(UpstreamModel):
+    """One node of ``report/tree.json``, a report collection or a report element.
+
+    ``docs/upstream/report.md``: "A report collection is a collection of report elements
+    which are grouped together and form one document"; "A report element is the actual
+    report, for example the balance sheet or profit and loss statement." The answer is
+    ``{"total": ..., "data": [...]}``, ``total`` counting the top-level nodes. The
+    documentation describes no field; typed from observation on 2026-10-27 (CashCtrl's
+    default reports: six collections and two elements at the top level, 44 nodes, every
+    field but ``data`` on every node).
+
+    ``id`` is the tree's own text key (``collection-1``, ``element-1``), which no other
+    operation takes. An element is a ``leaf`` with ``element_id``, the ``element_id`` of
+    ``get_report_data``, and its report ``type`` (``BALANCE``, ``PLS``,
+    ``OPEN_DEBTORS``, ...: the types of ``report/element/create.json``, a string),
+    ``type_name`` and ``xclass``; a collection has ``element_id``, ``type``,
+    ``type_name`` and ``xclass`` ``None`` and its elements in ``data``. Both carry
+    ``collection_id`` (``None`` for an element outside a collection), ``text`` (the name,
+    seen in German and in English), ``set_id``, ``expanded``, ``cls``, ``qtip`` and the
+    flags ``system``, ``pro`` and ``beta`` with their ``is_*`` twins.
+    """
+
+    id: str
+    text: str | None = None
+    type: str | None = None
+    type_name: str | None = Field(default=None, validation_alias="typeName")
+    element_id: int | None = Field(default=None, validation_alias="elementId")
+    collection_id: int | None = Field(default=None, validation_alias="collectionId")
+    set_id: int | None = Field(default=None, validation_alias="setId")
+    xclass: str | None = None
+    qtip: str | None = None
+    cls: str | None = None
+    leaf: bool
+    expanded: bool
+    system: bool
+    is_system: bool = Field(validation_alias="isSystem")
+    pro: bool
+    is_pro: bool = Field(validation_alias="isPro")
+    beta: bool
+    is_beta: bool = Field(validation_alias="isBeta")
+    data: list["ReportTreeNode"] = Field(default_factory=list)
+
+
+class ReportData(UpstreamModel):
+    """The answer of ``report/element/data.json``: one report's data for a period.
+
+    ``docs/upstream/report.md``, "Read JSON data": "Returns the JSON data of a single
+    element by ID for the given time period." The documentation gives no schema, and
+    the rows differ by report type (``report/element/create.json`` lists 41), so ``data``
+    and ``properties`` are kept as upstream sends them (``JsonValue``; decided by
+    Johannes on 2026-10-27, ADR-0003): rows under upstream's camelCase names
+    (``endAmount``), amounts as JSON numbers, not ``Decimal``.
+
+    Observed on 2026-10-27 for the balance sheet (``BALANCE``) of fiscal period 2025:
+    ``{"total": 2, "data": [...], "properties": {"columns": [...]}}``. ``total`` counts
+    the top-level rows (assets, liabilities and equity). Each row is a node with its
+    child rows in ``data``: ``text`` (the label, ``1020 Bank account``), ``level``,
+    ``leaf``, ``accountId`` (an account's id, ``null`` on a category or a total),
+    ``cls`` (``category level-0``, ``account level-3``, ``total level-3``), the amounts
+    (``openingAmount``, ``endAmount``, ``previousAmount``, ``changeAmount``, ... and
+    their ``dc*`` twins) and the flags ``isTotal`` and ``isForeignCurrency``; a
+    category's total is a row of its own. ``properties.columns`` lists the columns the
+    report shows, each with its ``title`` (``01/01/2025``) and ``dataIndex``, the row
+    field it shows (``dcOpeningAmount``).
+
+    The envelope, ``total`` a number and ``data`` a list, was observed for ``BALANCE``
+    alone and is assumed for every report type: an answer of another shape (a chart
+    without a ``total``, ``data`` as an object) fails to parse with ``ValidationError``
+    instead of being returned misread. Neither the answer nor the request names the
+    report's type.
+    """
+
+    total: int
+    data: list[JsonValue]
+    properties: JsonValue = None
 
 
 # The write tools' payloads (``tasks_write.py``) and their outcomes.

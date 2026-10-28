@@ -162,7 +162,8 @@ src/xippios/cashctrl/
                    projections tasks return without ssn and iban (ADR-0017)
   api/             endpoint wrappers, one module per upstream operation; _form.py encodes and posts writes
   tasks.py         task functions and list_organisations; __all__ is what the adapters register,
-                   MCP_CAPS any per-tool result caps (none)
+                   MCP_CAPS the per-tool result caps (list_custom_fields, list_cost_centers,
+                   get_report_data)
   tasks_write.py   confirm-gated write tasks for the separate write server (Write tools below)
   mcp_write.py     xippios-cashctrl-mcp-write entry point
   mcp.py           xippios-cashctrl-mcp entry point
@@ -231,7 +232,9 @@ Run `/add-endpoint <upstream operation>`. In short:
    `xippios.core.testing.mcp_call` (and compares what was sent through
    `sent_urls(route)` or `sent_query(route)` with `recorded_query(fixture)`, never a
    request from `route.calls`), a case in `TOOL_CASES` (which
-   checks `meta.tenant` and snake_case keys for every tool), a live smoke test in
+   checks `meta.tenant` and snake_case keys for every tool; a tool whose recorded
+   answer is empty goes into `UNOBSERVED`, whose models' field names are checked
+   instead, and a field kept as upstream sends it into `AS_SENT`), a live smoke test in
    `test_live.py` that takes the `demo_org` fixture.
 7. `CHANGELOG.md` under Unreleased, README status table (the task's name first in its
    cell, in backticks, as the family check reads it), then the full check suite.
@@ -242,8 +245,9 @@ for the page at `start` (default 0); `limit` omitted collects every page from `s
 through core's `paginate_offset`, `PAGE_SIZE` (100, upstream's documented default) a
 request. `meta.total` is upstream's `total` on every list task, never `len(data)`.
 
-Lookups (accounts, currencies, tax codes, fiscal periods) are tasks too, named
-`list_<thing>`, so agents can form valid calls; they serve the organisation's own data
+Lookups (accounts, currencies, tax codes, fiscal periods, account and person categories,
+titles, cost centers, locations, custom fields) are tasks too, named `list_<thing>`, so
+agents can form valid calls; they serve the organisation's own data
 live and are never packaged: a multi-tenant source packages no tenant data. Nor does the
 package ship a value set `docs/upstream/` fixes, since no task needs one yet, so the
 reference-data scaffolding (`params.py`, `enums.py`, `reference/`,
@@ -252,10 +256,18 @@ comes back from the `render_enums` port deleted here, not from template v0.2.2's
 scaffold, whose script needs renderers core 0.3.0 removed (`/refresh-reference-data` says
 where). A lookup whose whole list an agent needs and the default result cap (200 rows or
 64 KB) would cut gets a cap of its own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes
-through (ADR-0016); none has one, since each list takes filters or pages and no list must
-reach an agent whole. A task-shaped function that returns a subset of an upstream record
-builds its model with `UpstreamModel.project`; nothing is renamed or computed, parsing a
-value (`parse_decimal`) is the only override.
+through (ADR-0016): `list_custom_fields` (500 rows or 128 KB; no filter but `type`, and
+a write needs a type's custom fields whole) and `get_report_data` (128 KB; a report is
+read whole, and its result, no list, is cut to a note and a preview);
+`list_cost_centers` keeps the default bound with a note naming its filters. Every other
+list takes filters or pages, or is short. Where the documentation gives no schema and
+the shape differs by kind, as the rows of `report/element/data.json` differ by report
+type, the task returns upstream's JSON as sent (`JsonValue`, camelCase keys included)
+and says so in its docstring (decided by Johannes on 2026-10-27); `AS_SENT` in
+`tests/test_tasks.py` names those fields for the snake_case check. A task-shaped
+function that returns a subset of an upstream record builds its model with
+`UpstreamModel.project`; nothing is renamed or computed, parsing a value
+(`parse_decimal`) is the only override.
 Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
@@ -347,21 +359,39 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
 
 CashCtrl documents two personal identifiers, a person's `ssn` ("Social security number
 of the employee") and the `iban` of each of a person's `bankAccounts` (the list sends an
-`iban` of its own). Decided by Johannes on 2026-10-25: exactly these two.
+`iban` of its own). The rule is `ssn` and `iban` wherever it appears: a person's
+`bankAccounts[].iban` and the organisation's locations' `iban` and `qrIban` alike, kept
+out of every projection a task returns and dropped from the raw report rows
+`get_report_data` returns. Johannes decided the two identifiers on
+2026-10-25; the session decided on 2026-10-27 that `iban` covers the organisation's own
+bank account numbers too, as ADR-0017's "bank account number", and gap row 123 queues the
+question against sdk-core for Johannes to confirm or overturn. The recorder rewrites any
+value under `iban` in a body to `REDACTED`, so a projection that kept one could never be
+replay-tested with a real value.
 
 - The endpoint wrappers' read models stay faithful and carry them (`Person`,
-  `PersonDetail`, `JournalEntryDetail.associates`; ADR-0003).
+  `PersonDetail`, `JournalEntryDetail.associates`, `Location`; ADR-0003).
 - The tasks return projections without them, built with `UpstreamModel.project` in
   `tasks.py`: `PersonProjection` (`list_persons`), `PersonDetailProjection`
   (`get_person`; each bank account kept without its `iban`, which the projection's own
-  validator drops) and `JournalEntryDetailProjection` (`get_journal_entry`, its
-  `associates` projected). A write preview's `before` is the same projection.
+  validator drops), `JournalEntryDetailProjection` (`get_journal_entry`, its
+  `associates` projected) and `LocationProjection` (`list_locations`, without `iban` and
+  `qr_iban`, both undocumented and only seen `null`). A write preview's `before` is the
+  same projection.
 - `create_person` and `update_person` take `ssn` and, in `bank_accounts`, `iban`, and
   send them as given; a preview's `payload` and `changes` and a performed write's
   `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
   as empty.
-- Fixtures never carry their values: the recorder rewrites both to `REDACTED` by name,
-  and its final check refuses any other value (How to record a fixture).
+- Fixtures never carry their values: the recorder rewrites an `ssn` or `iban` value to
+  `REDACTED` by name, and its final check refuses only a value that survives the rewrite
+  (How to record a fixture). It does nothing for a location's `qrIban` yet, a compound
+  name (PR 4 adds it); the recorded location holds `null`.
+- `get_report_data` returns a report's rows as upstream sends them and drops every key
+  named `ssn`, `iban` or `qrIban` from them and from `properties`, in any letter case
+  and at any depth (`_report`; ADR-0003, amendment 2026-10-26). Payroll and people
+  reports carry other personal data under names the documentation does not give, which
+  passes; their type cannot be told from the answer without a second request, so they
+  are not refused, though the salary module is outside this package.
 - A task that fetches them deliberately may return them and says so in its docstring;
   none does.
 

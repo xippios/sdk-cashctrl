@@ -24,8 +24,11 @@ stay empty. Every list task sets ``meta.total`` to upstream's ``total``, its cou
 records matching the request (ADR-0012); it is never computed from ``len(data)``.
 
 The persons a task returns are projections without the personal identifiers ``ssn`` and
-``iban`` (ADR-0017, ``_person`` and its neighbours); the endpoint wrappers' read models
-keep them.
+``iban`` (ADR-0017, ``_person`` and its neighbours), the locations projections without
+their bank account numbers ``iban`` and ``qr_iban`` (``_location``), and the rows of a
+report, kept as upstream sends them, lose every key named ``ssn``, ``iban`` or
+``qrIban`` in any letter case and at any depth (``_report``); the endpoint wrappers' read
+models keep them.
 
 The journal, person and order lists page by offset (``start``, ``limit``), resolved once
 in ``_offset_pages`` (conventions §4). With ``limit`` the task sends one request,
@@ -42,13 +45,15 @@ collect the same records again.
 """
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from datetime import date, datetime
 from typing import Any, TypeGuard, get_args
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from pydantic_core import ErrorDetails
 from xippios.core import (
     InvalidRequestError,
     Result,
+    ResultCap,
     ResultMeta,
     collect,
     paginate_offset,
@@ -60,9 +65,13 @@ from xippios.cashctrl._client import SOURCE, TENANTS
 from xippios.cashctrl._tenants import list_task
 from xippios.cashctrl.models import (
     Account,
+    AccountCategory,
     AccountDetail,
     Comparison,
+    CostCenter,
     Currency,
+    CustomField,
+    CustomFieldType,
     Direction,
     Filter,
     FiscalPeriod,
@@ -70,14 +79,20 @@ from xippios.cashctrl.models import (
     JournalEntryDetail,
     JournalEntryDetailProjection,
     ListResponse,
+    Location,
+    LocationProjection,
     Order,
     OrderCategory,
     OrderDetail,
     OrderType,
     Person,
+    PersonCategory,
     PersonDetail,
     PersonDetailProjection,
     PersonProjection,
+    PersonTitle,
+    ReportData,
+    ReportTreeNode,
     TaxCode,
 )
 
@@ -86,16 +101,54 @@ __all__ = [
     "get_journal_entry",
     "get_order",
     "get_person",
+    "get_report_data",
+    "get_report_tree",
+    "list_account_categories",
     "list_accounts",
+    "list_cost_centers",
     "list_currencies",
+    "list_custom_fields",
     "list_fiscal_periods",
     "list_journal_entries",
+    "list_locations",
     "list_order_categories",
     "list_orders",
     "list_organisations",
+    "list_person_categories",
+    "list_person_titles",
     "list_persons",
     "list_tax_codes",
 ]
+
+MCP_CAPS: Mapping[str, ResultCap] = {
+    "get_report_data": ResultCap(
+        max_bytes=131_072,
+        note=(
+            "narrow the period (fiscal_period, or start_date and end_date) or read a "
+            "smaller report of get_report_tree to see the rest"
+        ),
+    ),
+    "list_cost_centers": ResultCap(
+        note="narrow the list with query, filter, category_id or only_active to see the rest"
+    ),
+    "list_custom_fields": ResultCap(
+        max_rows=500,
+        max_bytes=131_072,
+        note="the list is every custom field of the type and cannot be narrowed further",
+    ),
+}
+"""Per-tool MCP result caps (ADR-0016), which ``mcp.py`` passes to ``build_server``.
+
+Every other tool keeps the family default, 200 rows or 64 KB. ``list_custom_fields`` has
+no filter or paging beyond its ``type`` and a write needs a type's custom fields whole
+(``customField<id>``), so its bound is raised to 500 rows or 128 KB. A report is read
+whole: ``get_report_data``'s result is no list, so the cap replaces one over its bound
+with a note and a preview. The demo organisation's balance sheet of 2025, 25 rows with
+its totals, is about 17 KB, some 650 bytes a row, so 64 KB holds a report of about 100
+rows and 128 KB one of about 200; the note names the period parameters (a raised bound
+for a tool that is no reference list: row 127). ``list_cost_centers`` keeps the default
+bound and names its filters.
+"""
 
 DIRECTIONS: tuple[str, ...] = get_args(Direction)
 """The values of ``dir`` on every list that documents it: ``ASC``, ``DESC``."""
@@ -103,6 +156,8 @@ COMPARISONS: tuple[str, ...] = get_args(Comparison)
 """The values of ``comparison`` in a ``filter`` item: ``eq``, ``like``, ``gt``, ``lt``."""
 ORDER_TYPES: tuple[str, ...] = get_args(OrderType)
 """The values of ``type`` on ``order/list.json`` and ``order/category/list.json``."""
+CUSTOM_FIELD_TYPES: tuple[str, ...] = get_args(CustomFieldType)
+"""The values of ``type`` on ``customfield/list.json``, the modules: ``JOURNAL``, ``PERSON``, ..."""
 PAGE_SIZE = 100
 """Records per request when a list task collects every page.
 
@@ -342,9 +397,8 @@ async def list_accounts_async(
     ``category_id``, ``currency_code``, ``is_inactive`` and its balances for one fiscal
     period: ``opening_amount`` and ``end_amount`` in the account's currency,
     ``default_currency_opening_amount`` and ``default_currency_end_amount`` in the default
-    currency. Without parameters every account is listed, and a large chart of accounts
-    exceeds the MCP result cap (200 rows or 64 KB): the tool result is then truncated
-    with a note, so narrow the list with ``query``, ``filter`` or ``only_active``.
+    currency. Without parameters every account is listed; narrow a large chart of
+    accounts with ``query``, ``filter`` or ``only_active``.
     Upstream ignores values it does not understand, so ``dir`` and the filters'
     ``comparison`` are checked first and a wrong one is refused.
 
@@ -440,10 +494,9 @@ async def list_journal_entries_async(
     Paging: with ``limit``, one page of at most ``limit`` entries from ``start``; without
     it, every matching entry from ``start`` on. ``meta.total`` is upstream's count of all
     matching entries. The next page starts at ``start`` plus the number of records
-    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
-    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
-    (about 20): collecting a large journal costs about 1 s per 100 entries and still
-    ends at the cap. Offset pages over a list that changes meanwhile can repeat or skip
+    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
+    should always pass ``limit`` (about 20): collecting a large journal costs about 1 s
+    per 100 entries. Offset pages over a list that changes meanwhile can repeat or skip
     entries: an entry added or removed shifts every later page by one.
 
     Upstream ignores values it does not understand, so ``dir`` and the filters'
@@ -564,10 +617,9 @@ async def list_persons_async(
     Paging: with ``limit``, one page of at most ``limit`` persons from ``start``; without
     it, every matching person from ``start`` on. ``meta.total`` is upstream's count of
     all matching persons. The next page starts at ``start`` plus the number of records
-    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
-    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
-    (about 20): collecting many persons costs about 1 s per 100 and still ends at the
-    cap. Offset pages over a list that changes meanwhile can repeat or skip persons: a
+    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
+    should always pass ``limit`` (about 20): collecting many persons costs about 1 s per
+    100. Offset pages over a list that changes meanwhile can repeat or skip persons: a
     person added or removed shifts every later page by one.
 
     Upstream ignores values it does not understand, so ``dir`` and the filters'
@@ -686,10 +738,9 @@ async def list_orders_async(
     Paging: with ``limit``, one page of at most ``limit`` orders from ``start``; without
     it, every matching order from ``start`` on. ``meta.total`` is upstream's count of all
     matching orders. The next page starts at ``start`` plus the number of records
-    received; over MCP the result cap (200 rows or 64 KB) may return fewer than
-    ``limit``, so never advance by ``limit``. MCP agents should always pass ``limit``
-    (about 20): collecting many orders costs about 1 s per 100 and still ends at the
-    cap. Offset pages over a list that changes meanwhile can repeat or skip orders: an
+    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
+    should always pass ``limit`` (about 20): collecting many orders costs about 1 s per
+    100. Offset pages over a list that changes meanwhile can repeat or skip orders: an
     order added or removed shifts every later page by one.
 
     Upstream ignores values it does not understand, so ``type``, ``dir`` and the
@@ -806,6 +857,326 @@ async def list_order_categories_async(
     return Result(data=response.data, meta=meta)
 
 
+async def list_custom_fields_async(org: str, type: CustomFieldType) -> Result[list[CustomField]]:
+    """List an organisation's custom fields of one module, the fields it added to its records.
+
+    Every custom field of ``type`` comes back with its ``id``, its ``data_type``
+    (``TEXT``, ``TEXTAREA``, ``CHECKBOX``, ``DATE``, ``COMBOBOX``, ``NUMBER``, ``ACCOUNT``
+    or ``PERSON``), the labels it is shown with (``row_label``, ``field_label``,
+    localised as ``<values><de>...</de></values>``), ``is_inactive``, ``is_multi`` and,
+    for a ``COMBOBOX``, the ``values`` to choose from. A write tool sets a custom field
+    as ``customField<id>`` in its ``custom`` mapping, e.g. ``{"customField3": "Projekt
+    A"}``: ``JOURNAL`` for ``create_journal_entry``, ``PERSON`` for ``create_person``,
+    ``ORDER`` for ``create_order``. ``meta.total`` is upstream's count. ``type`` is
+    checked first, and a value outside the documented set is refused.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        type: The module whose custom fields to list: ``JOURNAL``, ``ACCOUNT``,
+            ``INVENTORY_ARTICLE``, ``INVENTORY_ASSET``, ``ORDER``, ``PERSON``, ``FILE`` or
+            ``SALARY_STATEMENT``, e.g. ``PERSON``.
+    """
+    if type not in CUSTOM_FIELD_TYPES:
+        allowed = ", ".join(CUSTOM_FIELD_TYPES)
+        raise InvalidRequestError(f"type must be one of {allowed}, not {type!r}", source=SOURCE)
+    response = await api.customfield_list(org, type)
+    sent = api.customfield_list_params(type)
+    meta = _meta(org, "customfield/list.json", sent, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
+async def list_person_categories_async(org: str) -> Result[list[PersonCategory]]:
+    """List an organisation's person categories, the groups its persons are filed in.
+
+    Every category comes back with its ``id`` (the ``category_id`` of ``list_persons``,
+    ``create_person`` and ``update_person``), its ``name`` (localised,
+    ``<values><de>Kunden</de><en>Customers</en>...</values>``), ``parent_id`` (``None``
+    at the top level), ``sequence_nr_id`` (the sequence that numbers its persons) and
+    ``discount_percentage``. CashCtrl creates four in a new organisation: customers,
+    vendors, employees and insurances.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+    """
+    response = await api.person_category_list(org)
+    meta = _meta(org, "person/category/list.json", {}, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
+async def list_person_titles_async(org: str) -> Result[list[PersonTitle]]:
+    """List an organisation's titles, the forms of address a person can be given.
+
+    Every title comes back with its ``id`` (the ``title_id`` of ``create_person`` and
+    ``update_person``), its ``name`` (localised, ``<values><de>Herr</de><en>Mr.</en>
+    ...</values>``), ``gender`` (``MALE``, ``FEMALE`` or empty) and ``sentence``, the
+    letter salutation (``<values><de>Sehr geehrter Herr</de>...</values>``).
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+    """
+    response = await api.person_title_list(org)
+    meta = _meta(org, "person/title/list.json", {}, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
+async def list_account_categories_async(org: str) -> Result[list[AccountCategory]]:
+    """List an organisation's account categories, the groups of its chart of accounts.
+
+    Every category comes back flat, with its ``id`` (the ``category_id`` an account
+    carries and ``list_accounts`` takes), ``number`` (``"1"``, ``"10"``, ``"100"``, as
+    text), ``name`` (localised as ``<values><de>...</de></values>``, plain for the five
+    top-level categories), ``full_name`` (number and name), ``account_class``
+    (``ASSET``, ``LIABILITY``, ``EXPENSE``, ``REVENUE`` or ``BALANCE``) and
+    ``parent_id``, the category it belongs to: ``None`` for the five top-level ones,
+    which are ``is_system``. The ``parent_id`` links are the hierarchy.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+    """
+    response = await api.account_category_list(org)
+    meta = _meta(org, "account/category/list.json", {}, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
+async def list_cost_centers_async(
+    org: str,
+    *,
+    query: str | None = None,
+    filter: list[Filter] | None = None,
+    category_id: int | None = None,
+    only_active: bool = False,
+    only_notes: bool = False,
+    sort: str | None = None,
+    dir: Direction | None = None,
+) -> Result[list[CostCenter]]:
+    """List an organisation's cost centers, the units amounts can be allocated to.
+
+    Every matching cost center comes back with its ``id`` (the ``to_cost_center_id`` of
+    an allocation in ``create_journal_entry``, ``update_journal_entry`` and the items of
+    ``create_order``), ``number``, ``name`` (localised), ``category_id``,
+    ``is_inactive``, ``notes`` and its targets ``target_min`` and ``target_max``. No
+    cost center has been observed yet (the demo organisation has none), so balances the
+    list may carry are not returned. ``meta.total`` is upstream's count. Upstream ignores
+    values it does not understand, so ``dir`` and the filters' ``comparison`` are checked
+    first and a wrong one is refused.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        query: Full-text search, e.g. ``"Projekt"``.
+        filter: Filters that must all match, each with ``comparison`` (``eq``, ``like``,
+            ``gt`` or ``lt``; ``like`` when left out), ``field`` (a column of the list,
+            e.g. ``number``) and ``value`` (a text, or a list of texts of which any may
+            match), e.g. ``[{"comparison": "eq", "field": "number", "value": "100"}]``.
+        category_id: Only the cost centers of one cost center category, e.g. ``1``.
+        only_active: ``true`` to leave out inactive cost centers.
+        only_notes: ``true`` to list only cost centers with notes.
+        sort: The column to sort by, e.g. ``number`` (upstream's default) or ``name``.
+        dir: ``ASC`` (upstream's default) or ``DESC``.
+    """
+    filters = _check_list_arguments(dir=dir, filter=filter, texts={"query": query, "sort": sort})
+    arguments: dict[str, Any] = {
+        "category_id": category_id,
+        "dir": dir,
+        "filter": filters,
+        "only_active": only_active or None,
+        "only_notes": only_notes or None,
+        "query": query,
+        "sort": sort,
+    }
+    sent = api.account_costcenter_list_params(**arguments)
+    response = await api.account_costcenter_list(org, **arguments)
+    meta = _meta(org, "account/costcenter/list.json", sent, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
+def _location(location: Location) -> LocationProjection:
+    """A ``location/list.json`` entry without ``iban`` and ``qr_iban`` (ADR-0017)."""
+    return LocationProjection.project(location)
+
+
+async def list_locations_async(org: str) -> Result[list[LocationProjection]]:
+    """List an organisation's locations: its headquarters, branches and other sites.
+
+    Every location comes back with its ``id`` (the ``location_id`` of ``create_person``
+    and ``update_person``, an employee's workplace), ``name``, ``type`` (``MAIN`` for
+    the headquarters, ``BRANCH``, ``STORAGE`` or ``OTHER``), the company name
+    ``org_name``, the address (``address``, ``zip``, ``city``, ``canton``, ``country``,
+    and ``full_address`` as printed), the contacts (``email``, ``phone_main``, ``url``),
+    ``vat_uid``, ``bur_nr``, ``bank_account_id`` and ``is_inactive``. The bank account
+    numbers ``iban`` and ``qr_iban`` are left out.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+    """
+    response = await api.location_list(org)
+    meta = _meta(org, "location/list.json", {}, total=response.total)
+    return Result(data=[_location(location) for location in response.data], meta=meta)
+
+
+async def get_report_tree_async(org: str) -> Result[list[ReportTreeNode]]:
+    """Get an organisation's report tree: its report collections and the reports in them.
+
+    Every top-level node comes back with its children in ``data``. A collection
+    (``Jahresbericht``, ``Mehrwertsteuer``, ...) holds report elements; an element, a
+    ``leaf``, is one report: its ``element_id`` is the ``element_id`` of
+    ``get_report_data``, its ``type`` the kind of report (``BALANCE`` for the balance
+    sheet, ``PLS`` for profit and loss, ``OPEN_DEBTORS``, ``VAT_SETTLEMENT``, ...) and
+    its ``text`` its name. ``id`` is the tree's own key (``element-1``), not an id other
+    tools take. ``meta.total`` is upstream's count of the top-level nodes, not of every
+    report.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+    """
+    response = await api.report_tree(org)
+    meta = _meta(org, "report/tree.json", {}, total=response.total)
+    return Result(data=response.data, meta=meta)
+
+
+_IDENTIFIER_KEYS = frozenset({"ssn", "iban", "qriban"})
+"""Keys dropped from a report's raw rows, compared in lower case (ADR-0017, row 123)."""
+
+
+def _without_identifiers(value: JsonValue) -> JsonValue:
+    """``value`` without a key named ``ssn``, ``iban`` or ``qrIban``, in any case, at any depth."""
+    if isinstance(value, dict):
+        return {
+            key: _without_identifiers(item)
+            for key, item in value.items()
+            if key.lower() not in _IDENTIFIER_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_identifiers(item) for item in value]
+    return value
+
+
+def _report(report: ReportData) -> ReportData:
+    """``report`` without the identifier keys in its rows and ``properties`` (ADR-0017).
+
+    The rows stay upstream's JSON (``JsonValue``); dropping a nested identifier is the
+    projection rule's parsing only (ADR-0003, amendment 2026-10-26).
+    """
+    return ReportData.project(
+        report,
+        data=[_without_identifiers(row) for row in report.data],
+        properties=_without_identifiers(report.properties),
+    )
+
+
+def _check_report_arguments(
+    *,
+    element_id: object,
+    fiscal_period: object,
+    start_date: object,
+    end_date: object,
+    language: object,
+    sort: object,
+) -> None:
+    """Refuse a ``get_report_data`` call upstream would answer for another period (ADR-0007).
+
+    ``docs/upstream/report.md``, "Read JSON data": ``fiscalPeriod`` "overrides the
+    ``startDate`` and ``endDate`` parameter, as these are derived from the fiscal
+    period", so upstream would silently ignore dates given with it: the two forms are
+    refused together. The rest is for Python callers, whose arguments nothing else
+    validates (the MCP and HTTP adapters refuse a wrong type before the task runs): the
+    ids are whole numbers, the dates ``date`` objects (not a ``datetime``, whose text
+    would carry a time), ``language`` and ``sort`` strings. Whether one date may be
+    given without the other, and what a start after the end answers, is not documented,
+    so neither is checked.
+
+    Raises:
+        InvalidRequestError: Naming every problem found.
+    """
+    problems: list[str] = []
+    if not _whole(element_id):
+        problems.append(f"element_id must be a whole number, not {element_id!r}")
+    if fiscal_period is not None and not _whole(fiscal_period):
+        problems.append(f"fiscal_period must be a whole number, not {fiscal_period!r}")
+    for name, value in (("start_date", start_date), ("end_date", end_date)):
+        if value is not None and (not isinstance(value, date) or isinstance(value, datetime)):
+            problems.append(f"{name} must be a date (YYYY-MM-DD), not {type(value).__name__}")
+    for name, value in (("language", language), ("sort", sort)):
+        if value is not None and not isinstance(value, str):
+            problems.append(f"{name} must be a string, not {type(value).__name__}")
+    if fiscal_period is not None and (start_date is not None or end_date is not None):
+        problems.append(
+            "give fiscal_period or start_date and end_date, not both: upstream derives "
+            "the dates from the fiscal period and would ignore the ones given"
+        )
+    if problems:
+        raise InvalidRequestError("; ".join(problems), source=SOURCE)
+
+
+async def get_report_data_async(
+    org: str,
+    element_id: int,
+    *,
+    fiscal_period: int | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    language: str | None = None,
+    sort: str | None = None,
+) -> Result[ReportData]:
+    """Read one report's data for a period, such as a balance sheet or a profit and loss.
+
+    The report is the element ``element_id`` of ``get_report_tree``, for the fiscal
+    period ``fiscal_period`` or for ``start_date`` to ``end_date``; passing the fiscal
+    period and a date is refused before anything is sent, since upstream derives the
+    dates from the period and would ignore the ones given. Pass one of the two for a
+    reproducible answer: which period upstream uses without either is not documented.
+
+    The data comes back as upstream sends it, since the documentation gives no schema
+    and the rows differ by report type: ``data``, the rows, each with its child rows in
+    ``data`` (a balance sheet's are categories and accounts, with ``text``,
+    ``accountId`` and the amounts ``openingAmount``, ``endAmount`` and more; a total is
+    a row of its own); ``properties``, among them the ``columns`` the report shows (each
+    a ``title`` and the row field it shows, ``dataIndex``); and ``total``, upstream's
+    count of the top-level rows, which ``meta.total`` repeats. Rows keep upstream's
+    camelCase names, and amounts are JSON numbers.
+
+    Payroll and people reports (``SALARY_LIST``, ``SETTLEMENT``,
+    ``WITHHOLDING_TAX_SETTLEMENT``, ``REVENUE_BY_PERSON``, ``OPEN_DEBTORS``, ...) carry
+    personal data under names the documentation does not give. Every key named ``ssn``,
+    ``iban`` or ``qrIban``, in any letter case and at any depth, is dropped before the
+    data comes back; nothing else is. The salary module is outside what this package
+    covers, but its reports are not refused: the answer does not say which type of
+    report it is.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        element_id: The report, an ``element_id`` from ``get_report_tree``, e.g. ``1``.
+        fiscal_period: The fiscal period, an ``id`` from ``list_fiscal_periods``, e.g.
+            ``2``; not together with ``start_date`` or ``end_date``.
+        start_date: The first day of the report period, ``YYYY-MM-DD``, e.g.
+            ``2025-01-01``.
+        end_date: The last day of the report period, ``YYYY-MM-DD``, e.g.
+            ``2025-12-31``.
+        language: The language of the report, e.g. ``en``; upstream lists no values,
+            and the language codes ``de``, ``fr``, ``it`` and ``en`` are assumed.
+        sort: The column to sort the rows by, a ``dataIndex`` of
+            ``properties.columns``, e.g. ``text``.
+    """
+    _check_report_arguments(
+        element_id=element_id,
+        fiscal_period=fiscal_period,
+        start_date=start_date,
+        end_date=end_date,
+        language=language,
+        sort=sort,
+    )
+    arguments: dict[str, Any] = {
+        "end_date": end_date,
+        "fiscal_period": fiscal_period,
+        "language": language,
+        "sort": sort,
+        "start_date": start_date,
+    }
+    sent = api.report_element_data_params(element_id, **arguments)
+    report = _report(await api.report_element_data(org, element_id, **arguments))
+    meta = _meta(org, "report/element/data.json", sent, total=report.total)
+    return Result(data=report, meta=meta)
+
+
 LIST_ORGANISATIONS_DOC = """List the organisations this server can reach, by name.
 
 On a server that serves every declared organisation, every other tool takes one of these
@@ -830,3 +1201,11 @@ get_person = sync(get_person_async)
 list_orders = sync(list_orders_async)
 get_order = sync(get_order_async)
 list_order_categories = sync(list_order_categories_async)
+list_custom_fields = sync(list_custom_fields_async)
+list_person_categories = sync(list_person_categories_async)
+list_person_titles = sync(list_person_titles_async)
+list_account_categories = sync(list_account_categories_async)
+list_cost_centers = sync(list_cost_centers_async)
+list_locations = sync(list_locations_async)
+get_report_tree = sync(get_report_tree_async)
+get_report_data = sync(get_report_data_async)
