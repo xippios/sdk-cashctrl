@@ -18,12 +18,12 @@ https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md.
    `Field(alias=...)`: the adapters serialise by alias, so `alias=` would hand agents
    upstream camelCase rows while tool arguments are snake_case. With `validation_alias`
    the upstream spelling is accepted on input and every output surface stays snake_case.
-   Dates become `datetime.date`/`datetime`, numbers become `int`/`Decimal`/`float`,
-   upstream enumerations become `StrEnum`, an enumeration of integer ids `IntEnum`
-   (conventions §3). No renaming to match another source. A value set upstream
-   documents, written by hand, lives here too, as a `Literal` type (`Direction`,
-   `OrderType`), so the tool schemas list it: cashctrl generates no `enums.py`
-   (`/refresh-reference-data`).
+   Dates become `datetime.date`/`datetime`, numbers become `int`/`Decimal`/`float`;
+   an upstream enumeration generated into `enums.py` would become a `StrEnum`, an
+   enumeration of integer ids an `IntEnum` (conventions §3). No renaming to match
+   another source. cashctrl generates no `enums.py` (`/refresh-reference-data`): a value
+   set upstream documents, written by hand, lives here, as a `Literal` type
+   (`Direction`, `OrderType`), so the tool schemas list it.
 
    For a write operation (a `create.json`, `update.json` or `delete.json`; add its path
    to the recorder's `WRITE_PATHS` deliberately), follow the
@@ -79,7 +79,7 @@ https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md.
 
 7. **Docs.** `CHANGELOG.md` under Unreleased; the README status table gets a row
    (upstream operation, task function, MCP tool name `cashctrl_<task>`, status),
-   the task's name first in its cell, in backticks, as the comment above the table says.
+   the task's name first in its cell, in backticks, as the family check reads it.
 
 8. **Checks**, all of them:
    `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest && uv run pre-commit run --all-files`.
