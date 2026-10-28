@@ -300,9 +300,10 @@ replay-tested with a real value.
   `tasks.py`: `PersonProjection` (`list_persons`), `PersonDetailProjection`
   (`get_person`; each bank account kept without its `iban`, which the projection's own
   validator drops), `JournalEntryDetailProjection` (`get_journal_entry`, its
-  `associates` projected) and `LocationProjection` (`list_locations`, without `iban` and
-  `qr_iban`, both undocumented and only seen `null`). A write preview's `before` is the
-  same projection.
+  `associates` projected), `LocationProjection` (`list_locations`, without `iban` and
+  `qr_iban`, both undocumented and only seen `null`) and `OrderDocumentProjection`
+  (`get_order_document`, without `orgIban`, `orgQrIban` and `recipientIban`, only seen
+  `null`). A write preview's `before` is the same projection.
 - `create_person` and `update_person` take `ssn` and, in `bank_accounts`, `iban`, and
   send them as given; a preview's `payload` and `changes` and a performed write's
   `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
@@ -310,7 +311,9 @@ replay-tested with a real value.
 - Fixtures never carry their values: the recorder rewrites an `ssn`, `iban` or
   `qrIban` value (a location's QR-IBAN, also as `qr_iban` or `qr-iban`) to `REDACTED` by
   name, in any letter case, and its final check refuses only a value that survives the
-  rewrite (How to record a fixture); the recorded location holds `null` for both.
+  rewrite (How to record a fixture); the recorded location holds `null` for both. Whole
+  names only: an order document's `orgIban`, `orgQrIban` and `recipientIban` are neither
+  rewritten nor refused, so never record a document whose bank accounts are set.
 - `get_report_data` refuses payroll and people reports before their data is requested
   (G5 (1) of 2026-10-28, rows 123 and 225): a type that starts with `SALARY_` or
   contains `PERSON`, or is `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or
@@ -322,10 +325,9 @@ replay-tested with a real value.
   `qrIban` dropped at any depth, in any case (`_report`; ADR-0003, amendment 2026-10-26).
 - A task that fetches them deliberately may return them and says so in its docstring.
   Two files may carry them, at the caller's path, never in a result or a tool
-  (`BULK_TASKS`; Johannes, 2026-10-28): `export_persons` names `PERSON_COLUMNS`,
-  `PersonProjection`'s fields, unless its caller names columns, `ssn` or `iban` among
-  them deliberately; `download_order_document`'s PDF may carry the organisation's IBAN
-  or QR-IBAN and the recipient's address on its QR-bill, disclosed, not stripped.
+  (`BULK_TASKS`; Johannes, 2026-10-28): `export_persons` names `PERSON_COLUMNS` unless
+  its caller names columns, `ssn` or `iban` among them; `download_order_document`'s PDF
+  may carry the organisation's IBAN or QR-IBAN and the recipient's address (QR-bill).
 
 ## CashCtrl specifics
 
@@ -501,9 +503,8 @@ delete, recorded or run. Record only a record marked `xippios-live`, its update 
 delete; confirm afterwards with one list per resource (`query=xippios-live`, counts
 only) that nothing is left.
 
-The write fixtures of 2026-10-24 record a journal entry and a person marked
-`xippios-live`, created, read, updated and deleted again in that order, and those of
-2026-10-27 the order 20, created, read, updated, read again and deleted.
+The write fixtures (2026-10-24 and 2026-10-27) record marked records created, read,
+updated and deleted again.
 
 Still grep before committing:
 
