@@ -150,7 +150,8 @@ scripts/
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
   record_fixture.py      records one exchange with the demo organisation; core's Scrub, then its own
                          TenantScrub (host, encoded and JSON checks) and scrub_text
-  seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md)
+  seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md);
+                         --discovery adds one custom field and one cost centre
 tests/
   conftest.py      core's plugin; demo-only environment, placeholder subdomain, clients reset per test, demo_org
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written

@@ -125,6 +125,12 @@ class FakeCashCtrl:
         self.refuse_headers: dict[str, str] = {}
         self.time_out_at: tuple[str, int] | None = None
         """``(path, nth)``: the nth request to ``path`` gets no answer in time."""
+        self.custom_fields: list[dict[str, Any]] = []
+        """``customfield/list.json`` for ``type=PERSON``; a new organisation has none."""
+        self.cost_centres: list[dict[str, Any]] = []
+        """``account/costcenter/list.json``; a new organisation has none."""
+        self.garble_names = False
+        """Store a created cost centre's name as a servlet that read UTF-8 as Latin-1 would."""
 
     @staticmethod
     def _period(id_: int, year: int) -> dict[str, Any]:
@@ -202,6 +208,11 @@ class FakeCashCtrl:
             return _list(self.person_categories)
         if path == "order/category/list.json":
             return _list(self.order_categories[params["type"]])
+        if path == "customfield/list.json":
+            assert params["type"] == "PERSON"
+            return _list(self.custom_fields)
+        if path == "account/costcenter/list.json":
+            return _list(self.cost_centres)
         return httpx.Response(404, text="unknown endpoint")
 
     def post(self, path: str, form: dict[str, str]) -> httpx.Response:
@@ -227,6 +238,16 @@ class FakeCashCtrl:
             sales = {str(c["id"]) for c in self.order_categories["SALES"]}
             order_type = "SALES" if form["categoryId"] in sales else "PURCHASE"
             self.orders_in[(order_type, 2 if form["date"].startswith("2025") else 1)] += 1
+        elif path == "customfield/create.json":
+            self.custom_fields.append(
+                {"id": 1 + len(self.custom_fields), "createdBy": OWNER, **form}
+            )
+        elif path == "account/costcenter/create.json":
+            name = form["name"]
+            if self.garble_names:
+                name = name.encode("utf-8").decode("latin-1")
+            centre = {"id": 1 + len(self.cost_centres), "number": form["number"], "name": name}
+            self.cost_centres.append({**centre, "createdBy": OWNER})
         self.next_id += 1
         self.insert_ids[path].append(self.next_id)
         insert_id: int | str = self.next_id
@@ -1151,6 +1172,212 @@ def test_the_pacer_keeps_the_pace_between_request_starts() -> None:
     assert slept == [pytest.approx(0.95)]
 
 
+# --- --discovery: one custom field and one cost centre, its own guard 3 ---------------------
+
+OWN_FIELD = {"id": 4, "type": "PERSON", "dataType": "TEXT", "rowLabel": "Kundenreferenz"}
+OWN_CENTRE = {"id": 2, "number": "100", "name": "Verkauf Büromöbel"}
+FOREIGN_FIELD = {"id": 5, "type": "PERSON", "dataType": "TEXT", "rowLabel": "Echte Kundennummer"}
+FOREIGN_CENTRE = {"id": 3, "number": "200", "name": "Echte Filiale"}
+DISCOVERY_READS = ["location/list.json", "customfield/list.json", "account/costcenter/list.json"]
+
+
+def paths(upstream: FakeCashCtrl) -> list[str]:
+    return [request.url.path.removeprefix("/api/v1/") for request in upstream.requests]
+
+
+def test_discovery_plan_is_offline_and_names_the_two_records(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_client(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("--plan must not build a client")
+
+    monkeypatch.setattr(seeder.httpx, "Client", no_client)
+    with respx.mock() as router:
+        for argv in (["--discovery"], ["--discovery", "--plan"]):
+            status, out, err = run(capsys, *argv)
+            assert (status, err) == (0, "")
+            assert (
+                "customfield/create.json: type PERSON, dataType TEXT, rowLabel Kundenreferenz"
+                in out
+            )
+            assert "account/costcenter/create.json: number 100, name Verkauf Büromöbel" in out
+            assert re.search(r"writes, at most 2", out)
+            assert "Nothing is ever deleted." in out
+            assert "Rechnung RE-2026-001" not in out, "the first mode's plan is not printed"
+        assert router.calls.call_count == 0
+
+
+def test_discovery_apply_without_yes_is_refused_without_a_request(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with respx.mock() as router:
+        status, _, err = run(capsys, "--discovery", "--apply")
+        assert router.calls.call_count == 0
+    assert status == 1
+    assert "--yes" in err
+
+
+def test_discovery_keeps_guard_1(capsys: pytest.CaptureFixture[str]) -> None:
+    with respx.mock() as router:
+        status = seeder.main(["--discovery", "--apply", "--yes"], environ={})
+        assert router.calls.call_count == 0
+    err = capsys.readouterr().err
+    assert status == 1
+    assert "refused (guard 1)" in err
+    assert seeder.SUBDOMAIN_ENV in err
+
+
+@pytest.mark.parametrize("name", ["Echte Firma AG", None])
+def test_discovery_keeps_guard_2(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str], name: str | None
+) -> None:
+    fake.org_name = name
+    status, out, err = run(capsys, "--discovery", "--apply", "--yes")
+    assert status == 1
+    assert paths(fake) == ["location/list.json"]
+    assert "does not contain 'demo'" in err
+    assert "Echte Firma" not in out + err
+
+
+def test_discovery_creates_both_records_into_two_empty_lists(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
+) -> None:
+    status, out, err = run(capsys, "--discovery", "--apply", "--yes")
+    assert (status, err) == (0, "")
+    assert paths(fake) == [
+        *DISCOVERY_READS,
+        "customfield/create.json",
+        "account/costcenter/create.json",
+        "customfield/list.json",
+        "account/costcenter/list.json",
+    ]
+    field, centre = fake.posts()
+    assert form_of(field) == {"dataType": "TEXT", "rowLabel": "Kundenreferenz", "type": "PERSON"}
+    assert form_of(centre) == {"name": "Verkauf Büromöbel", "number": "100"}
+    assert "guard 3: both discovery lists are empty; writing 2 records" in out
+    assert re.search(r"custom field Kundenreferenz: insertId \d+", out)
+    assert re.search(r"cost centre 100 Verkauf Büromöbel: insertId \d+", out)
+    assert "customfield/list.json type PERSON: total 1" in out
+    assert "account/costcenter/list.json: total 1" in out
+    assert "answers name 'Verkauf Büromöbel' byte for byte" in out
+    assert "refusals: none" in out
+    assert [fake.custom_fields[0]["rowLabel"], fake.cost_centres[0]["name"]] == [
+        "Kundenreferenz",
+        "Verkauf Büromöbel",
+    ]
+
+
+def test_discovery_is_idempotent(fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]) -> None:
+    """A second run finds both records and does nothing, exit status 0."""
+    assert run(capsys, "--discovery", "--apply", "--yes")[0] == 0
+    fake.requests.clear()
+    status, out, err = run(capsys, "--discovery", "--apply", "--yes")
+    assert (status, err) == (0, "")
+    assert paths(fake) == DISCOVERY_READS
+    assert "both discovery lists hold exactly this mode's two records: nothing to do" in out
+    assert (len(fake.custom_fields), len(fake.cost_centres)) == (1, 1)
+
+
+@pytest.mark.parametrize(
+    ("number", "own"),
+    [("100", True), (100, True), (100.0, True), ("100.00", True), ("200", False), (None, False)],
+)
+def test_the_cost_centre_number_is_compared_as_a_number(number: object, own: bool) -> None:
+    assert seeder.is_own_cost_centre({**OWN_CENTRE, "number": number}) is own
+
+
+@pytest.mark.parametrize(
+    ("fields", "centres", "shown"),
+    [
+        ([OWN_FIELD], [], "type PERSON lists 1 record(s), this mode's custom field; "),
+        ([], [OWN_CENTRE], "lists 1 record(s), this mode's cost centre)"),
+        ([FOREIGN_FIELD], [], "type PERSON lists 1 record(s); account"),
+        ([], [FOREIGN_CENTRE], "account/costcenter/list.json lists 1 record(s))"),
+        ([OWN_FIELD, FOREIGN_FIELD], [OWN_CENTRE], "lists 2 record(s); account"),
+        ([OWN_FIELD], [OWN_CENTRE, FOREIGN_CENTRE], "lists 2 record(s))"),
+        ([OWN_FIELD], [{**OWN_CENTRE, "number": "101"}], "lists 1 record(s))"),
+        ([{**OWN_FIELD, "dataType": "NUMBER"}], [OWN_CENTRE], "lists 1 record(s); account"),
+    ],
+)
+def test_discovery_refuses_anything_but_two_empty_lists_or_its_own_records(
+    fake: FakeCashCtrl,
+    capsys: pytest.CaptureFixture[str],
+    fields: list[dict[str, Any]],
+    centres: list[dict[str, Any]],
+    shown: str,
+) -> None:
+    fake.custom_fields = [dict(record) for record in fields]
+    fake.cost_centres = [dict(record) for record in centres]
+    status, out, err = run(capsys, "--discovery", "--apply", "--yes")
+    assert status == 1
+    assert fake.posts() == []
+    assert paths(fake) == DISCOVERY_READS
+    assert "neither both empty nor both this mode's records alone" in err
+    assert shown in err
+    assert "never deletes anything" in err
+    assert "nothing was written" in err
+    assert "Echte" not in out + err, "counts only, no record's value"
+
+
+@pytest.mark.parametrize("path", ["customfield/list.json", "account/costcenter/list.json"])
+@pytest.mark.parametrize("answer", [{"data": []}, {"total": 2, "data": [OWN_FIELD]}])
+def test_discovery_refuses_a_list_it_cannot_confirm_whole(
+    capsys: pytest.CaptureFixture[str], path: str, answer: dict[str, Any]
+) -> None:
+    upstream = FakeCashCtrl()
+    with respx.mock(assert_all_called=False) as router:
+        router.get(f"https://{SUB}.cashctrl.com/api/v1/{path}").mock(
+            return_value=httpx.Response(200, json=answer)
+        )
+        router.route(host=f"{SUB}.cashctrl.com").mock(side_effect=upstream)
+        status, _, err = run(capsys, "--discovery", "--apply", "--yes")
+    assert status == 1
+    assert upstream.posts() == []
+    assert f"cannot confirm what {path} holds" in err
+
+
+@pytest.mark.parametrize(
+    ("path", "created"),
+    [("customfield/create.json", []), ("account/costcenter/create.json", ["customfield"])],
+)
+def test_discovery_stops_at_a_refused_create_scrubbed(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str], path: str, created: list[str]
+) -> None:
+    fake.refuse = (path, 1)
+    status, out, err = run(capsys, "--discovery", "--apply", "--yes")
+    assert status == 1
+    assert paths(fake)[-1] == path, "no request follows the refusal"
+    assert ["customfield"] * len(fake.custom_fields) == created
+    assert fake.cost_centres == []
+    assert f"POST {path} answered HTTP 200, success: false" in err
+    assert "<subdomain>.cashctrl.com, ask <e-mail>" in err
+    assert f"refusal: POST {path}: HTTP 200" in out
+    shown = (out + err).lower()
+    for secret in (SUB, KEY, TOKEN, OWNER):
+        assert secret.lower() not in shown
+
+
+def test_discovery_fails_when_the_name_comes_back_garbled(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake.garble_names = True
+    status, out, err = run(capsys, "--discovery", "--apply", "--yes")
+    assert status == 1
+    assert "summary incomplete" in err
+    assert "the backend may have garbled UTF-8" in err
+    assert "UTF-8 round trip: not found: sent 'Verkauf B\\xfcrom\\xf6bel'" in out
+
+
+def test_discovery_never_deletes_and_writes_its_two_records_only(
+    fake: FakeCashCtrl, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run(capsys, "--discovery", "--apply", "--yes")
+    run(capsys, "--discovery", "--apply", "--yes")
+    posted = [request.url.path.removeprefix("/api/v1/") for request in fake.posts()]
+    assert posted == ["customfield/create.json", "account/costcenter/create.json"]
+    assert all(request.method in ("GET", "POST") for request in fake.requests)
+
+
 # --- the synthetic books ------------------------------------------------------------------
 
 
@@ -1274,3 +1501,22 @@ def test_the_document_describes_every_record() -> None:
     )
     assert rule is not None
     assert rule.group(1) == ", ".join(seeder.PLACEHOLDER_MARKERS)
+
+
+def test_the_document_describes_the_discovery_mode() -> None:
+    doc = (SCRIPT.parents[1] / "docs" / "demo-org.md").read_text(encoding="utf-8")
+    prose = " ".join(doc.split())
+    field, centre = seeder.CUSTOM_FIELD, seeder.COST_CENTRE
+    for phrase in (
+        "## The discovery records (`--discovery`)",
+        "uv run scripts/seed_demo.py --discovery --apply --yes",
+        f"`type` `{field.module}`, `dataType` `{field.data_type}`, `rowLabel` `{field.row_label}`",
+        f"`number` `{centre.number}`, `name` `{centre.name}`",
+        "it says that there is nothing to do and exits with status 0",
+        "It never deletes anything.",
+        f"`{centre.number} {centre.name}`",
+    ):
+        assert phrase in prose, phrase
+    for _, path, form in seeder.discovery_writes():
+        assert f"`{path}`" in doc
+        assert all(f"`{name}`" in doc for name in form)
