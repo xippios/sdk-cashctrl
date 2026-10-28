@@ -1644,8 +1644,8 @@ def recorded_invoice_statuses() -> list[int]:
     return [status.id for status in invoice.status]
 
 
-DRAFT, OPEN = recorded_invoice_statuses()[:2]
-"""The first two statuses of the invoice category (Draft, then Open in the recording)."""
+OPEN = recorded_invoice_statuses()[1]
+"""The second status of the invoice category (Open in the recording, after Draft)."""
 PAY_DAY = DAY
 """The payment's execution date: the date of every record the live tests write."""
 PAID = 26

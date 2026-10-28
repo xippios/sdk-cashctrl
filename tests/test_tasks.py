@@ -18,6 +18,7 @@ from xippios.core import InvalidRequestError, NotFoundError, UpstreamModel, sync
 from xippios.core.mcp import build_server, tool_name
 from xippios.core.testing import (
     Fixture,
+    ReplayFixture,
     fixture_path,
     load_fixture,
     mcp_call,
@@ -1555,6 +1556,23 @@ def test_list_order_categories_replays_the_sales_categories(
     assert (draft.id, draft.is_book, opened.id, opened.is_book) == (12, False, 16, True)
     assert "<en>Draft</en>" in (draft.name or "")
     assert [template.account_id for template in invoice.book_templates] == [3, 157]
+
+
+def test_list_order_categories_replays_the_purchase_categories(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    """``type=PURCHASE``, recorded on 2026-10-29 for the status the write fixtures set."""
+    route = replay_fixture("order_category_list", "purchase", match_params=["type"])
+    result = tasks.list_order_categories(DEMO, type="PURCHASE")
+    assert sent_query(route) == recorded_query(
+        recorded(fixtures_dir, "order_category_list", "purchase")
+    )
+    assert (result.meta.total, {category.type for category in result.data}) == (6, {"PURCHASE"})
+    (invoice,) = [c for c in result.data if "<en>Invoice</en>" in (c.name_singular or "")]
+    assert [(status.id, status.action_id) for status in invoice.status[:2]] == [
+        (78, ""),
+        (80, "CREATE_PAYMENT_ORDER"),
+    ], "Open, then Payment ordered with an action the documentation does not list"
 
 
 def test_list_order_categories_sends_type_and_period(respx_mock: respx.MockRouter) -> None:
