@@ -970,12 +970,13 @@ async def list_order_categories_async(
 async def list_custom_fields_async(org: str, type: CustomFieldType) -> Result[list[CustomField]]:
     """List an organisation's custom fields of one module, the fields it added to its records.
 
-    Every custom field of ``type`` comes back with its ``id``, its ``data_type``
-    (``TEXT``, ``TEXTAREA``, ``CHECKBOX``, ``DATE``, ``COMBOBOX``, ``NUMBER``, ``ACCOUNT``
-    or ``PERSON``), the labels it is shown with (``row_label``, ``field_label``,
-    localised as ``<values><de>...</de></values>``), ``is_inactive``, ``is_multi`` and,
-    for a ``COMBOBOX``, the ``values`` to choose from. A write tool sets a custom field
-    as ``customField<id>`` in its ``custom`` mapping, e.g. ``{"customField3": "Projekt
+    Every custom field of ``type`` comes back with its ``id``, ``field_id`` (the key a
+    write tool's ``custom`` takes, ``customField<id>``), its ``data_type`` (``TEXT``,
+    ``TEXTAREA``, ``CHECKBOX``, ``DATE``, ``COMBOBOX``, ``NUMBER``, ``ACCOUNT`` or
+    ``PERSON``), the labels it is shown with (``row_label``, ``field_label``, localised
+    as ``<values><de>...</de></values>``), ``is_inactive``, ``is_multi`` and, for a
+    ``COMBOBOX``, the ``values`` to choose from. A write tool sets a custom field as
+    ``customField<id>`` in its ``custom`` mapping, e.g. ``{"customField3": "Projekt
     A"}``: ``JOURNAL`` for ``create_journal_entry``, ``PERSON`` for ``create_person``,
     ``ORDER`` for ``create_order``. ``meta.total`` is upstream's count. ``type`` is
     checked first, and a value outside the documented set is refused.
@@ -1063,10 +1064,11 @@ async def list_cost_centers_async(
 
     Every matching cost center comes back with its ``id`` (the ``to_cost_center_id`` of
     an allocation in ``create_journal_entry``, ``update_journal_entry`` and the items of
-    ``create_order``), ``number``, ``name`` (localised), ``category_id``,
-    ``is_inactive``, ``notes`` and its targets ``target_min`` and ``target_max``. No
-    cost center has been observed yet (the demo organisation has none), so balances the
-    list may carry are not returned. ``meta.total`` is upstream's count. Upstream ignores
+    ``create_order``), ``number`` (as text, ``"100"``), ``name`` (localised),
+    ``category_id``, ``is_inactive``, ``notes``, its targets ``target_min`` and
+    ``target_max``, and its balances ``opening_amount`` and ``end_amount`` in the API
+    user's current fiscal period (upstream's default; this task sends no
+    ``fiscalPeriodId``). ``meta.total`` is upstream's count. Upstream ignores
     values it does not understand, so ``dir`` and the filters' ``comparison`` are checked
     first and a wrong one is refused.
 

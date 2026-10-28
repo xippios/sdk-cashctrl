@@ -32,9 +32,10 @@ as sent: no recorded message carries a tag.
 ``docs/upstream/`` shows no response bodies. Field types come from the create and update
 parameter tables where they describe the field, and from the answers recorded against the
 demo organisation where they do not: on 2026-10-23 and 2026-10-24 for the ledger,
-journal, person and order models, on 2026-10-27 for the custom field, category, title,
-cost center, location and report models. The latter fields are named in each model's
-docstring as typed from observation. Two demo organisations answered on 2026-10-23: the
+journal, person and order models, on 2026-10-27 for the category, title, location and
+report models, and on 2026-10-28 for the custom field and cost center models, whose
+records ``scripts/seed_demo.py --discovery`` created. The latter fields are named in each
+model's docstring as typed from observation. Two demo organisations answered on 2026-10-23: the
 first, a copy of real books, since retired, and the synthetic one seeded by
 ``scripts/seed_demo.py``; the committed fixtures come from the synthetic one only. What
 those answers showed:
@@ -1414,35 +1415,51 @@ class CustomField(UpstreamModel):
     """One custom field, an entry of ``customfield/list.json`` (``docs/upstream/common.md``).
 
     A field of the organisation's own on the records of one module (``type``); a write
-    task sets its value as ``customField<id>`` in ``custom``. Typed from the tables of
-    ``customfield/create.json`` and ``update.json`` alone: the demo organisation has no
-    custom field, and ``customfield/list.json`` for ``PERSON`` answered ``{"total": 0,
-    "data": []}`` on 2026-10-27, so no record was observed. Every field but ``id`` is
-    therefore optional, and the two whose wire type the tables leave open are kept as
-    upstream sends them: ``group_id`` (TEXT, "The ID of the custom field group") and
-    ``values`` (TEXT holding a JSON array, ``["red","green","blue"]``, the choices of a
-    ``COMBOBOX``). ``type`` and ``data_type`` (``TEXT``, ``TEXTAREA``, ``CHECKBOX``,
-    ``DATE``, ``COMBOBOX``, ``NUMBER``, ``ACCOUNT``, ``PERSON``) stay strings;
-    ``row_label``, ``field_label``, ``field_info`` and ``field_text_right`` may hold
-    localised text as ``<values><de>...</de></values>``; ``variable_name`` is the
-    optional ``$name`` used instead of ``$customField<ID>``. The ``created*`` and
-    ``last_updated*`` bookkeeping fields every other list sends are assumed here, not
-    observed.
+    task sets its value as ``customField<id>`` in ``custom``, the key ``field_id`` names.
+    Typed from the tables of ``customfield/create.json`` and ``update.json``: ``type``,
+    ``data_type`` (``TEXT``, ``TEXTAREA``, ``CHECKBOX``, ``DATE``, ``COMBOBOX``,
+    ``NUMBER``, ``ACCOUNT``, ``PERSON``) and ``row_label``, the three mandatory ones;
+    ``field_label``, ``field_info`` and ``field_text_right``, which may hold localised
+    text as ``<values><de>...</de></values>``; ``max_width``; ``variable_name``, the
+    optional ``$name`` used instead of ``$customField<ID>``; ``is_multi`` and
+    ``is_inactive``. ``type`` and ``data_type`` stay strings. Two whose wire type the
+    tables leave open are kept as sent, only seen ``null``: ``group_id`` (TEXT, "The ID of
+    the custom field group") and ``values`` (TEXT holding a JSON array,
+    ``["red","green","blue"]``, the choices of a ``COMBOBOX``).
+
+    Typed from observation on 2026-10-28 (``tests/fixtures/customfield_list/person.json``,
+    the one custom field ``scripts/seed_demo.py --discovery`` created, a ``TEXT`` field on
+    persons): ``id``; ``field_id`` (``customField1``, the key of ``custom``);
+    ``default_variable_name`` (``$customField1``), which ``variable_name`` repeats when
+    none was set; ``name`` and ``column_name``, both the row label; ``pos`` (``1``); the
+    twins ``multi`` and ``inactive``; and the ``created*``/``last_updated*`` bookkeeping
+    fields. Only seen ``null`` and kept as sent: ``category_id``, ``variable_id`` and
+    ``group_name``.
     """
 
     id: int
-    type: str | None = None
-    data_type: str | None = Field(default=None, validation_alias="dataType")
-    row_label: str | None = Field(default=None, validation_alias="rowLabel")
+    type: str
+    data_type: str = Field(validation_alias="dataType")
+    row_label: str = Field(validation_alias="rowLabel")
     field_label: str | None = Field(default=None, validation_alias="fieldLabel")
     field_info: str | None = Field(default=None, validation_alias="fieldInfo")
     field_text_right: str | None = Field(default=None, validation_alias="fieldTextRight")
+    field_id: str | None = Field(default=None, validation_alias="fieldId")
+    name: str | None = None
+    column_name: str | None = Field(default=None, validation_alias="columnName")
+    pos: int | None = None
     group_id: JsonValue = Field(default=None, validation_alias="groupId")
-    is_inactive: bool | None = Field(default=None, validation_alias="isInactive")
-    is_multi: bool | None = Field(default=None, validation_alias="isMulti")
+    group_name: JsonValue = Field(default=None, validation_alias="groupName")
+    category_id: JsonValue = Field(default=None, validation_alias="categoryId")
+    variable_id: JsonValue = Field(default=None, validation_alias="variableId")
     max_width: Decimal | None = Field(default=None, validation_alias="maxWidth")
     values: JsonValue = None
     variable_name: str | None = Field(default=None, validation_alias="variableName")
+    default_variable_name: str | None = Field(default=None, validation_alias="defaultVariableName")
+    multi: bool
+    is_multi: bool = Field(validation_alias="isMulti")
+    inactive: bool
+    is_inactive: bool = Field(validation_alias="isInactive")
     created: datetime | None = None
     created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
@@ -1550,29 +1567,39 @@ class CostCenter(UpstreamModel):
     A cost center or cost unit amounts are allocated to: its ``id`` is the
     ``to_cost_center_id`` of an allocation (``create_journal_entry``,
     ``update_journal_entry``, the items of ``create_order``). Typed from the tables of
-    ``account/costcenter/create.json`` and ``update.json`` alone: the demo organisation
-    has no cost center, and ``account/costcenter/list.json`` answered ``{"total": 0,
-    "data": []}`` on 2026-10-27, so no record was observed. Every field but ``id`` is
-    therefore optional: ``name`` (localised), ``category_id``, ``notes`` (HTML),
-    ``is_inactive``, ``target_min`` and ``target_max``, and ``attachments``, documented
-    as a list of ``{fileId}`` and kept as sent, as ``Location``'s are. ``number`` is
-    documented as the account number is ("NUMBER", "Must be numeric but can contain a
-    decimal point"), which comes as text, and is kept as sent. The list documents
-    ``fiscalPeriodId``, "from which we retrieve the balances", so its records presumably
-    carry balances; never observed, they are not modelled. The ``created*`` and
-    ``last_updated*`` bookkeeping fields every other list sends are assumed here, not
-    observed.
+    ``account/costcenter/create.json`` and ``update.json``: ``number`` and ``name``, the
+    two mandatory ones, ``name`` localised and ``number`` documented as the account
+    number is ("NUMBER", "Must be numeric but can contain a decimal point") and sent as
+    text (``"100"``), as ``Account.number`` is; ``category_id``, ``notes`` (HTML),
+    ``target_min``, ``target_max`` and ``is_inactive``; and ``attachments``, documented as
+    a list of ``{fileId}``, which the list does not send (it sends ``attachment_count``)
+    and which is kept, empty, should it come.
+
+    Typed from observation on 2026-10-28 (``tests/fixtures/account_costcenter_list/
+    default.json``, the one cost centre ``scripts/seed_demo.py --discovery`` created):
+    ``id``; the balances of the fiscal period asked for (``fiscalPeriodId``, "from which
+    we retrieve the balances", else the current one) as ``opening_amount`` and
+    ``end_amount``, as ``Account`` has them (``0`` seen, no amount allocated);
+    ``attachment_count``; the twin ``inactive``; and the ``created*``/``last_updated*``
+    bookkeeping fields. Only seen ``null`` and kept as sent: ``category_name`` and
+    ``target_display``.
     """
 
     id: int
-    number: JsonValue = None
-    name: str | None = None
+    number: str
+    name: str
     category_id: int | None = Field(default=None, validation_alias="categoryId")
+    category_name: JsonValue = Field(default=None, validation_alias="categoryName")
     notes: str | None = None
-    is_inactive: bool | None = Field(default=None, validation_alias="isInactive")
+    opening_amount: Decimal | None = Field(default=None, validation_alias="openingAmount")
+    end_amount: Decimal | None = Field(default=None, validation_alias="endAmount")
     target_min: Decimal | None = Field(default=None, validation_alias="targetMin")
     target_max: Decimal | None = Field(default=None, validation_alias="targetMax")
+    target_display: JsonValue = Field(default=None, validation_alias="targetDisplay")
+    attachment_count: int | None = Field(default=None, validation_alias="attachmentCount")
     attachments: list[JsonValue] = Field(default_factory=list)
+    inactive: bool
+    is_inactive: bool = Field(validation_alias="isInactive")
     created: datetime | None = None
     created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")

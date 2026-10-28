@@ -1519,7 +1519,8 @@ async def test_the_order_categories_are_on_the_read_server_and_the_router() -> N
 # The discovery lists and the reports, recorded on 2026-10-27 from the demo organisation:
 # CashCtrl's defaults (person categories and titles, the chart's account categories, the
 # report tree) and the main location made by hand with placeholder data (docs/demo-org.md).
-# The demo organisation has no custom field and no cost center, so both answers are empty.
+# The custom field and cost center lists were recorded again on 2026-10-28, each with the
+# one record scripts/seed_demo.py --discovery created (G5 (3) of 2026-10-28).
 
 
 def test_list_custom_fields_replays_the_recorded_list(
@@ -1531,7 +1532,22 @@ def test_list_custom_fields_replays_the_recorded_list(
     assert sent_query(route) == recorded_query(recorded(fixtures_dir, "customfield_list", "person"))
     assert result.meta.endpoint == "customfield/list.json"
     assert result.meta.request == {"org": DEMO, "type": "PERSON"}
-    assert (result.meta.tenant, result.meta.total, result.data) == (DEMO, 0, [])
+    assert (result.meta.tenant, result.meta.total, len(result.data)) == (DEMO, 1, 1)
+    (field,) = result.data
+    assert (field.id, field.type, field.data_type, field.row_label) == (
+        1,
+        "PERSON",
+        "TEXT",
+        "Kundenreferenz",
+    ), "the custom field seed_demo.py --discovery created"
+    assert field.field_id == "customField1", "the key a write tool's custom takes"
+    assert (field.variable_name, field.default_variable_name) == ("$customField1",) * 2
+    assert (field.name, field.column_name, field.pos) == ("Kundenreferenz", "Kundenreferenz", 1)
+    assert (field.is_multi, field.multi, field.is_inactive, field.inactive) == (False,) * 4
+    assert (field.group_id, field.group_name, field.category_id, field.variable_id) == (None,) * 4
+    assert (field.field_label, field.field_info, field.max_width, field.values) == (None,) * 4
+    assert field.created == datetime(2026, 10, 28, 21, 46, 59)
+    assert field.created_by == field.last_updated_by == "API:REDACTED"
 
 
 @pytest.mark.parametrize("value", ["person", "CONTACT", "", None])
@@ -1551,7 +1567,10 @@ async def test_list_custom_fields_as_a_tool(
 ) -> None:
     replay_fixture("customfield_list", "person")
     payload = await mcp_call(server, "cashctrl_list_custom_fields", {"org": DEMO, "type": "PERSON"})
-    assert (payload["data"], payload["meta"]["total"]) == ([], 0)
+    assert payload["meta"]["total"] == 1
+    assert [(f["field_id"], f["row_label"], f["data_type"]) for f in payload["data"]] == [
+        ("customField1", "Kundenreferenz", "TEXT")
+    ]
     assert payload["meta"]["request"] == {"org": DEMO, "type": "PERSON"}
     refused = {"org": DEMO, "type": "person"}
     text = await mcp_call_text(server, "cashctrl_list_custom_fields", refused)
@@ -1575,7 +1594,8 @@ def test_list_custom_fields_as_a_route(
     client = TestClient(app)
     response = client.get("/cashctrl/list_custom_fields", params={"org": DEMO, "type": "PERSON"})
     assert response.status_code == 200, response.text
-    assert (response.json()["data"], response.json()["meta"]["total"]) == ([], 0)
+    assert response.json()["meta"]["total"] == 1
+    assert response.json()["data"][0]["field_id"] == "customField1"
     assert response.json()["meta"]["tenant"] == DEMO
     refused = client.get("/cashctrl/list_custom_fields", params={"org": DEMO, "type": "person"})
     assert refused.status_code == 422
@@ -1668,7 +1688,18 @@ def test_list_cost_centers_replays_the_recorded_list(
     )
     assert result.meta.endpoint == "account/costcenter/list.json"
     assert result.meta.request == {"org": DEMO}
-    assert (result.meta.tenant, result.meta.total, result.data) == (DEMO, 0, [])
+    assert (result.meta.tenant, result.meta.total, len(result.data)) == (DEMO, 1, 1)
+    (centre,) = result.data
+    assert (centre.id, centre.number, centre.name) == (1, "100", "Verkauf Büromöbel")
+    assert isinstance(centre.number, str), "documented NUMBER, sent as text, as an account's"
+    assert (centre.opening_amount, centre.end_amount) == (Decimal(0), Decimal(0))
+    assert isinstance(centre.end_amount, Decimal)
+    assert (centre.attachment_count, centre.attachments) == (0, []), "the list sends a count"
+    assert (centre.is_inactive, centre.inactive) == (False, False)
+    assert (centre.category_id, centre.category_name, centre.notes) == (None, None, None)
+    assert (centre.target_min, centre.target_max, centre.target_display) == (None, None, None)
+    assert centre.created == datetime(2026, 10, 28, 21, 47)
+    assert centre.created_by == centre.last_updated_by == "API:REDACTED"
 
 
 def test_list_cost_centers_sends_its_parameters_as_upstream_reads_them(
@@ -1737,11 +1768,21 @@ def test_list_cost_centers_is_a_post_route(
     assert rejected.status_code == 422
 
 
-@pytest.mark.parametrize("model", [models.CustomField, models.CostCenter])
-def test_the_unobserved_models_serialise_under_snake_case_names(
-    model: type[UpstreamModel],
-) -> None:
-    """No record of these was observed (empty lists), so their field names are checked."""
+OUTPUT_MODELS = {
+    name: model
+    for name in models.__all__
+    if isinstance(model := getattr(models, name), type)
+    and issubclass(model, UpstreamModel)
+    and not issubclass(model, models._Input)  # inputs serialise under upstream's names
+    and not model.__pydantic_generic_metadata__["parameters"]
+}
+"""Every model a result carries: the input models of the writes and the generic envelopes
+left out."""
+
+
+@pytest.mark.parametrize("model", OUTPUT_MODELS.values(), ids=OUTPUT_MODELS.keys())
+def test_every_model_serialises_under_snake_case_names(model: type[UpstreamModel]) -> None:
+    """A model's own field names, recorded or not: a tool in ``UNOBSERVED`` relies on it."""
     properties = model.model_json_schema(mode="serialization")["properties"]
     assert [name for name in properties if not SNAKE_CASE.fullmatch(name)] == []
 
@@ -2413,6 +2454,8 @@ RECORDED_LISTS: dict[str, tuple[Callable[..., typing.Any], dict[str, typing.Any]
     "person_title_list/default": (api.person_title_list, {}),
     "account_category_list/default": (api.account_category_list, {}),
     "location_list/default": (api.location_list, {}),
+    "customfield_list/person": (api.customfield_list, {"type": "PERSON"}),
+    "account_costcenter_list/default": (api.account_costcenter_list, {}),
     "report_tree/default": (api.report_tree, {}),
     "order_bookentry_list/booked": (api.order_bookentry_list, {"id": BOOKED_ORDER}),
     "history_list/order": (api.history_list, {"order_id": BOOKED_ORDER, "start": 0, "limit": 100}),
@@ -2480,9 +2523,11 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
     "cashctrl_list_order_book_entries": ("order_bookentry_list/booked", {"order_id": 5}),
     "cashctrl_list_history": ("history_list/order", {"order_id": 5}),
 }
-UNOBSERVED = frozenset({"cashctrl_list_custom_fields", "cashctrl_list_cost_centers"})
-"""Tools whose recorded answer is an empty list: their snake_case names are checked on the
-models instead (``test_the_unobserved_models_serialise_under_snake_case_names``)."""
+UNOBSERVED: frozenset[str] = frozenset()
+"""Tools whose recorded answer is an empty list, left out of the snake_case checks on results:
+none since 2026-10-28, when the custom field and cost center lists, the last two, were
+recorded with a record each. Every model's field names are checked on its schema as well
+(``test_every_model_serialises_under_snake_case_names``)."""
 AS_SENT: dict[str, frozenset[str]] = {"cashctrl_get_report_data": frozenset({"data", "properties"})}
 """Fields of a tool's ``data`` that hold upstream's JSON as sent (``JsonValue``, decided by
 Johannes on 2026-10-27): their own names are snake_case, the keys inside them upstream's."""

@@ -270,7 +270,8 @@ async def test_list_custom_fields(demo_org: str) -> None:
     result = await tasks.list_custom_fields_async(demo_org, "PERSON")
     assert result.meta.request == {"org": demo_org, "type": "PERSON"}
     assert result.meta.tenant == demo_org
-    assert result.meta.total == len(result.data), "the demo organisation has none (2026-10-27)"
+    assert result.meta.total == len(result.data) > 0, "seed_demo.py --discovery made one"
+    assert all(field.type == "PERSON" and field.field_id for field in result.data)
 
 
 async def test_list_person_categories(demo_org: str) -> None:
@@ -299,7 +300,8 @@ async def test_list_account_categories(demo_org: str) -> None:
 async def test_list_cost_centers(demo_org: str) -> None:
     result = await tasks.list_cost_centers_async(demo_org, only_active=True)
     assert result.meta.request == {"org": demo_org, "onlyActive": "true"}
-    assert result.meta.total == len(result.data), "the demo organisation has none (2026-10-27)"
+    assert result.meta.total == len(result.data) > 0, "seed_demo.py --discovery made one"
+    assert all(isinstance(centre.number, str) and centre.name for centre in result.data)
 
 
 async def test_list_locations(demo_org: str) -> None:

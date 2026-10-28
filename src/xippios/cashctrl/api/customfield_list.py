@@ -6,7 +6,8 @@ custom field, meaning: which module the custom field belongs to. Possible values
 JOURNAL, ACCOUNT, INVENTORY_ARTICLE, INVENTORY_ASSET, ORDER, PERSON, FILE,
 SALARY_STATEMENT."). It documents no ``start`` or ``limit``: one answer carries every
 custom field of the type. Observed on 2026-10-27 for ``PERSON``: ``{"total": 0, "data":
-[]}``, the demo organisation having no custom field.
+[]}``; on 2026-10-28, after ``scripts/seed_demo.py --discovery`` created one, ``{"total":
+1, "data": [...]}``, the record ``CustomField`` mirrors.
 """
 
 from xippios.core import parse
