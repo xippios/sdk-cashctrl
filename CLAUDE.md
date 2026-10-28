@@ -348,7 +348,8 @@ before the split: where the family text and this section differ (`org` first and
   back by hand from the `render_enums` port deleted here (`/refresh-reference-data`).
   From template v0.2.2 on every template-rendered file is cashctrl's own (`ci.yml`,
   `publish.yml`, `gates.yml`, `live.yml`, the PR template, the `.claude/commands` files,
-  `.claude/family.md`, the template's parts of this file), and a core adoption
+  `.claude/settings.json`, `.claude/family.md`, `tests/conftest.py`,
+  `tests/test_family.py`, the template's parts of this file), and a core adoption
   hand-applies the template changes the conventions version it adopts needs (row 118).
 - cashctrl stays on template v0.2.2 after template v0.3.0 and keeps adopting core minors
   through conventions §15; `copier update` must never be run past v0.2.2: the v0.3.0
@@ -357,8 +358,9 @@ before the split: where the family text and this section differ (`org` first and
 
 ### How to add an endpoint
 
-`/add-endpoint` walks it. Steps 1, 5 and 7 are `.claude/family.md`'s; steps 2 to 4 and 6
-read here:
+`/add-endpoint` walks it. Steps 1, 5 and 7 are `.claude/family.md`'s, step 7's task name
+first in its README cell as the family check reads it (cashctrl's README has no comment
+above its status table); steps 2 to 4 and 6 read here:
 
 2. `models.py`: an `UpstreamModel` per payload object; dates, numbers and enums typed.
    Upstream's camelCase spellings are accepted with `Field(validation_alias=...)`, never
@@ -518,9 +520,10 @@ for testing (the demo organisation, ADR-0024) and cleans up after itself. Only i
 secrets `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`: the template renders the
 scaffold's `CASHCTRL_API_KEY`, which nothing reads, so the workflow names the pair by
 hand, and both org secrets must give sdk-cashctrl access for the nightly run to pass.
-`--tb=short` is added by hand too, and every live run here uses it: pytest's long
-traceback prints each frame's arguments, so a failed parse would print the upstream
-payload it was given, API user tags included, into the public Actions log.
+`--tb=short` is the template's own from v0.3.0, no longer an addition by hand, and every
+live run here uses it: pytest's long traceback prints each frame's arguments, so a failed
+parse would print the upstream payload it was given, API user tags included, into the
+public Actions log.
 
 ### Never
 
