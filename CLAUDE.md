@@ -459,8 +459,8 @@ refuses. The write stays the recorder's: core's `record` writes as soon as its o
 verify passes, before the recorder's step and final check could run. A compound name such as
 `publicHash` is not scrubbed and goes to review. Grep the file for key patterns, e-mail
 addresses, API user tags, token-like fields and values under `ssn`, `iban` and `qrIban`
-before committing (`/record-fixture`, `tests/fixtures/README.md`). Fixtures are never
-typed in by hand.
+before committing (`/record-fixture`, the grep block below). Fixtures are never typed in
+by hand.
 
 Writes: `--method POST` is accepted for the nine write paths the write tools call only
 (`journal/create|update|delete.json`, `person/create|update|delete.json`,
@@ -477,6 +477,25 @@ organisation changed, names the `insertId` it answered, and asks for the matchin
 delete, recorded or run. Record only a record marked `xippios-live`, its update and its
 delete; confirm afterwards with one list per resource (`query=xippios-live`, counts
 only) that nothing is left.
+
+The write fixtures of 2026-10-24 record a journal entry and a person marked
+`xippios-live`, created, read, updated and deleted again in that order, and those of
+2026-10-27 the order 20, created, read, updated, read again and deleted.
+
+Still grep before committing:
+
+```bash
+grep -rniE 'api[_-]?key|token|secret' tests/fixtures
+grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' tests/fixtures | sort -u
+grep -rhoiE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u
+grep -rhoiE '(hash|token|secret|api[_-]?key)\\?": *\\?"[^"\\]*' tests/fixtures | sort -u
+grep -rhoiE --include='*.json' '\\?"(ssn|iban|qr[_-]?iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
+grep -rhoiE --include='*.json' '(ssn=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
+```
+
+The last two count, without printing them, the values of `ssn`, `iban` and `qrIban`
+that are neither `null` nor `REDACTED`, in the JSON bodies and in a write's form body;
+both print `0`.
 
 ### Commands
 
