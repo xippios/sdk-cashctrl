@@ -1,67 +1,50 @@
-Adopt an sdk-template release, and the xippios-core minor it carries, in xippios-cashctrl: $ARGUMENTS
+Adopt a xippios-core minor in xippios-cashctrl, on sdk-template v0.2.2 for good: $ARGUMENTS
 
-Expected argument: the template tag to adopt, e.g. `v0.2.1`; without one, the latest tag
-(`git ls-remote --tags --refs https://github.com/xippios/sdk-template.git`). This is the
-adoption PR of conventions §15 (ADR-0018): one PR, before the next release, that adopts
-the release and changes nothing else; no new endpoints, tasks or fixtures ride along. It
-may delete the fixtures, mounts and tests that the adoption itself makes dead, and
-nothing more (ADR-0018, amendment (d)). Every step below is the session's: when the PR's
-merge class is `auto`, the session enables auto-merge after the reviewer's `ready`; a
-`human` adoption (a source-owned workflow, a changed template answer, a protected path, a
-build or install route) waits for Johannes (ADR-0018, amendment (e); the merge classes
-are in the README of the organisation's `.github` repository). A release tag is not part
-of an adoption.
+Expected argument: the core version to adopt, e.g. `0.4.0`, never a template tag. Without
+one, stop and ask; there is no default. cashctrl stays on sdk-template v0.2.2 (D35,
+Johannes 2026-10-26) and adopts a core minor without a template release (D85, 2026-10-27):
+no `copier update` runs, and `copier update` past v0.2.2 is forbidden (`CLAUDE.md`,
+Never). The family rule is still the adoption PR of conventions §15 (ADR-0018): one PR,
+before the next release, that adopts core `X.Y.Z` and changes nothing else; no new
+endpoints, tasks or fixtures ride along. It may delete the fixtures, mounts and tests
+that the adoption itself makes dead, and nothing more (ADR-0018, amendment (d)). A
+release tag is not part of an adoption.
 
-1. **Where the repository stands.** Read `.copier-answers.yml`: `_commit` is the template
-   tag the repository is on, `core_version` the core minor it depends on, `core_git_ref` a
-   git pin of core, if any. Start from a clean `main` on a branch
-   `chore/template-update-<tag>`.
+1. **Where the repository stands.** `.copier-answers.yml` stays at `_commit: v0.2.2` and
+   is not edited; its `core_version` is the record of the last render, not the floor.
+   `pyproject.toml` is the floor's source of truth: the `xippios-core~=` bound, with no
+   `[tool.uv.sources]` pin. Start from a clean `main` on a branch
+   `chore/template-update-<core version>` (e.g. `chore/template-update-0.4.0`), which
+   keeps the `chore/template-update*` class that rule 8 of the coordination rules names.
 
-2. **What the releases ask.** Read sdk-template's `CHANGELOG.md` at `<tag>`,
-   `https://github.com/xippios/sdk-template/blob/<tag>/CHANGELOG.md` (or
-   `git -C ../sdk-template show <tag>:CHANGELOG.md` when the family workspace is checked
-   out beside this repository), for every release after `_commit` up to `<tag>`: its
-   entries, its **Hand-apply** list and its "Updating from" paragraph, which names the
-   `-d` answers an update from an older tag needs. Then the core release it adopts,
-   `X.Y.Z`, the one the template release names (`X.Y.0`, or the patch that shipped what
-   the template needs: core 0.2.1 for template v0.2.1, whose `tests/test_family.py`
-   imports what 0.2.0 lacks): sdk-core's `CHANGELOG.md` section, the ADRs it names, their
-   Consequences, and `docs/handover.md`, section "Adopting core X.Y.Z", for what this
-   source deletes and declares (`https://github.com/xippios/sdk-core/tree/vX.Y.Z`, or
-   `git -C ../sdk-core show vX.Y.Z:<path>` in the same workspace).
+2. **What core X.Y.Z asks.** Read sdk-core at `vX.Y.Z`
+   (`git -C ../sdk-core show vX.Y.Z:<path>` in the family workspace, or
+   `https://github.com/xippios/sdk-core/tree/vX.Y.Z`): its `CHANGELOG.md` section
+   `[X.Y.Z]`, the ADRs it names with their Consequences, and `docs/handover.md`, "Adopting
+   core X.Y.Z", its "Every source" and "sdk-cashctrl" sections, for what this source
+   deletes and declares. Read sdk-template's `CHANGELOG.md` only to see which template
+   release accompanies core X.Y and its Hand-apply list: since no `copier update` runs,
+   the template changes the new conventions version needs are applied by hand (step 4,
+   row 118).
 
-3. **Items 1 and 2: the core floor and the template.** First move the tests of the
-   source's own out of every file the template release removes, into `tests/test_tasks.py`
-   (or `tests/test_tasks_write.py`), as the release's CHANGELOG says, and commit: the
-   update deletes such a file, a source's own lines in it included, with no conflict
-   marker. If the update ran first, the deleted file is still in the last commit, and
-   `git show HEAD:tests/test_adapters.py` brings its tests back to move (v0.2.1 removes it
-   and `tests/test_layout.py`). Then run
+3. **Item 1: the core floor, by hand.** In `pyproject.toml`, raise `xippios-core` and its
+   `mcp`, `http` and `testing` extras to `~=X.Y.0` (or `~=X.Y.Z` when patch `Z` shipped
+   what cashctrl adopts; still one minor, conventions §12, ADR-0018 amendment (c)), from
+   PyPI with no `[tool.uv.sources]`. Then `uv lock` and `uv sync --all-extras`. No copier
+   command runs. Item 2 is unticked with "no template release to adopt (D35)".
 
-   ```bash
-   uvx copier update --defaults --vcs-ref=<tag> -d core_version=X.Y.Z -d core_git_ref=
-   ```
-
-   adding every `-d` answer the "Updating from" paragraphs name. Resolve the conflicts:
-   `git grep -n '^<<<<<<< before updating'` finds them in the files the template manages
-   (`tests/conftest.py` and `tests/test_family.py` among them). Keep the template's side
-   and carry over what the source added on purpose, such as a fixture of its own in
-   `conftest.py`. The files the source fills, `__init__.py`, `_client.py`, `models.py`,
-   `api/`, `tasks.py`, `tasks_write.py`, `params.py`, `enums.py`, `reference/`,
-   `scripts/`, `tests/test_tasks.py`, `tests/test_tasks_write.py`, `tests/test_live.py`,
-   `tests/fixtures/`, `docs/upstream/`, `README.md` and `CHANGELOG.md`, are never touched
-   by the update. Then `uv lock` and `uv sync --all-extras`. `pyproject.toml` depends on
-   `xippios-core~=X.Y.Z`, its `mcp`, `http` and `testing` extras likewise, with no
-   `[tool.uv.sources]` left: `~=X.Y.0`, or `~=X.Y.Z` when patch `Z` shipped what the
-   source adopts (`~=0.2.1` for template v0.2.1), still one minor (conventions §12,
-   ADR-0018 amendment (c)).
-
-4. **Hand-apply.** Port every bullet of every Hand-apply list after `_commit` by hand:
-   path, change, reason. A bullet whose file the source changed is ported in the
-   source's form; a bullet that does not apply to this source says why in the PR.
+4. **Hand-apply.** Port by hand every template change the new conventions version needs:
+   the Hand-apply bullets of the template releases after v0.2.2 up to the one that
+   accompanies core X.Y, and the template-owned files' changes it makes (`ci.yml`,
+   `publish.yml`, `gates.yml`, `live.yml`, the PR template, `.claude/commands/`,
+   `tests/conftest.py`, `tests/test_family.py`, the template's parts of `CLAUDE.md`;
+   row 118): path, change, reason. Every template-rendered file is cashctrl's own, so a
+   change is ported in cashctrl's form. A change that does not apply says why in the PR,
+   among them every one D35 rules out (deleting `mcp_write.py`, `tasks_write.py` or
+   `tests/test_tasks_write.py`, `api_key_location: query`).
 
 5. **Items 3 and 4: workarounds.** Delete every local workaround a core change replaced,
-   its tests with it: those the release's ADRs and `docs/handover.md` name for this
+   its tests with it: those core X.Y.Z's ADRs and `docs/handover.md` name for this
    source, and any other the CHANGELOG's breaking changes reach. The PR description names
    the core change for each (`placeholder_api_key` in `conftest.py` → the plugin's pin,
    ADR-0013). Logic duplicated across sources that core does not provide yet is carried
@@ -76,38 +59,40 @@ of an adoption.
    reach the network is marked `network` (ADR-0013, ADR-0015).
    `xippios_placeholder_key_envs` under `[tool.pytest.ini_options]` names
    `CASHCTRL_DEMO_API_KEY`, the demo organisation's key (the scaffold's `CASHCTRL_API_KEY`
-   is never read, ADR-0014), and `tests/conftest.py` keeps no placeholder fixture of its
+   is never read, ADR-0024), and `tests/conftest.py` keeps no placeholder fixture of its
    own.
 
-7. **Item 6: generated enums.** Re-render `enums.py` once with the release's renderers
-   from the packaged lists, `uv run python scripts/refresh_reference.py --render-only`
-   (step 4 ports the flag where the script lacks it), and commit it as rendered: no
-   formatting step after it. An adoption fetches nothing: the packaged lists stay as
-   they are, since the PR changes nothing else, and so does `docs/upstream/FETCHED.md`,
-   left to the next `/refresh-upstream`; only the capture script's changes are ported
-   (conventions §15, ADR-0003 amendment).
+7. **Item 6: generated enums.** cashctrl has no generated enum file and no
+   `scripts/refresh_reference.py`, since it packages no reference data: the item stays
+   unticked with "no enum file". An adoption fetches nothing: `docs/upstream/FETCHED.md`
+   stays as it is, left to the next `/refresh-upstream`; only the capture script's
+   changes are ported (conventions §15, ADR-0003 amendment).
 
 8. **Item 7: scripts.** `uv run mypy` covers `scripts/` too
    (`files = ["src", "tests", "scripts"]`); fix what `--strict` reports there.
 
-9. **Item 8: conventions.** The release names a conventions version (the header of
-   sdk-core's `docs/conventions.md`, e.g. 1.15); every rule changed since the version
+9. **Item 8: conventions.** Core X.Y.Z names a conventions version (the header of
+   sdk-core's `docs/conventions.md` at `vX.Y.Z`); every rule changed since the version
    this repository last applied (its `CHANGELOG.md` says which) holds after this PR, or
    the PR says why not.
 
-10. **Item 9: changelog.** One line under Unreleased in `CHANGELOG.md` naming the core,
-    template and conventions versions adopted, e.g. "Adopted xippios-core 0.2.1,
-    sdk-template v0.2.1 and conventions 1.15 (conventions §15)."
+10. **Item 9: changelog.** One line under Unreleased in `CHANGELOG.md` naming core
+    X.Y.Z, template v0.2.2 and the conventions version, e.g. "Adopted xippios-core X.Y.Z
+    and conventions N on sdk-template v0.2.2 (conventions §15, D35)."
 
 11. **Checks**, all of them:
     `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest && uv run pre-commit run --all-files`.
 
-12. **The PR.** `gh pr create` from `chore/template-update-<tag>`; the body is
+12. **The PR.** `gh pr create` from `chore/template-update-<core version>`; the body is
     `.github/PULL_REQUEST_TEMPLATE.md` with its **Enforced by CI**, **Adoption PR** and
     **Process** blocks only (Code, Tests and Docs deleted), ticked, an unticked item with
     a one-line reason, the core change named for each deleted workaround, the live calls
     spent counted (`none` is a count), assumptions and open questions listed, and the
-    `## Decisions taken` block. After the reviewer's `ready`, if the `merge-class` check
+    `## Decisions taken` block. Its merge class is `human` when a hand-maintained
+    workflow changes (`ci.yml`, `publish.yml`, `gates.yml`, `live.yml`), and likewise for
+    a protected path or a build or install route (ADR-0018, amendment (e); the merge
+    classes are in the README of the organisation's `.github` repository); a `human`
+    adoption waits for Johannes. After the reviewer's `ready`, if the `merge-class` check
     says `auto`, the session enables auto-merge from the family workspace root, the
     directory that holds the family `CLAUDE.md`, because this repository's
     `.claude/settings.json` denies `gh pr merge`; `-R` names the repository, which `gh`
@@ -117,5 +102,4 @@ of an adoption.
     gh pr merge --auto --squash -R xippios/sdk-cashctrl <number>
     ```
 
-    GitHub merges once `ci` is green and review threads are resolved. A `human`
-    adoption waits for Johannes (ADR-0018, amendment (e)).
+    GitHub merges once `ci` is green and review threads are resolved.

@@ -167,13 +167,7 @@ src/xippios/cashctrl/
   mcp_write.py     xippios-cashctrl-mcp-write entry point
   mcp.py           xippios-cashctrl-mcp entry point
   http.py          FastAPI router
-  params.py        packaged value sets: PACKAGED_LISTS, packaged_values(); none yet
-  enums.py         StrEnums (IntEnums for integer ids) generated from documented value sets;
-                   never edited by hand
-  reference/       documented value sets plus README with provenance; never tenant data
 scripts/
-  refresh_reference.py   stub until a documented value set is needed (refresh-reference-data);
-                         --render-only renders enums.py from reference/ without a request
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
   record_fixture.py      records one exchange with the demo organisation; core's Scrub, then its own
                          TenantScrub (host, encoded and JSON checks) and scrub_text
@@ -194,7 +188,6 @@ tests/
   test_org_lock.py the --org lock: bound tools, driven through core's mcp_call_text (in-process)
   test_record_fixture.py  the recorder never writes the demo host, subdomain or key
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
-  test_refresh_reference.py  nothing is packaged; the stub refuses, --render-only reproduces enums.py
   test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
 docs/upstream/     documentation snapshot and FETCHED.md
 docs/demo-org.md   the synthetic demo organisation: why, how to create and seed it, its books
@@ -202,7 +195,9 @@ docs/demo-org.md   the synthetic demo organisation: why, how to create and seed 
                    publish.yml (the release train: tag, build, PyPI), live.yml (nightly live
                    tests), gates.yml (the merge gates as jobs, off until GATES_CALLER is 1)
 .claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep,
-                   adopt-release
+                   adopt-release; refresh-reference-data does not apply here: cashctrl packages
+                   no reference data and has no scripts/refresh_reference.py, until a documented
+                   value set is needed
 ```
 
 `src/xippios/` has **no** `__init__.py`: it is a PEP 420 namespace package shared with
@@ -249,13 +244,18 @@ request. `meta.total` is upstream's `total` on every list task, never `len(data)
 
 Lookups (accounts, currencies, tax codes, fiscal periods) are tasks too, named
 `list_<thing>`, so agents can form valid calls; they serve the organisation's own data
-live and are never packaged (`/refresh-reference-data`). One whose whole list an agent
-needs and the default result cap (200 rows or 64 KB) would cut gets a cap of its own in
-`MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (ADR-0016); none has one, since
-each list takes filters or pages and no list must reach an agent whole. A task-shaped
-function that returns a subset of an upstream record builds its model with
-`UpstreamModel.project`; nothing is renamed or computed, parsing a value
-(`parse_decimal`) is the only override.
+live and are never packaged: a multi-tenant source packages no tenant data. Nor does the
+package ship a value set `docs/upstream/` fixes, since no task needs one yet, so the
+reference-data scaffolding (`params.py`, `enums.py`, `reference/`,
+`scripts/refresh_reference.py`) is gone until a documented value set is needed; then it
+comes back from the `render_enums` port deleted here, not from template v0.2.2's
+scaffold, whose script needs renderers core 0.3.0 removed (`/refresh-reference-data` says
+where). A lookup whose whole list an agent needs and the default result cap (200 rows or
+64 KB) would cut gets a cap of its own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes
+through (ADR-0016); none has one, since each list takes filters or pages and no list must
+reach an agent whole. A task-shaped function that returns a subset of an upstream record
+builds its model with `UpstreamModel.project`; nothing is renamed or computed, parsing a
+value (`parse_decimal`) is the only override.
 Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
@@ -480,11 +480,14 @@ payload it was given, API user tags included, into the public Actions log.
   session enables auto-merge after the reviewer's `ready` (ADR-0018, amendment (e)). An
   adoption of a later core minor runs no `copier update` (D35, D85): it raises the floor
   to `~=X.Y.0` by hand in `pyproject.toml`, runs `uv lock` and ports that core release's
-  Hand-apply list (`/adopt-release`). From template v0.2.2 on every template-rendered
-  file is cashctrl's own (`ci.yml`, `publish.yml`, `gates.yml`, `live.yml`, the PR
-  template, the `.claude/commands` files, the template's parts of this file), and a core
-  adoption hand-applies the template changes the conventions version it adopts needs
-  (row 118).
+  Hand-apply list (`/adopt-release`). The reference-data scaffolding (`params.py`,
+  `enums.py`, `reference/`, `scripts/refresh_reference.py`) does not come back, since
+  cashctrl runs no further `copier update` (D35); a future value set brings the script
+  back by hand from the `render_enums` port deleted here (`/refresh-reference-data`).
+  From template v0.2.2 on every template-rendered file is cashctrl's own (`ci.yml`,
+  `publish.yml`, `gates.yml`, `live.yml`, the PR template, the `.claude/commands` files,
+  the template's parts of this file), and a core adoption hand-applies the template
+  changes the conventions version it adopts needs (row 118).
 - cashctrl stays on template v0.2.2 after template v0.3.0 and keeps adopting core minors
   through conventions §15; `copier update` must never be run past v0.2.2: the v0.3.0
   template deletes `mcp_write.py`, `tasks_write.py` and `tests/test_tasks_write.py` and

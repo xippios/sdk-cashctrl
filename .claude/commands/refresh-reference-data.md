@@ -1,3 +1,5 @@
+Note: cashctrl packages no reference data and has no `scripts/refresh_reference.py`, so this command does not apply here until a documented value set is needed; then the script comes back from the `render_enums` port this repository deleted (below).
+
 Refresh the packaged reference data for CashCtrl: $ARGUMENTS
 
 CashCtrl has two kinds of lists, and only one of them may ship inside the package. A
@@ -17,17 +19,22 @@ every tenant, if any.
   generated with provenance from the snapshot, never typed in by hand and never fetched
   from an organisation.
 
-`scripts/refresh_reference.py` is a stub until the first such value set is needed: run
-without options it says so and exits with status 1. Its `LISTS` is empty, and
-`--render-only` regenerates `enums.py` from the packaged `reference/*.json` alone (none
-yet, so an empty module), without a request or a key, as an adoption does after a core
-release changes the renderers (`/adopt-release`). When a task needs a value set:
+None is packaged yet, so `scripts/refresh_reference.py`, `params.py`, `enums.py` and
+`reference/` are gone (the note above). When a task needs a value set, bring them back
+from the `render_enums` port deleted here: `git show dfb65ce:<path>` (dfb65ce on main,
+the merge of #13), or `git show <commit>^:<path>` with `<commit>`, the commit that
+deleted it, from `git log --diff-filter=D -1 -- scripts/refresh_reference.py`. Not from
+template v0.2.2's scaffold: its script imports `render_str_enums` and
+`render_int_enums`, which core 0.3.0 removed. Make the script the generator of step 3;
+its `--render-only` regenerates `enums.py` from the packaged `reference/*.json` alone,
+without a request or a key, through its one `render_enums` call, as an adoption does
+after a core release changes `render_enums` (`/adopt-release`). Then:
 
 1. Work on a branch `chore/reference-<thing>`. Make sure `docs/upstream/` is current
    (`/refresh-upstream` first if it is not).
 2. Find the parameter and its "Possible values" in `docs/upstream/`: snapshot file,
    operation, parameter. Values come from there, verbatim, nowhere else.
-3. Replace the stub with a generator over the snapshot: a `LISTS` mapping from the set's
+3. Make the script a generator over the snapshot: a `LISTS` mapping from the set's
    name to (snapshot file, operation, parameter); for each entry it reads the values from
    the snapshot, writes `reference/<name>.json` (`param`, `fetched` = the snapshot date
    in `docs/upstream/FETCHED.md`, `values`) and regenerates `enums.py` with
