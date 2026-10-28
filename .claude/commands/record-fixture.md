@@ -5,11 +5,16 @@ example `account/read.json unknown_id id=999999999` or, for a write,
 `journal/delete.json ok --method POST ids=51`.
 
 Fixtures are recorded through the real client by `scripts/record_fixture.py`, never typed
-in by hand. **Every fixture comes from the demo organisation and from nothing else**: the
-script has no organisation parameter, drops `CASHCTRL_ORGS` from its own environment and
-always records through `client_for("demo")`. Never record from a productive organisation,
-never adapt the script or a one-off snippet to do so, and never set `CASHCTRL_ORGS` with
-real names to record. The repository is public.
+in by hand (conventions §10). **Every fixture comes from the demo organisation and from
+nothing else**: the script has no organisation parameter, drops `CASHCTRL_ORGS` from its
+own environment and always records through `client_for("demo")`. Never record from a
+productive organisation, never adapt the script or a one-off snippet to do so, and never
+set `CASHCTRL_ORGS` with real names to record. The repository is public.
+
+A fixture rides in the PR of the task it tests: the definition of done,
+https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, lists its
+checks, and the reviewer judges them against
+https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md.
 
 The demo subdomain is treated exactly like a key: never in a file, a commit, a log line or
 a report. Never print `CASHCTRL_DEMO_SUBDOMAIN` or any variable ending in `_API_KEY`.
@@ -89,11 +94,12 @@ writes nothing and exits non-zero:
 
    It builds the fixture in memory with core's `fixture_from_response` and
    `Scrub(secrets=[key, its basic-auth token])` (credentials scrubbed, the key replaced
-   with `REDACTED` where it appears as given), then runs its own step, `TenantScrub`
-   (ADR-0024): the demo host replaced with `demo.cashctrl.com` everywhere in it, the host
-   offline tests replay against, in any case and percent-encoded too, the key in every
-   encoded form replaced with `REDACTED`, and a fixture still holding the host, the
-   subdomain or the key, behind a JSON escape included, refused; it replaces every
+   with `REDACTED` where it appears as given), then runs its own step, `TenantScrub`, on
+   the `Fixture` core returns, before the write (ADR-0024): the demo host replaced with
+   `demo.cashctrl.com` everywhere in it, the host offline tests replay against, in any
+   case and percent-encoded too, the key in every encoded form replaced with `REDACTED`,
+   and a fixture still holding the host, the subdomain or the key, behind a JSON escape
+   included, refused; it replaces every
    e-mail address with
    `user@example.com`, every API user tag in `createdBy` and `lastUpdatedBy` with
    `API:REDACTED` and the value of every token-like field (`hash`, `token`, `secret`,
@@ -103,7 +109,12 @@ writes nothing and exits non-zero:
    It prints only the status and that URL. `--wrong-key` sends an invalid key instead of
    the real one, to record a 401.
    Error cases (an unknown id, a refusal) are worth recording; the recorder keeps them
-   instead of raising.
+   instead of raising. A source whose upstream counts a quota records through a client
+   that never retries, so a 5xx spends no quota on a retry; core's `record` takes no
+   `retry=`, so the recorder's client carries it:
+   `AsyncClient(dataclasses.replace(client.config, retry=RetryPolicy(max_attempts=1)), auth=auth)`,
+   with `AsyncClient` and `RetryPolicy` from `xippios.core`, `client` being
+   `client_for("demo")`.
 4. The check runs on the scrubbed fixture before the write, over its text, the
    decoded strings of its response body and, for a write, the request body (the raw
    text, every form field decoded and every string of a JSON value such as `items`): if
@@ -127,8 +138,10 @@ writes nothing and exits non-zero:
    grep -rhoiE --include='*.json' '(ssn=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
    ```
 
-   The first prints nothing but `REDACTED` values (and the README's own example line);
-   the second prints `user@example.com` and nothing else; the third prints `clean`.
+   The first prints nothing but `REDACTED` values; a match in upstream's own text (a
+   word such as `SECRETARY` in a name or a description) is no credential: read every
+   match by eye. The second prints `user@example.com` and nothing else; the third prints
+   `clean`.
    `grep -rhoiE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u` prints `API:REDACTED` at
    most. The fourth grep prints `REDACTED` values only. The last two count, without
    printing them, the values of `ssn`, `iban` and `qrIban`, the identifiers this package
@@ -136,8 +149,17 @@ writes nothing and exits non-zero:
    the JSON bodies and in a write's form body (`ssn=`, and `iban` inside the
    percent-encoded `bankAccounts`); both print `0`. A real value found means the file is
    deleted, never committed.
-6. Keep the fixture small enough to review, well under 40 KB (`limit=`, a filter, a
-   query): prefer the narrowest query that shows the shape. The default chart of
-   accounts (139 accounts) is too large for one fixture; narrow `account/list.json`.
-   Reference it from a test with the `replay_fixture("<endpoint>", "<case>")` fixture and
-   call through `client_for("demo")` or a task with `org="demo"`.
+6. The fixture file stays under 256 KiB (conventions §10, ADR-0019 decision 5); `ci.yml`
+   fails on a larger one. The recorder cuts no body (no `max_bytes=`) and refuses one
+   that is not UTF-8 text, so narrow the query instead: keep the fixture small enough to
+   review, well under 40 KB (`limit=`, a filter, a query), and prefer the narrowest query
+   that shows the shape. The default chart of accounts (139 accounts) is too large for
+   one fixture; narrow `account/list.json`.
+7. Reference it from a test with the `replay_fixture("<endpoint>", "<case>")` fixture and
+   call through `client_for("demo")` or a task with `org="demo"`. Stage it
+   (`git add tests/fixtures`) before `uv run pre-commit run --all-files`, which scans
+   only the files in git's index: an unstaged fixture escapes detect-secrets. When
+   detect-secrets flags a recorded HTML error page (a site's "Page not found" carries
+   hashes it reads as secrets), never edit the fixture to pass it: narrow the request,
+   or drop the fixture and keep the status alone, named in the PR description with the
+   call counted. An HTML error body is kept only when a test needs it.

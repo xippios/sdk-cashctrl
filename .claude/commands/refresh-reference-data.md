@@ -6,6 +6,11 @@ CashCtrl has two kinds of lists, and only one of them may ship inside the packag
 multi-tenant source (ADR-0014) packages no tenant data, only lists that are the same for
 every tenant, if any.
 
+The PR meets the definition of done,
+https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, and the
+reviewer judges it against
+https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md.
+
 - **Tenant data is never packaged.** Accounts, currencies, tax codes, fiscal periods,
   cost centres, units, person categories and every other list an organisation keeps for
   itself are per-organisation data: each organisation has its own, and they change as it
@@ -36,8 +41,10 @@ after a core release changes `render_enums` (`/adopt-release`). Then:
    operation, parameter. Values come from there, verbatim, nowhere else.
 3. Make the script a generator over the snapshot: a `LISTS` mapping from the set's
    name to (snapshot file, operation, parameter); for each entry it reads the values from
-   the snapshot, writes `reference/<name>.json` (`param`, `fetched` = the snapshot date
-   in `docs/upstream/FETCHED.md`, `values`) and regenerates `enums.py` with
+   the snapshot, writes `reference/<name>.json` with core's `PackagedList(...).write`
+   (`param`, `endpoint` = the snapshot file and operation, `fetched` = the snapshot's
+   `Fetched` time in `docs/upstream/FETCHED.md`, `records`, a value list as records of
+   one field named by the list) and regenerates `enums.py` with
    one `xippios.core.reference.render_enums` call (`member_names=` for a value with no
    identifier to derive; integer ids as `id_name_pairs` builds them), then `ruff format`
    and `ruff check --fix` on it, as `--render-only` does.
@@ -46,13 +53,17 @@ after a core release changes `render_enums` (`/adopt-release`). Then:
    snapshot.
 4. Commit `enums.py` as the script leaves it: core's `render_enums` writes it ASCII-only
    and the script's ruff step lays it out (ADR-0008, amendment 2026-10-27).
-5. Add a row to the provenance table in `reference/README.md`: file, origin (snapshot
-   file, operation, parameter), snapshot date.
+5. Add a row to the provenance table in `reference/README.md`: the file, its origin
+   (the `docs/upstream/` file it was rebuilt from, the operation and the parameter) and
+   the snapshot's `Fetched` time.
 6. Agents need the values to form valid calls: a parameter typed with the enum lists them
    in the tool's schema. Where a task takes them some other way, add one lookup task per
    list (`list_<thing>`, `/add-endpoint`), which returns the packaged data and does not
    call upstream; a list an agent needs whole that is longer than the default result cap
    (200 rows or 64 KB) gets a cap of its own, `MCP_CAPS` in `tasks.py`, keyed by the
    task's name (ADR-0016).
-7. Run the checks and open the PR with the diff summarised: values added or gone (a
-   value that disappeared may break callers). Do not merge.
+7. Update what pins the old lists: counts and dates in docstrings and in tests. A test
+   that reads them from the packaged file needs no change.
+8. Run the checks and open the PR, its body as the definition of done says, with the
+   diff summarised: values added or gone (a value that disappeared may break callers).
+   Do not merge.
