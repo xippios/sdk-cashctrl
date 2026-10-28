@@ -109,12 +109,11 @@ writes nothing and exits non-zero:
    It prints only the status and that URL. `--wrong-key` sends an invalid key instead of
    the real one, to record a 401.
    Error cases (an unknown id, a refusal) are worth recording; the recorder keeps them
-   instead of raising. A source whose upstream counts a quota records through a client
-   that never retries, so a 5xx spends no quota on a retry; core's `record` takes no
-   `retry=`, so the recorder's client carries it:
-   `AsyncClient(dataclasses.replace(client.config, retry=RetryPolicy(max_attempts=1)), auth=auth)`,
-   with `AsyncClient` and `RetryPolicy` from `xippios.core`, `client` being
-   `client_for("demo")`.
+   instead of raising. The rule is a recording client that never retries, so a 5xx
+   spends no call on a retry: `RetryPolicy(max_attempts=1)` from `xippios.core` on the
+   recorder's client, since core's `record` takes no `retry=`. cashctrl's recorder does
+   not carry it yet: it records through `client_for("demo")` with core's default
+   retries, and PR 2 of the 0.3.0 package adds the policy (row 138 item 3).
 4. The check runs on the scrubbed fixture before the write, over its text, the
    decoded strings of its response body and, for a write, the request body (the raw
    text, every form field decoded and every string of a JSON value such as `items`): if
