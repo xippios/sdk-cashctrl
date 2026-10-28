@@ -136,6 +136,16 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
+def _api_path(url: httpx.URL) -> str:
+    """The path after ``/api/v1``, e.g. ``/order/document/read.pdf``; never the host or query."""
+    return url.path.rsplit("/api/v1", 1)[-1]
+
+
+def _reads_pdf_by_ids(url: httpx.URL) -> bool:
+    """``<...>/read.pdf`` asked for records by non-empty ``ids``, at most ``lang`` besides."""
+    return url.path.endswith("/read.pdf") and _reads_by_id(url)
+
+
 def _reads_by_id(url: httpx.URL) -> bool:
     """A read by id: ``<...>/read.json`` by ``id``, or ``<...>/read.pdf`` by ``ids``.
 
@@ -199,9 +209,16 @@ def _status_error(response: httpx.Response) -> XippiosError | None:
     # Core maps a copy whose body names cashctrl.com instead.
     neutral = _without_tenant_host(response)
     error = error_from_response(neutral, source=SOURCE)
+    url = response.request.url
+    if isinstance(error, NotFoundError) and _reads_pdf_by_ids(url):
+        # Observed on 2026-10-29: order/document/read.pdf answers an id no order has with
+        # a 404; upstream signals absence there (conventions §5).
+        return NotFoundError(
+            f"CashCtrl: no record has an id asked, HTTP 404 ({_api_path(url)})", source=SOURCE
+        )
     if isinstance(error, NotFoundError):
         # error-handling.md: "404 - Not Found: The requested endpoint doesn't exist." An
-        # absent record is a 200 refusal (classify), so NotFoundError keeps that one meaning.
+        # absent record is a 200 refusal (classify), or a 404 on a read.pdf by ids above.
         return UpstreamError(
             f"{error.message} (the endpoint does not exist upstream)",
             status=404,
@@ -221,7 +238,12 @@ def classify(response: httpx.Response) -> XippiosError | None:
     ``cashctrl.com`` instead of the organisation's host, so neither the quoted snippet
     nor ``UpstreamError.body`` carries an organisation's subdomain. A 404
     means "The requested endpoint doesn't exist" and raises ``UpstreamError`` with
-    ``status=404``: ``NotFoundError`` only ever means an absent record (ADR-0003).
+    ``status=404``: ``NotFoundError`` only ever means an absent record (ADR-0003). One
+    404 does mean an absent record: on a ``<...>/read.pdf`` asked by non-empty ``ids``
+    (``order/document/read.pdf``), which answered an id no order has with HTTP 404
+    ("CashCtrl - 404 Not Found") on 2026-10-29 and served the existing order's PDF in
+    the same run; it raises ``NotFoundError``, upstream signalling absence (conventions
+    §5), its message naming the path only.
 
     Documented refusals: validation errors come back as HTTP 200 with
     ``{"success": false, "errors": [{"field": ..., "message": ...}]}``. They raise
@@ -259,10 +281,10 @@ def classify(response: httpx.Response) -> XippiosError | None:
       (``"This book entry does not exist."``) were observed; the other operations are
       assumed to refuse alike.
     - A ``<...>/read.pdf`` asked for records by non-empty ``ids`` (``order/document/read.pdf``,
-      the one this package downloads) reads by id too: its refusal with a message and no
-      field list raises ``NotFoundError``, assumed alike and not observed. A download's
-      answer reaches ``classify`` unread; ``api/_download.py`` hands it a JSON answer's
-      head (queue row 142).
+      the one this package downloads) reads by id too: a refusal with a message and no
+      field list there would raise ``NotFoundError`` (not observed: an unknown id answers
+      a 404, above). A download's 200 reaches ``classify`` unread; ``api/_download.py``
+      hands it a JSON answer's head (queue row 142).
 
     Everything else falls through (``None``): a 200 that is not a JSON object with
     ``"success": false`` (data, malformed JSON), a download's 200, whose body core leaves
@@ -284,9 +306,7 @@ def classify(response: httpx.Response) -> XippiosError | None:
     message = _text(payload.get("errorMessage")) or _text(payload.get("message"))
     url = response.request.url
     if not errors and message and _reads_by_id(url):
-        return NotFoundError(
-            f"CashCtrl: {message} ({url.path.rsplit('/api/v1', 1)[-1]})", source=SOURCE
-        )
+        return NotFoundError(f"CashCtrl: {message} ({_api_path(url)})", source=SOURCE)
     return RequestRejected(errors, upstream_message=message, source=SOURCE)
 
 
