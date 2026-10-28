@@ -1138,9 +1138,10 @@ async def list_cost_centers_async(
     an allocation in ``create_journal_entry``, ``update_journal_entry`` and the items of
     ``create_order``), ``number`` (as text, ``"100"``), ``name`` (localised),
     ``category_id``, ``is_inactive``, ``notes``, its targets ``target_min`` and
-    ``target_max``, and its balances ``opening_amount`` and ``end_amount`` in the API
-    user's current fiscal period (upstream's default; this task sends no
-    ``fiscalPeriodId``). ``meta.total`` is upstream's count. Upstream ignores
+    ``target_max``, and its balances ``opening_amount`` and ``end_amount``, assumed to be
+    the API user's current fiscal period's (this task sends no ``fiscalPeriodId``,
+    upstream documents no default, and only ``0`` was observed). ``meta.total`` is
+    upstream's count. Upstream ignores
     values it does not understand, so ``dir`` and the filters' ``comparison`` are checked
     first and a wrong one is refused.
 
@@ -1207,7 +1208,8 @@ async def get_report_tree_async(org: str) -> Result[list[ReportTreeNode]]:
     sheet, ``PLS`` for profit and loss, ``OPEN_DEBTORS``, ``VAT_SETTLEMENT``, ...) and
     its ``text`` its name. ``id`` is the tree's own key (``element-1``), not an id other
     tools take. ``meta.total`` is upstream's count of the top-level nodes, not of every
-    report.
+    report. ``get_report_data`` refuses the payroll and people reports among the elements
+    (``SALARY_LIST``, ``SETTLEMENT``, ``REVENUE_BY_PERSON``, ...).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1398,12 +1400,14 @@ async def get_report_data_async(
     reports ``SALARY_LIST``, ``SALARY_TYPE_RECAP``, ``SALARY_TYPES``,
     ``SALARY_BOOK_ENTRIES``, ``SETTLEMENT``, ``WITHHOLDING_TAX_SETTLEMENT``,
     ``REVENUE_BY_PERSON``, ``EXPENSE_BY_PERSON``, ``REVENUE_BY_PERSON_CHART`` and
-    ``EXPENSE_BY_PERSON_CHART``. ``WITHHOLDING_TAX_RATES`` is read. The type is the one
-    ``get_report_tree`` shows: the first call for an organisation reads its report tree
-    and keeps it, and an element the kept tree does not list reads it once more; one the
-    tree does not list at all is asked of upstream as given. From every other report,
-    each key named ``ssn``, ``iban`` or ``qrIban``, in any letter case and at any depth,
-    is dropped before the data comes back; nothing else is.
+    ``EXPENSE_BY_PERSON_CHART``. ``WITHHOLDING_TAX_RATES`` is read, and so are the debtor
+    and creditor reports (``OPEN_DEBTORS``, ``OPEN_CREDITORS``), which name business
+    partners as ``list_persons`` does, the identifier drop below their guard. The type is
+    the one ``get_report_tree`` shows: the first call for an organisation reads its
+    report tree and keeps it, and an element the kept tree does not list reads it once
+    more; one the tree does not list at all is asked of upstream as given. From every
+    other report, each key named ``ssn``, ``iban`` or ``qrIban``, in any letter case and
+    at any depth, is dropped before the data comes back; nothing else is.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
