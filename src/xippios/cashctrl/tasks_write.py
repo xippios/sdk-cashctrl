@@ -28,7 +28,8 @@ into ``False``, and refuses anything else. The decisions taken for these tools o
    documents, every value escaped. An update keeps every stored custom value it is not
    given.
 4. **Ids for orders.** ``list_order_categories`` (``tasks.py``, the read server) lists
-   the categories and their statuses, the ids ``create_order`` takes.
+   the categories and their statuses, the ids ``create_order`` and ``update_order``
+   take.
 5. **Live tests mark, delete and sweep** (``tests/test_live.py``).
 6. **Deletes** preview the record they would delete. A journal delete reads the entry,
    confirmed or not, and refuses one an order or a salary run booked (2026-10-24).
@@ -94,6 +95,7 @@ __all__ = [
     "delete_order",
     "delete_person",
     "update_journal_entry",
+    "update_order",
     "update_person",
 ]
 
@@ -344,6 +346,7 @@ _FLAGS = frozenset(
     {
         "is_auto_fill_responsible_person",
         "is_customer",
+        "is_display_item_gross",
         "is_employee",
         "is_family",
         "is_inactive",
@@ -351,9 +354,10 @@ _FLAGS = frozenset(
         "is_vendor",
     }
 )
-"""The boolean update parameters ("Possible values: true, false"), every one a person's.
+"""The boolean update parameters ("Possible values: true, false"): a person's and an order's.
 
-``journal/update.json`` documents none. A flag named in ``clear`` is sent as ``false``.
+``journal/update.json`` documents none; ``order/update.json`` one,
+``isDisplayItemGross``. A flag named in ``clear`` is sent as ``false``.
 """
 
 _UNSENT = {
@@ -551,7 +555,10 @@ async def create_journal_entry_async(
     upstream then ignores those three. ``amount`` with a ``tax_id`` is the gross amount,
     VAT included (observed on the demo organisation, although the tax codes' calculation
     type reads NET). Account ids come from ``list_accounts`` (the ``id``, not the account
-    number), tax codes from ``list_tax_codes``, persons from ``list_persons``. CashCtrl
+    number; ``list_account_categories`` gives the ``category_id`` that narrows it), tax
+    codes from ``list_tax_codes``, persons from ``list_persons``, currencies from
+    ``list_currencies``, cost centers from ``list_cost_centers`` and custom field names
+    from ``list_custom_fields`` with ``type`` ``JOURNAL``. CashCtrl
     checks the entry and refuses it naming the fields, e.g. ``debitId: This field cannot
     be empty.``; nothing is checked here that upstream checks itself.
 
@@ -571,7 +578,8 @@ async def create_journal_entry_async(
             ``credit``, and optionally ``description``, ``tax_id``, ``associate_id`` and
             ``allocations``, e.g. ``[{"account_id": 3, "debit": 500},
             {"account_id": 42, "credit": 500}]``.
-        allocations: Allocations to cost centers, e.g.
+        allocations: Allocations to cost centers, each a ``share`` and a
+            ``to_cost_center_id`` from ``list_cost_centers``, e.g.
             ``[{"share": 1, "to_cost_center_id": 2}]``.
         attachments: Files to attach, e.g. ``[{"file_id": 24}]``.
         currency_id: A currency, an ``id`` from ``list_currencies``; the default currency
@@ -588,7 +596,8 @@ async def create_journal_entry_async(
         notify_email: The address notified with ``notify_type`` ``EMAIL``.
         notify_person_id: The person notified with ``notify_type`` ``PERSON``.
         notify_user_id: The user notified with ``notify_type`` ``USER``.
-        custom: Custom field values by upstream's name, e.g.
+        custom: Custom field values by upstream's name, ``customField<id>`` with an
+            ``id`` from ``list_custom_fields`` (``type`` ``JOURNAL``), e.g.
             ``{"customField1": "Projekt A"}``.
         confirm: ``true`` books the entry; ``false`` (the default) only previews it.
     """
@@ -679,7 +688,10 @@ async def update_journal_entry_async(
     booked (``order_id``, ``order_book_entry_id`` or ``salary_book_entry_id`` set); a
     simple entry that gives no ``amount``, ``debit_id`` or ``credit_id``; an entry
     holding attachments or allocations, which cannot be carried over, unless the call
-    replaces or clears them. ``amount`` with a ``tax_id`` is gross.
+    replaces or clears them. ``amount`` with a ``tax_id`` is gross. The ids come from
+    the lists ``create_journal_entry`` names: ``list_accounts``, ``list_tax_codes``,
+    ``list_persons``, ``list_currencies``, ``list_cost_centers`` and
+    ``list_custom_fields`` (``JOURNAL``).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -697,7 +709,8 @@ async def update_journal_entry_async(
         items: The lines of a collective entry, replacing the stored ones, each with
             ``account_id`` and ``debit`` or ``credit``, e.g.
             ``[{"account_id": 3, "debit": 500}, {"account_id": 42, "credit": 500}]``.
-        allocations: Allocations to cost centers, replacing the stored ones, e.g.
+        allocations: Allocations to cost centers, replacing the stored ones, each a
+            ``share`` and a ``to_cost_center_id`` from ``list_cost_centers``, e.g.
             ``[{"share": 1, "to_cost_center_id": 2}]``.
         attachments: Files to attach, replacing the stored ones, e.g. ``[{"file_id": 24}]``.
         currency_id: A currency, an ``id`` from ``list_currencies``.
@@ -712,7 +725,8 @@ async def update_journal_entry_async(
         notify_email: The address notified with ``notify_type`` ``EMAIL``.
         notify_person_id: The person notified with ``notify_type`` ``PERSON``.
         notify_user_id: The user notified with ``notify_type`` ``USER``.
-        custom: Custom field values to set by upstream's name, e.g.
+        custom: Custom field values to set by upstream's name, ``customField<id>`` with
+            an ``id`` from ``list_custom_fields`` (``type`` ``JOURNAL``), e.g.
             ``{"customField1": "Projekt B"}``; the other stored values are kept.
         clear: Parameters to send empty, by these names, e.g. ``["tax_id", "notes"]``;
             ``["custom"]`` empties every custom field. A parameter cannot be both given
@@ -1083,8 +1097,11 @@ async def create_person_async(
     one of ``company``, ``first_name`` or ``last_name`` and refuses a person without,
     naming the fields. The roles are flags (``is_customer``, ``is_vendor``, ...); a flag
     left out is not sent, so upstream applies its default. Without ``nr`` and
-    ``sequence_number_id`` upstream may number the person from a sequence itself.
-    Person categories are ids from CashCtrl's person categories.
+    ``sequence_number_id`` upstream may number the person from a sequence itself. Ids:
+    ``category_id`` from ``list_person_categories``, ``title_id`` from
+    ``list_person_titles``, an employee's ``location_id`` from ``list_locations``,
+    ``superior_id`` from ``list_persons`` and custom field names from
+    ``list_custom_fields`` with ``type`` ``PERSON``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1101,7 +1118,8 @@ async def create_person_async(
             ``EMAIL_INVOICE``, ``PHONE_WORK``, ``MOBILE_WORK``, ``WEBSITE``, ...) and
             ``address``, optionally ``notes``, e.g.
             ``[{"type": "EMAIL_WORK", "address": "info@muster.example"}]``.
-        category_id: A person category's id, e.g. ``1``.
+        category_id: A person category, an ``id`` from ``list_person_categories``,
+            e.g. ``1``.
         is_customer: ``true`` for a customer.
         is_vendor: ``true`` for a vendor.
         is_employee: ``true`` for an employee.
@@ -1111,7 +1129,8 @@ async def create_person_async(
         nr: The person number, at most 50 characters, e.g. ``"K-1001"``.
         sequence_number_id: The sequence number that generates ``nr``, e.g. ``3``.
         language: ``DE``, ``EN``, ``FR`` or ``IT``, e.g. for documents.
-        title_id: A person title's id (Mr., Mrs., Dr.), e.g. ``1``.
+        title_id: A title (Mr., Mrs., Dr.), an ``id`` from ``list_person_titles``,
+            e.g. ``1``.
         alt_name: An alternative name for the organisational chart.
         position: The job title, at most 100 characters.
         department: The department, at most 100 characters.
@@ -1126,13 +1145,13 @@ async def create_person_async(
         date_birth: The date of birth, e.g. ``1980-05-17``.
         color: The colour in the organisational chart: ``BLUE``, ``GREEN``, ``RED``,
             ``YELLOW``, ``ORANGE``, ``BLACK``, ``GRAY``, ``BROWN``, ``VIOLET``, ``PINK``.
-        superior_id: The superior, a person's id.
+        superior_id: The superior, an ``id`` from ``list_persons``.
         notes: Notes, limited HTML allowed.
         attachments: Files to attach, e.g. ``[{"file_id": 24}]``.
         user_id: The CashCtrl user linked to an employee.
         is_auto_fill_responsible_person: ``true`` fills this person in as responsible
             person on order documents (with ``user_id``).
-        location_id: The employee's workplace, a location's id.
+        location_id: The employee's workplace, an ``id`` from ``list_locations``.
         ssn: The employee's social security number; sent as given, shown as
             ``REDACTED`` in the preview and in ``meta.request``.
         children: Children of an employee or family, each with ``name``.
@@ -1143,7 +1162,9 @@ async def create_person_async(
         insurance_nr: The insurance number of an insurance.
         insurance_member_nr: The member number at an insurance.
         insurance_contracts: Insurance contracts, each with ``type_id``.
-        custom: Custom field values by upstream's name, e.g. ``{"customField2": "Gold"}``.
+        custom: Custom field values by upstream's name, ``customField<id>`` with an
+            ``id`` from ``list_custom_fields`` (``type`` ``PERSON``), e.g.
+            ``{"customField2": "Gold"}``.
         confirm: ``true`` creates the person; ``false`` (the default) only previews it.
     """
     problems: list[str] = []
@@ -1269,7 +1290,10 @@ async def update_person_async(
     an address with a title or a contact with a purpose, which cannot be carried over;
     an insurance whose read shows no ``insurance_nr`` or ``insurance_member_nr``, or an
     employee whose read shows no ``user_id`` (the read leaves empty fields out, and these
-    were never seen come back, so their absence is unknown, not empty).
+    were never seen come back, so their absence is unknown, not empty). The ids come
+    from the lists ``create_person`` names: ``list_person_categories``,
+    ``list_person_titles``, ``list_locations``, ``list_persons`` and
+    ``list_custom_fields`` (``PERSON``).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1282,7 +1306,8 @@ async def update_person_async(
             ``country`` (``CHE``), e.g. ``[{"type": "MAIN", "city": "Bern"}]``.
         contacts: Contact information replacing the stored ones, each with ``type``
             (``EMAIL_WORK``, ``PHONE_WORK``, ...) and ``address``.
-        category_id: A person category's id, e.g. ``1``.
+        category_id: A person category, an ``id`` from ``list_person_categories``,
+            e.g. ``1``.
         is_customer: ``true`` for a customer, ``false`` to drop the role.
         is_vendor: ``true`` for a vendor, ``false`` to drop the role.
         is_employee: ``true`` for an employee.
@@ -1292,7 +1317,8 @@ async def update_person_async(
         nr: The person number, at most 50 characters, e.g. ``"K-1001"``.
         sequence_number_id: The sequence number that generates ``nr``, e.g. ``3``.
         language: ``DE``, ``EN``, ``FR`` or ``IT``.
-        title_id: A person title's id (Mr., Mrs., Dr.), e.g. ``1``.
+        title_id: A title (Mr., Mrs., Dr.), an ``id`` from ``list_person_titles``,
+            e.g. ``1``.
         alt_name: An alternative name for the organisational chart.
         position: The job title, at most 100 characters.
         department: The department, at most 100 characters.
@@ -1306,13 +1332,13 @@ async def update_person_async(
         date_birth: The date of birth, e.g. ``1980-05-17``.
         color: ``BLUE``, ``GREEN``, ``RED``, ``YELLOW``, ``ORANGE``, ``BLACK``, ``GRAY``,
             ``BROWN``, ``VIOLET`` or ``PINK``.
-        superior_id: The superior, a person's id.
+        superior_id: The superior, an ``id`` from ``list_persons``.
         notes: Notes, limited HTML allowed.
         attachments: Files to attach, replacing the stored ones, e.g. ``[{"file_id": 24}]``.
         user_id: The CashCtrl user linked to an employee.
         is_auto_fill_responsible_person: ``true`` fills this person in as responsible
             person on order documents.
-        location_id: The employee's workplace, a location's id.
+        location_id: The employee's workplace, an ``id`` from ``list_locations``.
         ssn: The employee's social security number; sent as given, shown as
             ``REDACTED`` in the preview and in ``meta.request``.
         children: Children replacing the stored ones, each with ``name``.
@@ -1325,7 +1351,8 @@ async def update_person_async(
         insurance_member_nr: The member number at an insurance.
         insurance_contracts: Insurance contracts replacing the stored ones, each with
             ``type_id``.
-        custom: Custom field values to set by upstream's name, e.g.
+        custom: Custom field values to set by upstream's name, ``customField<id>`` with
+            an ``id`` from ``list_custom_fields`` (``type`` ``PERSON``), e.g.
             ``{"customField2": "Silber"}``; the other stored values are kept.
         clear: Parameters to send empty, by these names, e.g. ``["department", "notes"]``
             or ``["user_id"]``; ``["custom"]`` empties every custom field, and a flag
@@ -1491,7 +1518,9 @@ async def create_order_async(
     ``list_order_categories`` (``type`` ``SALES`` or ``PURCHASE``); without
     ``status_id`` the order gets the category's first status (Draft for the default
     invoice category, which books nothing). The partner comes from ``list_persons``,
-    accounts from ``list_accounts``, tax codes from ``list_tax_codes``. The items'
+    accounts from ``list_accounts``, tax codes from ``list_tax_codes``, currencies from
+    ``list_currencies``, cost centers from ``list_cost_centers`` and custom field names
+    from ``list_custom_fields`` with ``type`` ``ORDER``. The items'
     ``unit_price`` was read as gross, VAT included, on the demo organisation. Without
     ``nr`` upstream numbers the order from the category's sequence, if it has one, and
     refuses it otherwise.
@@ -1503,18 +1532,21 @@ async def create_order_async(
         category_id: The order category, an ``id`` from ``list_order_categories``,
             e.g. ``4`` (the default invoice category).
         date: The date of the order, e.g. ``2026-10-24``.
-        items: The items, each with ``account_id`` (revenue account for sales, expense
-            account for purchase), ``name`` and ``unit_price``, optionally ``quantity``
-            (default 1), ``tax_id``, ``description``, ``article_nr``,
-            ``discount_percentage``, ``unit_id``, ``inventory_id``, ``type`` (``ARTICLE``,
-            ``TEXT``, ``PAGEBREAK``, ``SUBTOTAL``, ``TITLE``, ``OPTIONTOTAL``) and
-            ``allocations``, e.g. ``[{"account_id": 42, "name": "Beratung",
-            "unit_price": 150, "quantity": 2, "tax_id": 9}]``.
+        items: The items, each with ``account_id`` (an ``id`` from ``list_accounts``:
+            revenue for sales, expense for purchase), ``name`` and ``unit_price``,
+            optionally ``quantity`` (default 1), ``tax_id`` (from ``list_tax_codes``),
+            ``description``, ``article_nr``, ``discount_percentage``, ``unit_id``,
+            ``inventory_id``, ``type`` (``ARTICLE``, ``TEXT``, ``PAGEBREAK``,
+            ``SUBTOTAL``, ``TITLE``, ``OPTIONTOTAL``) and ``allocations`` (each a
+            ``share`` and a ``to_cost_center_id`` from ``list_cost_centers``), e.g.
+            ``[{"account_id": 42, "name": "Beratung", "unit_price": 150, "quantity": 2,
+            "tax_id": 9}]``.
         nr: The order number, at most 50 characters, e.g. ``"RE-2026-201"``.
         description: A description of the document, at most 200 characters.
         status_id: A status of the category, an id from its ``status`` in
             ``list_order_categories``, e.g. ``12``.
-        account_id: The account, e.g. the debtors account; the category's when left out.
+        account_id: The account, e.g. the debtors account, an ``id`` from
+            ``list_accounts``; the category's when left out.
         language: The document's language: ``DE``, ``EN``, ``FR`` or ``IT``.
         due_days: Days until payment is due, e.g. ``30``.
         discount_percentage: A discount on the whole order, 0 to 100, e.g. ``2``.
@@ -1525,7 +1557,7 @@ async def create_order_async(
             when left out.
         group_id: The order group (dossier) to put the order in, e.g. ``3``.
         previous_id: The order this one continues (offer to invoice), e.g. ``2``.
-        responsible_person_id: The responsible person, a person's id.
+        responsible_person_id: The responsible person, an ``id`` from ``list_persons``.
         rounding_id: The rounding of the grand total, e.g. ``1``.
         notes: Notes, limited HTML allowed.
         attachments: Files to attach, e.g. ``[{"file_id": 24}]``.
@@ -1538,7 +1570,9 @@ async def create_order_async(
         notify_email: The address notified with ``notify_type`` ``EMAIL``.
         notify_person_id: The person notified with ``notify_type`` ``PERSON``.
         notify_user_id: The user notified with ``notify_type`` ``USER``.
-        custom: Custom field values by upstream's name, e.g. ``{"customField3": "A-17"}``.
+        custom: Custom field values by upstream's name, ``customField<id>`` with an
+            ``id`` from ``list_custom_fields`` (``type`` ``ORDER``), e.g.
+            ``{"customField3": "A-17"}``.
         confirm: ``true`` creates the order; ``false`` (the default) only previews it.
     """
     problems: list[str] = []
@@ -1593,6 +1627,326 @@ async def create_order_async(
     return _performed(org, endpoint, fields, answer)
 
 
+def _order_items(order: OrderDetail) -> tuple[list[OrderItemInput] | None, str | None]:
+    """The record's items as inputs, in their position, or why they cannot be carried.
+
+    Each item is taken under the keys the ``items`` table of ``order/update.json``
+    documents: ``accountId``, ``name``, ``unitPrice``, ``articleNr``, ``description``,
+    ``discountPercentage``, ``inventoryId``, ``quantity``, ``taxId``, ``type`` and
+    ``unitId``; what upstream computes from them (the totals, ``netUnitPrice``, the tax
+    code's text) is not sent. An item's ``allocations`` were only ever seen empty, and
+    its ``attachments`` and ``isOptional`` are not in the table: an item holding one of
+    them cannot be carried over, nor one outside the documented value sets or without
+    the mandatory ``accountId``, ``name`` or ``unitPrice``. The items are sent in the
+    order of their ``pos``.
+    """
+    if not order.items:
+        return None, None
+    if any(item.allocations for item in order.items):
+        return None, "items, one with allocations, never observed filled"
+    if any(item.attachments for item in order.items):
+        return None, "items, one with attachments, a key the items table does not document"
+    if any(item.is_optional or item.optional for item in order.items):
+        return None, "items, one marked optional, a key the items table does not document"
+    ordered = sorted(order.items, key=lambda item: (item.pos is None, item.pos or 0))
+    try:
+        inputs = [
+            OrderItemInput.model_validate(
+                {
+                    "account_id": item.account_id,
+                    "name": item.name,
+                    "unit_price": item.unit_price,
+                    "article_nr": item.article_nr,
+                    "description": item.description,
+                    "discount_percentage": item.discount_percentage,
+                    "inventory_id": item.inventory_id,
+                    "quantity": item.quantity,
+                    "tax_id": item.tax_id,
+                    "type": item.type,
+                    "unit_id": item.unit_id,
+                }
+            )
+            for item in ordered
+        ]
+    except ValidationError:
+        return None, (
+            "items, one outside the documented value sets or without its account, name "
+            "or unit price"
+        )
+    return inputs, None
+
+
+def _order_values(order: OrderDetail) -> tuple[dict[str, Any], dict[str, str | None]]:
+    """Every ``update.json`` parameter of ``order`` by task name, and what it cannot carry.
+
+    ``sequenceNumberId`` is not stored (the read sends none): an update leaves it out,
+    so ``nr`` stays as it is ("Leave empty to generate the number with
+    ``sequenceNumberId``"). ``statusId`` is sent as stored: left out, upstream would set
+    "the first status in the list". ``attachments`` were only ever seen empty; an order
+    holding attachments, or items ``_order_items`` cannot carry, cannot be carried over.
+    """
+    items, items_blocked = _order_items(order)
+    values: dict[str, Any] = {
+        "associate_id": order.associate_id,
+        "category_id": order.category_id,
+        "date": order.date,
+        "account_id": order.account_id,
+        "currency_id": order.currency_id,
+        "currency_rate": order.currency_rate,
+        "custom": order.custom,
+        "days_before": order.days_before,
+        "description": order.description,
+        "discount_percentage": order.discount_percentage,
+        "due_days": order.due_days,
+        "end_date": order.end_date,
+        "group_id": order.group_id,
+        "is_display_item_gross": order.is_display_item_gross,
+        "items": items,
+        "language": order.language,
+        "notes": order.notes,
+        "notify_email": order.notify_email,
+        "notify_person_id": order.notify_person_id,
+        "notify_type": order.notify_type,
+        "notify_user_id": order.notify_user_id,
+        "nr": order.nr,
+        "previous_id": order.previous_id,
+        "recurrence": order.recurrence,
+        "responsible_person_id": order.responsible_person_id,
+        "rounding_id": order.rounding_id,
+        "start_date": order.start_date,
+        "status_id": order.status_id,
+    }
+    stored = {
+        "attachments": _never_seen("attachments", order.attachments),
+        "items": items_blocked,
+    }
+    return values, stored
+
+
+ORDER_UPDATE: dict[str, str] = {
+    "associate_id": "associateId",
+    "category_id": "categoryId",
+    "date": "date",
+    "account_id": "accountId",
+    "attachments": "attachments",
+    "currency_id": "currencyId",
+    "currency_rate": "currencyRate",
+    "custom": "custom",
+    "days_before": "daysBefore",
+    "description": "description",
+    "discount_percentage": "discountPercentage",
+    "due_days": "dueDays",
+    "end_date": "endDate",
+    "group_id": "groupId",
+    "is_display_item_gross": "isDisplayItemGross",
+    "items": "items",
+    "language": "language",
+    "notes": "notes",
+    "notify_email": "notifyEmail",
+    "notify_person_id": "notifyPersonId",
+    "notify_type": "notifyType",
+    "notify_user_id": "notifyUserId",
+    "nr": "nr",
+    "previous_id": "previousId",
+    "recurrence": "recurrence",
+    "responsible_person_id": "responsiblePersonId",
+    "rounding_id": "roundingId",
+    "sequence_number_id": "sequenceNumberId",
+    "start_date": "startDate",
+    "status_id": "statusId",
+}
+"""Every parameter ``order/update.json`` documents but ``id``: task name to upstream name."""
+
+_ORDER_MANDATORY = (
+    ("associate_id", "associateId"),
+    ("category_id", "categoryId"),
+    ("date", "date"),
+)
+"""The parameters ``order/update.json`` marks mandatory, ``id`` aside: task and upstream name."""
+
+
+async def update_order_async(
+    org: str,
+    id: int,
+    *,
+    associate_id: int | None = None,
+    category_id: int | None = None,
+    date: date | None = None,
+    items: list[OrderItemInput] | None = None,
+    nr: str | None = None,
+    description: str | None = None,
+    status_id: int | None = None,
+    account_id: int | None = None,
+    language: Language | None = None,
+    due_days: int | None = None,
+    discount_percentage: Decimal | None = None,
+    is_display_item_gross: bool | None = None,
+    currency_id: int | None = None,
+    currency_rate: Decimal | None = None,
+    sequence_number_id: int | None = None,
+    group_id: int | None = None,
+    previous_id: int | None = None,
+    responsible_person_id: int | None = None,
+    rounding_id: int | None = None,
+    notes: str | None = None,
+    attachments: list[AttachmentInput] | None = None,
+    recurrence: Recurrence | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    days_before: int | None = None,
+    notify_type: NotifyType | None = None,
+    notify_email: str | None = None,
+    notify_person_id: int | None = None,
+    notify_user_id: int | None = None,
+    custom: Mapping[str, str] | None = None,
+    clear: list[str] | None = None,
+    confirm: bool = False,
+) -> Result[OrderOutcome]:
+    """Change an order, its items included; without confirm=true it only previews the change.
+
+    The order is read first (``order/read.json``), the parameters given are applied,
+    and every parameter ``order/update.json`` documents is sent, taken from the order
+    where not given: upstream empties every parameter an update leaves out, the items
+    included. A parameter left out here keeps its stored value. Without ``items`` the
+    stored items are sent back unchanged, in their position, each with the keys the
+    items table documents (``account_id``, ``name``, ``unit_price``, ``quantity``,
+    ``tax_id``, ``description``, ...); ``items`` given replace them whole. One named in
+    ``clear`` is sent empty, ``is_display_item_gross`` as ``false``. Without ``confirm``
+    nothing is written: the preview (``performed`` false) shows the ``payload`` that
+    would be sent, the order as it is (``before``, as ``get_order`` returns it) and the
+    ``changes``, at the cost of that one read. ``confirm=true`` reads the order again and
+    recomputes the payload, so it can differ from the preview if the order changed in
+    between. Refused before anything is written, unless the call replaces or clears what
+    is missing: an order holding attachments, or an item holding allocations or
+    attachments or marked optional, which cannot be carried over; an item without its
+    account, name or unit price; an order that gives no ``associate_id``,
+    ``category_id`` or ``date``. Upstream changes the journal entries an order booked
+    only through its items. Ids: ``category_id`` and ``status_id`` from
+    ``list_order_categories``, the partner from ``list_persons``, accounts from
+    ``list_accounts``, tax codes from ``list_tax_codes``, currencies from
+    ``list_currencies``, cost centers from ``list_cost_centers`` and custom field names
+    from ``list_custom_fields`` with ``type`` ``ORDER``. The items' ``unit_price`` was
+    read as gross, VAT included, on the demo organisation.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        id: The order's ``id`` from ``list_orders``, e.g. ``7``; not its number ``nr``.
+        associate_id: The business partner, one ``id`` from ``list_persons``, e.g.
+            ``7``; a new person is created with ``create_person`` first.
+        category_id: The order category, an ``id`` from ``list_order_categories``,
+            e.g. ``4`` (the default invoice category).
+        date: The date of the order, e.g. ``2026-10-24``.
+        items: The items replacing the stored ones, each with ``account_id`` (an ``id``
+            from ``list_accounts``: revenue for sales, expense for purchase), ``name``
+            and ``unit_price``, optionally ``quantity`` (default 1), ``tax_id`` (from
+            ``list_tax_codes``), ``description``, ``article_nr``,
+            ``discount_percentage``, ``unit_id``, ``inventory_id``, ``type``
+            (``ARTICLE``, ``TEXT``, ``PAGEBREAK``, ``SUBTOTAL``, ``TITLE``,
+            ``OPTIONTOTAL``) and ``allocations`` (each a ``share`` and a
+            ``to_cost_center_id`` from ``list_cost_centers``), e.g.
+            ``[{"account_id": 42, "name": "Beratung", "unit_price": 150, "quantity": 2,
+            "tax_id": 9}]``.
+        nr: The order number, at most 50 characters, e.g. ``"RE-2026-201"``.
+        description: A description of the document, at most 200 characters.
+        status_id: A status of the category, an id from its ``status`` in
+            ``list_order_categories``, e.g. ``12``.
+        account_id: The account, e.g. the debtors account, an ``id`` from
+            ``list_accounts``.
+        language: The document's language: ``DE``, ``EN``, ``FR`` or ``IT``.
+        due_days: Days until payment is due, e.g. ``30``.
+        discount_percentage: A discount on the whole order, 0 to 100, e.g. ``2``.
+        is_display_item_gross: ``true`` shows item totals gross, ``false`` net.
+        currency_id: A currency, an ``id`` from ``list_currencies``.
+        currency_rate: The exchange rate into the default currency, e.g. ``0.92``.
+        sequence_number_id: The sequence number that generates ``nr``, e.g. ``3``.
+        group_id: The order group (dossier) of the order, e.g. ``3``.
+        previous_id: The order this one continues (offer to invoice), e.g. ``2``.
+        responsible_person_id: The responsible person, an ``id`` from ``list_persons``.
+        rounding_id: The rounding of the grand total, e.g. ``1``.
+        notes: Notes, limited HTML allowed, e.g. ``"<p>Lieferung im November</p>"``.
+        attachments: Files to attach, replacing the stored ones, e.g. ``[{"file_id": 24}]``.
+        recurrence: How often the order repeats: ``MONTHLY``, ``WEEKLY``, ``DAILY``,
+            ``YEARLY``, ``SEMESTRAL``, ``QUARTERLY``, ``BI_MONTHLY`` or ``BI_WEEKLY``.
+        start_date: The next date the order repeats on, e.g. ``2026-11-01``.
+        end_date: The date the recurrence stops, e.g. ``2027-12-31``.
+        days_before: Create the next order this many days before ``start_date``.
+        notify_type: ``NONE``, ``USER``, ``PERSON``, ``RESPONSIBLE_PERSON`` or ``EMAIL``.
+        notify_email: The address notified with ``notify_type`` ``EMAIL``.
+        notify_person_id: The person notified with ``notify_type`` ``PERSON``.
+        notify_user_id: The user notified with ``notify_type`` ``USER``.
+        custom: Custom field values to set by upstream's name, ``customField<id>`` with
+            an ``id`` from ``list_custom_fields`` (``type`` ``ORDER``), e.g.
+            ``{"customField3": "A-18"}``; the other stored values are kept.
+        clear: Parameters to send empty, by these names, e.g. ``["notes", "due_days"]``;
+            ``["items"]`` removes every item, ``["custom"]`` empties every custom field
+            and ``["is_display_item_gross"]`` sends ``false``. A parameter cannot be
+            both given and cleared, and ``sequence_number_id``, not stored and sent
+            only when given, cannot be cleared.
+        confirm: ``true`` writes the change; ``false`` (the default) only previews it.
+    """
+    _check_id(id)
+    problems: list[str] = []
+    _check_associate(associate_id, problems)
+    given = _given(
+        associate_id=associate_id,
+        category_id=category_id,
+        date=date,
+        account_id=account_id,
+        attachments=_inputs("attachments", attachments, AttachmentInput, problems),
+        currency_id=currency_id,
+        currency_rate=currency_rate,
+        days_before=days_before,
+        description=description,
+        discount_percentage=discount_percentage,
+        due_days=due_days,
+        end_date=end_date,
+        group_id=group_id,
+        is_display_item_gross=is_display_item_gross,
+        items=_inputs("items", items, OrderItemInput, problems),
+        language=language,
+        notes=notes,
+        notify_email=notify_email,
+        notify_person_id=notify_person_id,
+        notify_type=notify_type,
+        notify_user_id=notify_user_id,
+        nr=nr,
+        previous_id=previous_id,
+        recurrence=recurrence,
+        responsible_person_id=responsible_person_id,
+        rounding_id=rounding_id,
+        sequence_number_id=sequence_number_id,
+        start_date=start_date,
+        status_id=status_id,
+    )
+    _choices(
+        problems,
+        language=(language, LANGUAGES),
+        notify_type=(notify_type, NOTIFY_TYPES),
+        recurrence=(recurrence, RECURRENCES),
+    )
+    cleared = _clear_names(clear, ORDER_UPDATE, given, custom, problems)
+    _refuse(problems)
+    if custom:
+        api.custom_xml(custom)  # refuse a wrong name before the read
+    order = await api.order_read(org, id)
+    values, stored = _order_values(order)
+    blocked = _blocked(stored, [*given, *cleared])
+    if blocked:
+        raise _cannot_carry("order", blocked)
+    merged = {**values, **given, "custom": api.merge_custom(order.custom, custom or {})}
+    merged.update(_cleared(cleared))
+    absent = [upstream for name, upstream in _ORDER_MANDATORY if merged[name] is None]
+    if absent:
+        raise _missing("order", absent, "pass them (associate_id, category_id, date)")
+    fields = api.order_fields(id=order.id, **merged)
+    changes = _changes(api.order_fields, ORDER_UPDATE, given, cleared, custom)
+    endpoint = "order/update.json"
+    if confirm is not True:
+        return _preview(org, endpoint, fields, before=order, changes=changes)
+    answer = await api.order_update(org, fields)
+    return _performed(org, endpoint, fields, answer)
+
+
 async def delete_order_async(org: str, id: int, *, confirm: bool = False) -> Result[OrderOutcome]:
     """Delete one order; without confirm=true it only shows the order.
 
@@ -1624,4 +1978,5 @@ create_person = sync(create_person_async)
 update_person = sync(update_person_async)
 delete_person = sync(delete_person_async)
 create_order = sync(create_order_async)
+update_order = sync(update_order_async)
 delete_order = sync(delete_order_async)

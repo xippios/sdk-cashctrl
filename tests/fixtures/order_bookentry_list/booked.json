@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-10-27T22:22:11.980800Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/order/bookentry/list.json?id=5"
+  },
+  "response": {
+    "body": "{\"total\":1,\"data\":[{\"id\":5,\"created\":\"2026-10-23 10:30:23.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:30:23.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"templateId\":null,\"orderId\":5,\"accountId\":45,\"debitId\":45,\"creditId\":9,\"taxId\":13,\"currencyId\":null,\"importEntryId\":null,\"type\":\"GENERATED\",\"date\":\"2026-02-02 00:00:00.0\",\"description\":\"Wareneinkauf B\u00fcrom\u00f6bel\",\"amount\":4650,\"currencyRate\":1,\"reference\":null,\"allocations\":[],\"name\":\"\",\"original\":false,\"costCenterNumbers\":\"\",\"rows\":[{\"fcDebit\":4301.57,\"fcCredit\":0,\"acDebit\":4301.57,\"acCredit\":0,\"dcDebit\":4301.57,\"dcCredit\":0,\"fcTax\":348.43,\"acTax\":348.43,\"dcTax\":348.43,\"taxPercentage\":8.1,\"accountName\":\"4200 <values><de>Warenaufwand</de><en>Cost of goods sold</en><fr>Charges de marchandises</fr><it>Costi delle merci di rivendita</it></values>\",\"accountId\":45,\"isTax\":false,\"isTaxed\":true},{\"fcDebit\":0,\"fcCredit\":4650,\"acDebit\":0,\"acCredit\":4650,\"dcDebit\":0,\"dcCredit\":4650,\"fcTax\":0,\"acTax\":0,\"dcTax\":0,\"taxPercentage\":null,\"accountName\":\"2000 <values><de>Kreditoren</de><en>Accounts payable</en><fr>Cr\u00e9anciers</fr><it>Creditori</it></values>\",\"accountId\":9,\"isTax\":false,\"isTaxed\":false},{\"fcDebit\":348.43,\"fcCredit\":0,\"acDebit\":348.43,\"acCredit\":0,\"dcDebit\":348.43,\"dcCredit\":0,\"fcTax\":0,\"acTax\":0,\"dcTax\":0,\"taxPercentage\":8.1,\"accountName\":\"1170 <values><de>Vorsteuer</de><en>Sales tax receivable</en><fr>Imp\u00f4t pr\u00e9alable</fr><it>Imposta precedente</it></values>\",\"accountId\":34,\"isTax\":true,\"isTaxed\":false}],\"separate\":false,\"debitName\":\"4200 <values><de>Warenaufwand</de><en>Cost of goods sold</en><fr>Charges de marchandises</fr><it>Costi delle merci di rivendita</it></values>\",\"creditName\":\"2000 <values><de>Kreditoren</de><en>Accounts payable</en><fr>Cr\u00e9anciers</fr><it>Creditori</it></values>\",\"defaultCurrencyAmount\":4650,\"netAmount\":4301.57,\"taxAmount\":348.43,\"isAllowTax\":true}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 27 Oct 2026 22:22:09 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

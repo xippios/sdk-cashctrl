@@ -1,11 +1,13 @@
 """The write tasks: previews send nothing, confirmed writes replay, updates fail closed.
 
-Every fixture here was recorded on 2026-10-24 from the synthetic demo organisation with
+Every fixture here was recorded from the synthetic demo organisation with
 ``scripts/record_fixture.py --method POST``, in this order, so that every record created
-was deleted again: the journal entry 51 (created, a refused create without ``debitId``,
-read, updated, deleted, deleted again), the person 14 (created, read, updated, deleted)
-and the order 7 (created, deleted). A preview's ``payload`` is compared with the body the
-confirmed call sent, as the fixture recorded it: the preview is what upstream receives.
+was deleted again: on 2026-10-24 the journal entry 51 (created, a refused create without
+``debitId``, read, updated, deleted, deleted again) and the person 14 (created, read,
+updated, deleted); on 2026-10-27 the order 20 (created with the body the order 7 was
+created with on 2026-10-24, read, updated, read again, deleted). A preview's ``payload``
+is compared with the body the confirmed call sent, as the fixture recorded it: the
+preview is what upstream receives.
 
 The negative update cases change a recorded read in memory (a field removed, a stored
 list filled in) and serve it with ``respx``; they are not fixtures, and they say so.
@@ -66,7 +68,7 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 DAY = date(2026, 10, 24)
 JOURNAL_ENTRY = 51
 PERSON = 14
-ORDER = 7
+ORDER = 20
 
 WRITE_TASKS: dict[str, Callable[..., Any]] = {
     name: getattr(tasks_write, name) for name in tasks_write.__all__
@@ -239,8 +241,10 @@ async def assert_write_tools(
 async def test_the_write_server_serves_write_tasks_only() -> None:
     """Conventions §8: a write server, its tools exactly the write tasks, confirm last.
 
-    So the organisation list, a reference tool, stays on the read server.
+    So the organisation list, a reference tool, stays on the read server. Nine write
+    tasks: create, update and delete for journal entries, persons and orders.
     """
+    assert len(WRITE_TASKS) == 9
     await assert_write_tools(
         write_server,
         list(WRITE_TASKS.values()),
@@ -1019,9 +1023,16 @@ def test_clearing_a_flag_sends_false(
     )
 
 
-@pytest.mark.parametrize(
-    "task", [tasks_write.update_journal_entry, tasks_write.update_person], ids=lambda t: t.__name__
-)
+UPDATE_TABLES: dict[str, dict[str, str]] = {
+    "update_journal_entry": tasks_write.JOURNAL_UPDATE,
+    "update_person": tasks_write.PERSON_UPDATE,
+    "update_order": tasks_write.ORDER_UPDATE,
+}
+"""Each update task's table of the parameters its ``update.json`` documents."""
+UPDATES = [getattr(tasks_write, name) for name in UPDATE_TABLES]
+
+
+@pytest.mark.parametrize("task", UPDATES, ids=lambda t: t.__name__)
 def test_clearing_a_parameter_that_is_never_sent_is_refused(
     respx_mock: respx.MockRouter, task: Callable[..., Any]
 ) -> None:
@@ -1034,23 +1045,22 @@ def test_clearing_a_parameter_that_is_never_sent_is_refused(
     assert not respx_mock.calls
 
 
-@pytest.mark.parametrize(
-    "task", [tasks_write.update_journal_entry, tasks_write.update_person], ids=lambda t: t.__name__
-)
+@pytest.mark.parametrize("task", UPDATES, ids=lambda t: t.__name__)
 def test_every_boolean_update_parameter_is_a_flag(task: Callable[..., Any]) -> None:
     """``_FLAGS`` holds every ``bool | None`` parameter of an update task, ``confirm`` aside."""
     facade: Any = task
     hints = typing.get_type_hints(facade.async_fn)
     booleans = {name for name, hint in hints.items() if hint == bool | None}
     assert booleans <= tasks_write._FLAGS
-    table = (
-        tasks_write.JOURNAL_UPDATE
-        if task is tasks_write.update_journal_entry
-        else tasks_write.PERSON_UPDATE
-    )
+    table = UPDATE_TABLES[task.__name__]
     assert tasks_write._FLAGS & set(table) == booleans
-    assert tasks_write._FLAGS.issubset(
-        set(tasks_write.JOURNAL_UPDATE) | set(tasks_write.PERSON_UPDATE)
+    assert tasks_write._FLAGS.issubset(set().union(*UPDATE_TABLES.values()))
+
+
+def test_every_update_task_has_a_table() -> None:
+    """The write tasks named ``update_*`` are exactly those with a table here."""
+    assert {name for name in tasks_write.__all__ if name.startswith("update_")} == set(
+        UPDATE_TABLES
     )
 
 
@@ -1068,6 +1078,13 @@ def test_the_update_takes_every_documented_parameter_but_the_unsent_from_the_rec
     )
     person_values, person_stored, _ = tasks_write._person_values(person)
     assert set(tasks_write.PERSON_UPDATE) - set(person_values) - set(person_stored) == set(
+        tasks_write._UNSENT
+    )
+    order = OrderDetail.model_validate(
+        recorded_read(fixtures_dir, "order_read", "for_update")["data"]
+    )
+    order_values, order_stored = tasks_write._order_values(order)
+    assert set(tasks_write.ORDER_UPDATE) - set(order_values) - set(order_stored) == set(
         tasks_write._UNSENT
     )
 
@@ -1290,6 +1307,296 @@ def test_create_order_sends_several_partners_comma_separated(respx_mock: respx.M
     assert not respx_mock.calls
 
 
+def update_the_recorded_order(confirm: bool = False) -> Any:
+    """The update recorded on 2026-10-27: two header fields changed, no ``items`` given."""
+    return tasks_write.update_order(
+        DEMO,
+        ORDER,
+        description="xippios-live fixture updated",
+        due_days=30,
+        confirm=confirm,
+    )
+
+
+def test_update_order_previews_the_whole_order_after_one_read(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    read = replay_fixture("order_read", "for_update")
+    result = update_the_recorded_order()
+    assert read.call_count == 1, "one read, never a write"
+    preview = preview_of(result)
+    assert preview.endpoint == "order/update.json"
+    assert list(preview.payload.items()) == recorded_body(fixtures_dir, "order_update", "ok")
+    assert preview.changes == {"description": "xippios-live fixture updated", "dueDays": "30"}
+    assert isinstance(preview.before, OrderDetail)
+    assert (preview.before.id, preview.before.description, preview.before.due_days) == (
+        ORDER,
+        "xippios-live fixture",
+        None,
+    )
+    assert result.meta.endpoint == "order/update.json"
+    assert (result.meta.tenant, result.meta.request) == (DEMO, {"org": DEMO})
+
+
+def test_update_order_with_confirm_reads_then_sends_the_whole_order(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    read = replay_fixture("order_read", "for_update")
+    update = replay_fixture("order_update", "ok")
+    result = update_the_recorded_order(confirm=True)
+    assert (read.call_count, update.call_count) == (1, 1)
+    sent = update.calls.last.request
+    assert sent.headers["Content-Type"] == FORM_CONTENT_TYPE
+    assert sent_body(update) == recorded_body(fixtures_dir, "order_update", "ok")
+    written = result.data
+    assert isinstance(written, WriteResult)
+    assert (written.performed, written.insert_id, written.message) == (
+        True,
+        ORDER,
+        "Rechnung saved",
+    ), "an update answers the order's own id"
+    assert result.meta.request == {
+        "org": DEMO,
+        **dict(recorded_body(fixtures_dir, "order_update", "ok")),
+    }
+
+
+ITEM_KEYS = frozenset(OrderItemInput.model_fields)
+"""The keys the items table documents, by task name: what an update carries back."""
+
+
+def test_update_order_carries_the_items_back_unchanged(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    """The items the update sent are the stored ones, and the read after it shows them so.
+
+    ``order_read/after_update`` was recorded right after the update: every field of the
+    item is as before, the computed totals included, but its ``id``: upstream stores the
+    items an update sends anew (26 became 27).
+    """
+    replay_fixture("order_read", "for_update")
+    payload = preview_of(update_the_recorded_order()).payload
+    before = OrderDetail.model_validate(
+        recorded_read(fixtures_dir, "order_read", "for_update")["data"]
+    )
+    after = OrderDetail.model_validate(
+        recorded_read(fixtures_dir, "order_read", "after_update")["data"]
+    )
+    assert json.loads(payload["items"]) == [
+        {
+            "accountId": 42,
+            "name": "xippios-live item",
+            "unitPrice": 100,
+            "quantity": 1,
+            "taxId": 9,
+            "type": "ARTICLE",
+        }
+    ], "the stored item under the table's keys, none of the computed ones"
+    assert [item.model_dump(exclude={"id"}) for item in after.items] == [
+        item.model_dump(exclude={"id"}) for item in before.items
+    ]
+    assert ([i.id for i in before.items], [i.id for i in after.items]) == ([26], [27])
+    assert (after.description, after.due_days) == ("xippios-live fixture updated", 30)
+    assert (after.sub_total, after.tax, after.total) == (
+        before.sub_total,
+        before.tax,
+        before.total,
+    )
+    assert after.status_id == before.status_id, "statusId sent back as stored"
+
+
+def test_update_order_replaces_the_items_when_given(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    replay_fixture("order_read", "for_update")
+    items: list[Any] = [
+        OrderItemInput(account_id=42, name="xippios-live chair", unit_price=Decimal("172.32")),
+        {"account_id": 42, "name": "xippios-live desk", "unit_price": 680, "quantity": 2},
+    ]
+    preview = preview_of(tasks_write.update_order(DEMO, ORDER, items=items))
+    sent = (
+        '[{"accountId":42,"name":"xippios-live chair","unitPrice":172.32},'
+        '{"accountId":42,"name":"xippios-live desk","unitPrice":680,"quantity":2}]'
+    )
+    assert preview.payload["items"] == sent
+    assert preview.changes == {"items": sent}
+    recorded = dict(recorded_body(fixtures_dir, "order_update", "ok"))
+    stored = {name: value for name, value in recorded.items() if name not in ("items", "dueDays")}
+    assert {name: value for name, value in preview.payload.items() if name != "items"} == {
+        **stored,
+        "description": "xippios-live fixture",
+    }, "every other field as stored: the recorded update without its two changes"
+
+
+def test_update_order_clears_items_flags_and_text(replay_fixture: ReplayFixture) -> None:
+    replay_fixture("order_read", "for_update")
+    preview = preview_of(
+        tasks_write.update_order(
+            DEMO, ORDER, clear=["items", "is_display_item_gross", "notes", "description"]
+        )
+    )
+    assert "items" not in preview.payload, "left out: upstream empties what is left out"
+    assert "description" not in preview.payload
+    assert preview.payload["isDisplayItemGross"] == "false"
+    assert preview.changes == {
+        "items": "[]",
+        "isDisplayItemGross": "false",
+        "notes": "",
+        "description": "",
+    }
+    emptied = preview_of(tasks_write.update_order(DEMO, ORDER, items=[]))
+    assert "items" not in emptied.payload
+    assert emptied.changes == {"items": "[]"}, "an empty list given is shown"
+
+
+def test_update_order_keeps_the_stored_custom_values(
+    respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """The recorded read with custom values, changed in memory."""
+    body = recorded_read(fixtures_dir, "order_read", "for_update")
+    stored = (
+        "<values><customField3>A-17</customField3><customField4>B &amp; C</customField4></values>"
+    )
+    body["data"]["custom"] = stored
+    serve_read(respx_mock, "order/read.json", body)
+    untouched = tasks_write.update_order(DEMO, ORDER, description="x")
+    assert preview_of(untouched).payload["custom"] == stored, "sent back as stored, unparsed"
+    changed = tasks_write.update_order(DEMO, ORDER, custom={"customField3": "A-18"})
+    assert preview_of(changed).payload["custom"] == (
+        "<values><customField3>A-18</customField3><customField4>B &amp; C</customField4></values>"
+    )
+    assert preview_of(changed).changes == {
+        "custom": "<values><customField3>A-18</customField3></values>"
+    }
+    cleared = tasks_write.update_order(DEMO, ORDER, clear=["custom"])
+    assert "custom" not in preview_of(cleared).payload
+    assert preview_of(cleared).changes == {"custom": ""}
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (
+            lambda data: data.update(attachments=[{"fileId": 3}]),
+            "holds attachments, never observed filled",
+        ),
+        (
+            lambda data: data["items"][0].update(allocations=[{"share": 1, "toCostCenterId": 2}]),
+            "holds items, one with allocations, never observed filled",
+        ),
+        (
+            lambda data: data["items"][0].update(attachments=[{"fileId": 3}]),
+            "holds items, one with attachments, a key the items table does not document",
+        ),
+        (
+            lambda data: data["items"][0].update(isOptional=True, optional=True),
+            "holds items, one marked optional, a key the items table does not document",
+        ),
+        (
+            lambda data: data["items"][0].update(accountId=None),
+            "holds items, one outside the documented value sets or without its account",
+        ),
+        (
+            lambda data: data["items"][0].update(type="BUNDLE"),
+            "holds items, one outside the documented value sets",
+        ),
+    ],
+    ids=[
+        "attachments",
+        "item-allocations",
+        "item-attachments",
+        "item-optional",
+        "item-without-account",
+        "item-type",
+    ],
+)
+def test_update_order_refuses_what_it_cannot_carry(
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+    change: Callable[[dict[str, Any]], None],
+    message: str,
+) -> None:
+    """The recorded read changed in memory: nothing is written, unless replaced or cleared."""
+    body = recorded_read(fixtures_dir, "order_read", "for_update")
+    change(body["data"])
+    serve_read(respx_mock, "order/read.json", body)
+    write = respx_mock.post(f"{BASE}/order/update.json")
+    with pytest.raises(InvalidRequestError, match=re.escape(message)) as raised:
+        tasks_write.update_order(DEMO, ORDER, description="x", confirm=True)
+    assert str(raised.value).endswith("Nothing was sent")
+    assert not write.called
+    parameter = "attachments" if "holds attachments" in message else "items"
+    assert f"pass {parameter} to replace it" in str(raised.value)
+    cleared = preview_of(tasks_write.update_order(DEMO, ORDER, clear=[parameter]))
+    assert parameter not in cleared.payload
+    emptied: dict[str, Any] = {parameter: []}
+    replaced = preview_of(tasks_write.update_order(DEMO, ORDER, **emptied))
+    assert replaced.changes == {parameter: "[]"}
+
+
+@pytest.mark.parametrize(
+    ("change", "arguments", "missing"),
+    [
+        (lambda data: data.pop("associateId"), {"description": "x"}, "associateId"),
+        (lambda data: None, {"clear": ["associate_id"]}, "associateId"),
+        (lambda data: None, {"clear": ["category_id", "date"]}, "categoryId, date"),
+    ],
+    ids=["read-without-partner", "partner-cleared", "category-and-date-cleared"],
+)
+def test_update_order_refuses_an_order_without_a_mandatory_parameter(
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+    change: Callable[[dict[str, Any]], object],
+    arguments: dict[str, Any],
+    missing: str,
+) -> None:
+    """``associateId``, ``categoryId`` and ``date`` are mandatory: given, stored or refused."""
+    body = recorded_read(fixtures_dir, "order_read", "for_update")
+    change(body["data"])
+    serve_read(respx_mock, "order/read.json", body)
+    write = respx_mock.post(f"{BASE}/order/update.json")
+    with pytest.raises(
+        InvalidRequestError, match=f"gives no {missing}, which update.json requires"
+    ):
+        tasks_write.update_order(DEMO, ORDER, **arguments, confirm=True)
+    assert not write.called
+
+
+def test_update_order_takes_a_partner_the_read_lacks(
+    respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    body = recorded_read(fixtures_dir, "order_read", "for_update")
+    del body["data"]["associateId"]
+    serve_read(respx_mock, "order/read.json", body)
+    preview = preview_of(tasks_write.update_order(DEMO, ORDER, associate_id=8))
+    assert preview.payload["associateId"] == "8"
+    assert preview.changes == {"associateId": "8"}
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"associate_id": "Muster AG"}, "associate_id must be a person's id, a whole number"),
+        ({"associate_id": True}, "associate_id must be a person's id"),
+        ({"items": [{"name": "x", "unit_price": 1}]}, "items[0].account_id: Field required"),
+        ({"items": {"account_id": 42}}, "items takes a list, not dict"),
+        ({"language": "de"}, "language must be one of DE, EN, FR, IT"),
+        ({"recurrence": "HOURLY"}, "recurrence must be one of MONTHLY"),
+        ({"notify_type": "SOMETIMES"}, "notify_type must be one of NONE"),
+        ({"description": "x", "clear": ["description"]}, "'description' is both changed"),
+        ({"clear": ["dueDays"]}, "clear: 'dueDays' is not an update.json parameter here"),
+        ({"clear": ["id"]}, "clear: 'id' is not an update.json parameter here"),
+        ({"custom": {"colour": "blue"}}, "'colour' is not a custom field name"),
+    ],
+)
+def test_update_order_refuses_its_arguments_before_any_request(
+    respx_mock: respx.MockRouter, arguments: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(InvalidRequestError, match=re.escape(message)):
+        tasks_write.update_order(DEMO, ORDER, **arguments)
+    assert not respx_mock.calls
+
+
 def test_delete_order_previews_the_order_then_deletes(
     replay_fixture: ReplayFixture, fixtures_dir: Path
 ) -> None:
@@ -1328,6 +1635,17 @@ def test_an_update_writes_only_when_confirm_is_true(
     read = replay_fixture("journal_read", "for_update")
     write = respx_mock.post(f"{BASE}/journal/update.json")
     result = tasks_write.update_journal_entry(DEMO, JOURNAL_ENTRY, title="x", confirm=confirm)
+    assert isinstance(result.data, WritePreview)
+    assert (read.call_count, write.called) == (1, False), "the read only, never the write"
+
+
+@pytest.mark.parametrize("confirm", NOT_TRUE, ids=[repr(value) for value in NOT_TRUE])
+def test_an_order_update_writes_only_when_confirm_is_true(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, confirm: Any
+) -> None:
+    read = replay_fixture("order_read", "for_update")
+    write = respx_mock.post(f"{BASE}/order/update.json")
+    result = tasks_write.update_order(DEMO, ORDER, description="x", confirm=confirm)
     assert isinstance(result.data, WritePreview)
     assert (read.call_count, write.called) == (1, False), "the read only, never the write"
 
@@ -1566,6 +1884,32 @@ async def test_a_preview_through_the_write_server(fixtures_dir: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_an_order_update_through_the_write_server(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    """The tool previews, then writes with ``confirm``: the recorded update, end to end."""
+    replay_fixture("order_read", "for_update")
+    update = replay_fixture("order_update", "ok")
+    arguments = {
+        "org": DEMO,
+        "id": ORDER,
+        "description": "xippios-live fixture updated",
+        "due_days": 30,
+    }
+    preview = await mcp_call(write_server, "cashctrl_update_order", arguments)
+    assert preview["data"]["performed"] is False
+    assert list(preview["data"]["payload"].items()) == recorded_body(
+        fixtures_dir, "order_update", "ok"
+    )
+    assert preview["data"]["before"]["items"][0]["name"] == "xippios-live item"
+    assert not update.called
+    done = await mcp_call(write_server, "cashctrl_update_order", {**arguments, "confirm": True})
+    assert (done["data"]["performed"], done["data"]["insert_id"]) == (True, ORDER)
+    assert sent_body(update) == recorded_body(fixtures_dir, "order_update", "ok")
+    assert done["meta"]["tenant"] == DEMO
+
+
+@pytest.mark.anyio
 async def test_a_refusal_through_the_write_server(
     respx_mock: respx.MockRouter, fixtures_dir: Path, replay_fixture: ReplayFixture
 ) -> None:
@@ -1595,10 +1939,12 @@ async def test_a_refusal_through_the_write_server(
 @pytest.mark.anyio
 async def test_the_write_tool_schemas_show_snake_case_inside_lists() -> None:
     tools = {tool.name: tool for tool in await write_server.list_tools()}
+    for name in ("cashctrl_create_order", "cashctrl_update_order"):
+        schema = tools[name].input_schema
+        item = schema["$defs"]["OrderItemInput"]["properties"]
+        assert {"account_id", "unit_price", "tax_id"} <= set(item), name
+        assert "accountId" not in item, name
     schema = tools["cashctrl_create_order"].input_schema
-    item = schema["$defs"]["OrderItemInput"]["properties"]
-    assert {"account_id", "unit_price", "tax_id"} <= set(item)
-    assert "accountId" not in item
     assert schema["properties"]["confirm"] == {
         "default": False,
         "title": "Confirm",
@@ -1639,6 +1985,10 @@ WRITE_TOOL_CASES: dict[str, tuple[list[tuple[str, str]], dict[str, Any]]] = {
     "preview of an order delete": (
         [("order_read", "by_id")],
         {"tool": "cashctrl_delete_order", "id": 3},
+    ),
+    "preview of an order update": (
+        [("order_read", "for_update")],
+        {"tool": "cashctrl_update_order", "id": ORDER, "due_days": 30},
     ),
     "a performed create": (
         [("order_create", "ok")],

@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-10-27T22:21:32.478514Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/order/read.json?id=20"
+  },
+  "response": {
+    "body": "{\"success\":true,\"data\":{\"id\":20,\"created\":\"2026-10-27 23:20:47.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-27 23:21:24.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"categoryId\":4,\"associateId\":7,\"accountId\":4,\"recurrenceId\":null,\"currencyId\":null,\"items\":[{\"id\":27,\"orderId\":20,\"inventoryId\":null,\"accountId\":42,\"taxId\":9,\"unitId\":null,\"unitName\":null,\"attachments\":[],\"allocations\":[],\"type\":\"ARTICLE\",\"articleNr\":null,\"quantity\":1,\"name\":\"xippios-live item\",\"description\":null,\"unitPrice\":100,\"discountPercentage\":null,\"pos\":0,\"defaultCurrencyUnitPrice\":100,\"defaultCurrencyNetUnitPrice\":92.50693802,\"netUnitPrice\":92.50693802,\"grossTotal\":100,\"taxTotal\":7.49,\"netTotal\":92.51,\"defaultCurrencyNetTotal\":92.51,\"defaultCurrencyGrossTotal\":100,\"taxCalcType\":\"NET\",\"taxCode\":\"UN1\",\"discountInherited\":null,\"discountEffective\":null,\"taxAmount\":7.49306198,\"baseValue\":\"GROSS\",\"optional\":false,\"taxRate\":8.1,\"isOptional\":false,\"isInventoryArticle\":false,\"isIncludedInStats\":false}],\"responsiblePersonId\":null,\"statusId\":12,\"roundingId\":null,\"fileId\":null,\"groupId\":20,\"previousId\":null,\"attachments\":[],\"type\":\"SALES\",\"bookType\":\"DEBIT\",\"taxType\":\"AGREED\",\"date\":\"2026-10-24 00:00:00.0\",\"nr\":\"xippios-live\",\"description\":\"xippios-live fixture updated\",\"dueDays\":30,\"dateLastBooked\":\"2026-10-24 00:00:00.0\",\"subTotal\":92.51,\"tax\":7.49,\"total\":100,\"open\":null,\"groupOpen\":null,\"currencyRate\":1,\"discountPercentage\":null,\"qrReference\":\"000000000000000000000004200\",\"iso11649Reference\":\"RF130000000000000420\",\"customReference\":null,\"language\":\"DE\",\"custom\":null,\"notes\":null,\"attachmentCount\":0,\"allocationCount\":null,\"costCenterIds\":null,\"hash\":\"REDACTED\",\"sent\":null,\"sentBy\":null,\"downloaded\":null,\"downloadedBy\":null,\"costCenterNumbers\":null,\"currencyCode\":null,\"book\":false,\"removeStock\":false,\"addStock\":false,\"associateName\":\"Muster Consulting GmbH\",\"nameSingular\":\"<values><de>Rechnung</de><en>Invoice</en><fr>Facture</fr><it>Fattura</it></values>\",\"namePlural\":\"<values><de>Rechnungen</de><en>Invoices</en><fr>Factures</fr><it>Fatture</it></values>\",\"responsiblePersonName\":null,\"roundingDifference\":0,\"totalToPay\":100,\"defaultCurrencyTotal\":100,\"foreignCurrency\":false,\"actionId\":\"\",\"due\":false,\"fileReplacement\":false,\"displayItemGross\":false,\"sentStatusId\":16,\"icon\":\"GRAY\",\"closed\":false,\"startDate\":null,\"notifyEmail\":null,\"statusName\":\"<values><de>Entwurf</de><en>Draft</en><fr>Projet</fr><it>Progetto</it></values>\",\"categoryName\":\"<values><de>Rechnung</de><en>Invoice</en><fr>Facture</fr><it>Fattura</it></values>\",\"recurrence\":null,\"endDate\":null,\"daysBefore\":null,\"notifyType\":null,\"notifyPersonId\":null,\"notifyUserId\":null,\"paid\":100,\"isBook\":false,\"isRemoveStock\":false,\"isAddStock\":false,\"isClosed\":false,\"isDisplayItemGross\":false,\"isFileReplacement\":false,\"hasRecurrence\":false,\"isCreditNote\":false,\"hasDueDays\":true}}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 27 Oct 2026 22:21:30 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

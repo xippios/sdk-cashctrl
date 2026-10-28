@@ -25,12 +25,14 @@ from xippios.cashctrl.api.account_read import account_read
 from xippios.cashctrl.api.currency_list import currency_list
 from xippios.cashctrl.api.customfield_list import customfield_list, customfield_list_params
 from xippios.cashctrl.api.fiscalperiod_list import fiscalperiod_list
+from xippios.cashctrl.api.history_list import history_list, history_list_params
 from xippios.cashctrl.api.journal_create import journal_create, journal_fields
 from xippios.cashctrl.api.journal_delete import journal_delete
 from xippios.cashctrl.api.journal_list import journal_list, journal_list_params
 from xippios.cashctrl.api.journal_read import journal_read
 from xippios.cashctrl.api.journal_update import journal_update
 from xippios.cashctrl.api.location_list import location_list
+from xippios.cashctrl.api.order_bookentry_list import order_bookentry_list
 from xippios.cashctrl.api.order_category_list import (
     order_category_list,
     order_category_list_params,
@@ -39,6 +41,7 @@ from xippios.cashctrl.api.order_create import order_create, order_fields
 from xippios.cashctrl.api.order_delete import order_delete
 from xippios.cashctrl.api.order_list import order_list, order_list_params
 from xippios.cashctrl.api.order_read import order_read
+from xippios.cashctrl.api.order_update import order_update
 from xippios.cashctrl.api.person_category_list import person_category_list
 from xippios.cashctrl.api.person_create import person_create, person_fields
 from xippios.cashctrl.api.person_delete import person_delete
@@ -67,6 +70,8 @@ __all__ = [
     "delete_fields",
     "encode_filter",
     "fiscalperiod_list",
+    "history_list",
+    "history_list_params",
     "journal_create",
     "journal_delete",
     "journal_fields",
@@ -76,6 +81,7 @@ __all__ = [
     "journal_update",
     "location_list",
     "merge_custom",
+    "order_bookentry_list",
     "order_category_list",
     "order_category_list_params",
     "order_create",
@@ -84,6 +90,7 @@ __all__ = [
     "order_list",
     "order_list_params",
     "order_read",
+    "order_update",
     "person_category_list",
     "person_create",
     "person_delete",

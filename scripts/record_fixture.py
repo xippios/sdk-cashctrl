@@ -25,15 +25,15 @@ described in ``docs/demo-org.md``: invented companies on placeholder streets,
 recorded. These policies stand all the same; every refusal writes nothing, says why,
 never shows a value, and exits with status 1:
 
-- GET, and POST for the eight write paths only. ``--method POST`` is allowed for
+- GET, and POST for the nine write paths only. ``--method POST`` is allowed for
   exactly the operations this package's write tools call (``WRITE_PATHS``):
   ``journal/create.json``, ``journal/update.json``, ``journal/delete.json``,
   ``person/create.json``, ``person/update.json``, ``person/delete.json``,
-  ``order/create.json`` and ``order/delete.json``. It sends the ``key=value`` pairs as a
-  form body, as the write tools do (``api/_form.py``:
+  ``order/create.json``, ``order/update.json`` and ``order/delete.json``. It sends the
+  ``key=value`` pairs as a form body, as the write tools do (``api/_form.py``:
   ``application/x-www-form-urlencoded; charset=UTF-8``). Every other POST
-  (``order/update.json``, ``account/create.json``, ``update_status.json``, a POST to a
-  list) and every other method is refused before a request is sent, and so is a
+  (``order/update_status.json``, ``account/create.json``, ``order/bookentry/create.json``,
+  a POST to a list) and every other method is refused before a request is sent, and so is a
   ``create.json`` whose pairs do not carry the marker ``xippios-live`` (``MARK``) in a
   value: a write records a marked record, updates it or deletes it, and nothing else. A
   recorded write changes the demo organisation: the recorder says so after the request
@@ -57,12 +57,13 @@ never shows a value, and exits with status 1:
   right after a JSON escape. A tag the scrub cannot reach (glued to a word, or behind a
   Unicode escape) is refused by the final check.
 - No token-like fields and no personal identifiers. A body field named ``hash``,
-  ``token``, ``secret`` or ``apiKey`` (``api_key``, ``api-key``), or ``ssn`` or ``iban``,
-  the personal identifiers this package keeps out of its projections (ADR-0017), in any
-  case, has its text value replaced by ``REDACTED``. ``order/read.json`` sends ``hash``,
-  an undocumented 32-character text that may be the token of a public link to the order
-  document (observed on 2026-10-23, not verified); ``person/list.json`` sends ``ssn``
-  and ``iban``, only ever seen ``null``; the others were never seen and are scrubbed
+  ``token``, ``secret`` or ``apiKey`` (``api_key``, ``api-key``), or ``ssn``, ``iban`` or
+  ``qrIban`` (``qr_iban``, ``qr-iban``), the identifiers this package keeps out of its
+  projections (ADR-0017), in any case, has its text value replaced by ``REDACTED``.
+  ``order/read.json`` sends ``hash``, an undocumented 32-character text that may be the
+  token of a public link to the order document (observed on 2026-10-23, not verified);
+  ``person/list.json`` sends ``ssn`` and ``iban``, and ``location/list.json`` ``iban``
+  and ``qrIban``, only ever seen ``null``; the others were never seen and are scrubbed
   should they appear. The final check refuses any value under such a name but ``null``
   or ``REDACTED``, whatever its type or shape: text behind an escaped field name, a
   number, an array, an object; in a write's form body as a field (``ssn=...``) and
@@ -141,6 +142,7 @@ WRITE_PATHS = frozenset(
         "person/update.json",
         "person/delete.json",
         "order/create.json",
+        "order/update.json",
         "order/delete.json",
     }
 )
@@ -168,11 +170,14 @@ _EMAIL_IN_TEXT = re.compile(
 )
 _SCRUBBED_EMAILS = frozenset({SCRUBBED_EMAIL, SCRUBBED_EMAIL.replace("@", "%40")})
 
-TOKEN_FIELD_NAME = re.compile(r"hash|token|secret|api[_-]?key|ssn|iban", re.IGNORECASE)
+TOKEN_FIELD_NAME = re.compile(r"hash|token|secret|api[_-]?key|ssn|iban|qr[_-]?iban", re.IGNORECASE)
 """Body fields whose value may grant access or identify a person, by whole name in any case.
 
 ``ssn`` and ``iban`` are the documented personal identifiers this package keeps out of
-its projections (ADR-0017): fixtures never carry their values either.
+its projections (ADR-0017), and ``qrIban`` (``qr_iban``, ``qr-iban``) the QR-IBAN of the
+organisation's own bank account that ``location/list.json`` sends next to its ``iban``
+(only seen ``null``), which ``LocationProjection`` leaves out as well: fixtures never
+carry their values either.
 """
 _TOKEN_FIELD = re.compile(
     r'(?P<field>"(?:' + TOKEN_FIELD_NAME.pattern + r')"\s*:\s*)"(?:[^"\\]|\\.)*"',
@@ -223,7 +228,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--method",
         default="GET",
-        help="HTTP method: GET, or POST for one of the eight write paths the write tools call",
+        help="HTTP method: GET, or POST for one of the nine write paths the write tools call",
     )
     parser.add_argument(
         "--wrong-key", action="store_true", help=f"send {WRONG_KEY!r} instead of the key"
@@ -276,7 +281,7 @@ def refusal(method: str, endpoint: str) -> str | None:
         )
     if is_write(method) and endpoint not in WRITE_PATHS:
         return (
-            f"a POST is recorded only for one of the eight write paths the write tools "
+            f"a POST is recorded only for one of the nine write paths the write tools "
             f"call ({', '.join(sorted(WRITE_PATHS))}), not {endpoint}"
         )
     if not endpoint.endswith(".json"):

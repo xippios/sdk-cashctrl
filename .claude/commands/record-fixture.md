@@ -21,13 +21,14 @@ recorded. If the demo pair ever points at an organisation that is not that synth
 one, stop: never record from it. These policies stand all the same, and each refusal
 writes nothing and exits non-zero:
 
-- **GET, and POST for the eight write paths only.** `--method POST` is accepted for
+- **GET, and POST for the nine write paths only.** `--method POST` is accepted for
   exactly the operations the write tools call: `journal/create.json`,
   `journal/update.json`, `journal/delete.json`, `person/create.json`,
   `person/update.json`, `person/delete.json`, `order/create.json`,
-  `order/delete.json`. Every other POST (`order/update.json`, `update_status.json`,
-  ...) and every other method is refused before a request is sent, and so is a
-  `create.json` none of whose pairs carries `xippios-live`. A POST sends the `key=value` pairs
+  `order/update.json`, `order/delete.json`. Every other POST (`update_status.json`,
+  `order/bookentry/create.json`, ...) and every other method is refused before a
+  request is sent, and so is a `create.json` none of whose pairs carries
+  `xippios-live`. A POST sends the `key=value` pairs
   as the form body, in their order, as the write tools send theirs
   (`application/x-www-form-urlencoded; charset=UTF-8`). A recorded write changes the
   demo organisation: the recorder says so, names the `insertId` upstream answered, and
@@ -54,12 +55,12 @@ writes nothing and exits non-zero:
   key's first four characters on their own as a possible key prefix.
 - **No token-like fields and no personal identifiers.** The text value of every body
   field named `hash`, `token`, `secret` or `apiKey` (`api_key`, `api-key`), and of every
-  field named `ssn` or `iban`, the personal identifiers this package keeps out of its
-  projections (ADR-0017), in any case and at any depth, becomes `REDACTED`.
-  `order/read.json` sends `hash`, an undocumented 32-character text that may be the token
-  of a public link to the order document (observed on 2026-10-23, not verified);
-  `person/list.json` sends `ssn` and `iban`, only ever seen `null`; the others were never
-  seen. The final check refuses any value under such a name but `null` or `REDACTED`,
+  field named `ssn`, `iban` or `qrIban` (`qr_iban`, `qr-iban`), the identifiers this
+  package keeps out of its projections (ADR-0017), in any case and at any depth, becomes
+  `REDACTED`. `order/read.json` sends `hash`, an undocumented 32-character text that may
+  be the token of a public link to the order document (observed on 2026-10-23, not
+  verified); `person/list.json` sends `ssn` and `iban`, and `location/list.json` `iban`
+  and `qrIban`, only ever seen `null`; the others were never seen. The final check refuses any value under such a name but `null` or `REDACTED`,
   whatever its type or shape (text behind an escaped field name, a number, an array, an
   object), in the response body and in a write's form body, a JSON form value such as
   `bankAccounts` included: a write that sends `ssn` or an `iban` is not recorded. A
@@ -96,7 +97,7 @@ writes nothing and exits non-zero:
    e-mail address with
    `user@example.com`, every API user tag in `createdBy` and `lastUpdatedBy` with
    `API:REDACTED` and the value of every token-like field (`hash`, `token`, `secret`,
-   `apiKey`) and personal identifier (`ssn`, `iban`) with `REDACTED`, checks it, and only
+   `apiKey`) and identifier (`ssn`, `iban`, `qrIban`) with `REDACTED`, checks it, and only
    then writes
    `tests/fixtures/<endpoint>/<case>.json` (`account/read.json` becomes `account_read/`).
    It prints only the status and that URL. `--wrong-key` sends an invalid key instead of
@@ -122,7 +123,7 @@ writes nothing and exits non-zero:
    grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' tests/fixtures | sort -u
    direnv exec ~/github/sdk sh -c 'git grep -n --untracked -i -- "$CASHCTRL_DEMO_SUBDOMAIN" >/dev/null && echo LEAK || echo clean'
    grep -rhoiE '(hash|token|secret|api[_-]?key)\\?": *\\?"[^"\\]*' tests/fixtures | sort -u
-   grep -rhoiE --include='*.json' '\\?"(ssn|iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
+   grep -rhoiE --include='*.json' '\\?"(ssn|iban|qr[_-]?iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
    grep -rhoiE --include='*.json' '(ssn=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
    ```
 
@@ -130,7 +131,7 @@ writes nothing and exits non-zero:
    the second prints `user@example.com` and nothing else; the third prints `clean`.
    `grep -rhoiE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u` prints `API:REDACTED` at
    most. The fourth grep prints `REDACTED` values only. The last two count, without
-   printing them, the values of `ssn` and `iban`, the personal identifiers this package
+   printing them, the values of `ssn`, `iban` and `qrIban`, the identifiers this package
    keeps out of its projections (ADR-0017), that are neither `null` nor `REDACTED`, in
    the JSON bodies and in a write's form body (`ssn=`, and `iban` inside the
    percent-encoded `bankAccounts`); both print `0`. A real value found means the file is

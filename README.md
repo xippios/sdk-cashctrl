@@ -102,8 +102,10 @@ tool acts on `acme` and takes no `org`, so no call reaches another organisation;
 `--org`, a server serves every declared organisation and the agent picks one per call,
 after `cashctrl_list_organisations` has named them. Its tools are read-only and named
 `cashctrl_<verb>_<noun>`. Results are capped at 200 rows or 64 KB with a note on how to
-narrow the query; `cashctrl_list_custom_fields` at 500 rows or 128 KB and
-`cashctrl_get_report_data` at 128 KB, since an agent needs them whole. `--http` serves
+narrow the query (`cashctrl_list_cost_centers` and `cashctrl_list_history` name their
+filters, and a paged list says where to resume); `cashctrl_list_custom_fields` at 500
+rows or 128 KB and `cashctrl_get_report_data` at 128 KB, since an agent needs them
+whole. `--http` serves
 streamable HTTP instead of stdio.
 
 Write tools run in a separate server, `xippios-cashctrl-mcp-write` (see Write tools
@@ -130,7 +132,7 @@ behind a gateway that authenticates.
 
 ## Write tools
 
-Eight tools create, change and delete journal entries, persons and orders. They are
+Nine tools create, change and delete journal entries, persons and orders. They are
 tasks in `xippios.cashctrl.tasks_write` (re-exported from `xippios.cashctrl`), served
 by the write server only: never by the read server, never as an HTTP route.
 
@@ -143,6 +145,7 @@ by the write server only: never by the read server, never as an HTTP route.
 | `POST person/update.json` (Update person) | `update_person` | `cashctrl_update_person` |
 | `POST person/delete.json` (Delete people) | `delete_person` | `cashctrl_delete_person` |
 | `POST order/create.json` (Create order) | `create_order` | `cashctrl_create_order` |
+| `POST order/update.json` (Update order) | `update_order` | `cashctrl_update_order` |
 | `POST order/delete.json` (Delete orders) | `delete_order` | `cashctrl_delete_order` |
 
 - **The confirm gate.** Every write tool takes `confirm`, last, `false` by default.
@@ -161,17 +164,22 @@ by the write server only: never by the read server, never as an HTTP route.
   In Python the result is `Result[WritePreview[<record>] | WriteResult]`; narrow it
   with `isinstance` or `if result.data.performed:`.
 - **Updates send the whole record.** CashCtrl empties every parameter an update leaves
-  out. `update_journal_entry` and `update_person` therefore read the record, apply the
-  parameters given, and send every parameter `update.json` documents, the rest taken
-  from the record. A parameter left out keeps its value; `clear` names parameters to
-  send empty (`clear=["tax_id", "notes"]`; a flag such as `is_vendor` is sent `false`),
+  out. `update_journal_entry`, `update_person` and `update_order` therefore read the
+  record, apply the parameters given, and send every parameter `update.json` documents,
+  the rest taken from the record. A parameter left out keeps its value: an order's
+  items, too, are sent back as stored, each under the keys the items table documents
+  (`account_id`, `name`, `unit_price`, `quantity`, `tax_id`, ...), and `items` given
+  replace them whole; upstream stores the items it is sent anew, so their ids change
+  (observed). `clear` names parameters to send empty (`clear=["tax_id", "notes"]`; a
+  flag such as `is_vendor` or `is_display_item_gross` is sent `false`),
   and a parameter both given and cleared is refused, as is `sequence_number_id`, which
   an update sends only when given. Refused with `InvalidRequestError` before anything is
   written, unless the call gives or clears what is missing: a record that gives no value
   for a mandatory parameter; one holding a list whose shape was never observed
   (attachments, allocations, bank accounts, children, service periods, insurance
-  contracts, certificate values), an address with a `titleId` or a contact with a
-  `purpose` (keys the tables do not document); an insurance whose read shows no
+  contracts, certificate values, an order item's allocations), an address with a
+  `titleId`, a contact with a `purpose` or an order item with attachments or marked
+  optional (keys the tables do not document); an insurance whose read shows no
   insurance numbers or an employee whose read shows no `user_id` (the read leaves empty
   fields out, and these were never seen come back); and a journal entry an order or a
   salary run booked. A confirmed update reads the record again and recomputes the
@@ -237,7 +245,8 @@ it explicitly on each request. A deployment that must reach one organisation onl
 declares only that one. A task whose
 parameters are all scalars is a `GET /cashctrl/<task>` with query parameters; the list
 tasks that take a `filter`, a list (`list_accounts`, `list_cost_centers`,
-`list_journal_entries`, `list_persons`, `list_orders`), are a `POST` with a JSON body
+`list_journal_entries`, `list_persons`, `list_orders`, `list_history`), are a `POST`
+with a JSON body
 keyed by parameter name.
 The MCP entry points quiet httpx's request log; the router does not, so a consumer that
 logs at INFO logs httpx's request lines, whose URLs carry the organisation's host (its
@@ -259,6 +268,7 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET person/read.json` (Read person) | `get_person` | `cashctrl_get_person` | available |
 | `GET order/list.json` (List orders) | `list_orders` | `cashctrl_list_orders` | available; paged; HTTP route is `POST` |
 | `GET order/read.json` (Read order) | `get_order` | `cashctrl_get_order` | available |
+| `GET order/bookentry/list.json` (List book entries) | `list_order_book_entries` | `cashctrl_list_order_book_entries` | available; one order's (`order_id`, sent as `id`) |
 | `GET order/category/list.json` (List categories) | `list_order_categories` | `cashctrl_list_order_categories` | available |
 | `GET customfield/list.json` (List custom fields) | `list_custom_fields` | `cashctrl_list_custom_fields` | available; one module (`type`) a call |
 | `GET person/category/list.json` (List categories) | `list_person_categories` | `cashctrl_list_person_categories` | available |
@@ -268,9 +278,10 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET location/list.json` (List locations) | `list_locations` | `cashctrl_list_locations` | available; without `iban` and `qr_iban` |
 | `GET report/tree.json` (Get tree of reports) | `get_report_tree` | `cashctrl_get_report_tree` | available |
 | `GET report/element/data.json` (Read JSON data) | `get_report_data` | `cashctrl_get_report_data` | available; rows as upstream sends them |
+| `GET history/list.json` (List history) | `list_history` | `cashctrl_list_history` | available; paged; HTTP route is `POST` |
 | `POST journal/create.json`, `update.json`, `delete.json` | `create_journal_entry`, `update_journal_entry`, `delete_journal_entry` | `cashctrl_create_journal_entry`, ... | available on the write server only |
 | `POST person/create.json`, `update.json`, `delete.json` | `create_person`, `update_person`, `delete_person` | `cashctrl_create_person`, ... | available on the write server only |
-| `POST order/create.json`, `delete.json` | `create_order`, `delete_order` | `cashctrl_create_order`, `cashctrl_delete_order` | available on the write server only |
+| `POST order/create.json`, `update.json`, `delete.json` | `create_order`, `update_order`, `delete_order` | `cashctrl_create_order`, ... | available on the write server only |
 
 `lang` (`de`, `fr`, `it`, `en`), which upstream takes on every request and which matters
 mostly for error messages and exports, is not exposed yet. `list_accounts` checks `dir`
@@ -279,16 +290,16 @@ anything is sent, since upstream silently ignores values it does not know; both 
 typed as these value sets, so the tool schema lists them. A filter is a `Filter` or,
 from Python, a mapping with the same keys.
 
-The paged lists (`list_journal_entries`, `list_persons`, `list_orders`) take `start`
-(default 0) and `limit`. With `limit` they return one page of at most `limit` records
-from `start`; without it, every record from `start` on, fetched 100 at a time (upstream's
-documented page size, about 1 s per 100 at the self-imposed pace). `meta.total` is
-upstream's count of every record the request matches. The next page starts at `start`
-plus the number of records received: over MCP the result cap (200 rows or 64 KB) may
-return fewer than `limit`, so never advance by `limit`. MCP agents should always pass a
-`limit` of about 20. Offset pages over a list that changes meanwhile can repeat or skip
-records. Every other list returns its whole answer in one request and reports
-upstream's `total` too.
+The paged lists (`list_journal_entries`, `list_persons`, `list_orders`, `list_history`)
+take `start` (default 0) and `limit`. With `limit` they return one page of at most
+`limit` records from `start`; without it, every record from `start` on, fetched 100 at a
+time (upstream's documented page size, about 1 s per 100 at the self-imposed pace).
+`meta.total` is upstream's count of every record the request matches. The next page
+starts at `start` plus the number of records received: over MCP the result cap (200 rows
+or 64 KB) may return fewer than `limit`, so never advance by `limit`. MCP agents should
+always pass a `limit` of about 20. Offset pages over a list that changes meanwhile can
+repeat or skip records. Every other list returns its whole answer in one request and
+reports upstream's `total` too.
 
 The journal and order lists answer for the API user's current fiscal period unless
 `fiscal_period_id` is given; that period is server-side state that
@@ -296,6 +307,13 @@ The journal and order lists answer for the API user's current fiscal period unle
 answered, so pass `fiscal_period_id` (an id from `list_fiscal_periods`) for a
 reproducible answer. Without `type` (`SALES`, `PURCHASE`), `list_orders` returns both;
 `list_order_categories` lists `SALES` (upstream's default) unless given `PURCHASE`.
+
+`list_order_book_entries` lists one order's book entries (`order_id`, sent as upstream's
+`id`): the journal entries its items booked (`type` `GENERATED`) and those booked to it
+by hand, such as payments, each with its `rows`; an order in a status that books nothing
+has none. `list_history` is the audit log, newest first: who changed what and when
+(`created_by`, `change_type`, `message`), narrowed with `order_id`, `person_id` or
+`statement_id`; the history of a deleted order is no longer listed (observed).
 
 `get_report_tree` lists the organisation's reports, collections of report elements;
 `get_report_data` reads one element (`element_id`, a balance sheet, a profit and loss

@@ -89,9 +89,9 @@ organisation is synthetic: invented books seeded by `scripts/seed_demo.py` and d
 in `docs/demo-org.md`, never a copy of real books. So the recorder records any module and
 any amount; it still scrubs e-mail addresses to `user@example.com`, API user tags to
 `API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) and the
-personal identifiers `ssn` and `iban` to `REDACTED`, in the request body as well, and
+identifiers `ssn`, `iban` and `qrIban` to `REDACTED`, in the request body as well, and
 refuses any method but GET and POST, a POST
-to anything but the eight write paths, a create without the marker `xippios-live`, and
+to anything but the nine write paths, a create without the marker `xippios-live`, and
 any endpoint but `.json`. Writes against demo create a record marked `xippios-live`,
 update it and delete it again, nothing else (see Write tools). The demo subdomain is
 treated like a key: never in a file, a commit, a log line or a report. The repository is
@@ -163,7 +163,7 @@ src/xippios/cashctrl/
   api/             endpoint wrappers, one module per upstream operation; _form.py encodes and posts writes
   tasks.py         task functions and list_organisations; __all__ is what the adapters register,
                    MCP_CAPS the per-tool result caps (list_custom_fields, list_cost_centers,
-                   get_report_data)
+                   get_report_data, list_history)
   tasks_write.py   confirm-gated write tasks for the separate write server (Write tools below)
   mcp_write.py     xippios-cashctrl-mcp-write entry point
   mcp.py           xippios-cashctrl-mcp entry point
@@ -239,7 +239,7 @@ Run `/add-endpoint <upstream operation>`. In short:
 7. `CHANGELOG.md` under Unreleased, README status table (the task's name first in its
    cell, in backticks, as the family check reads it), then the full check suite.
 
-A list that documents `start` and `limit` (journal, persons, orders) pages through
+A list that documents `start` and `limit` (journal, persons, orders, history) pages through
 `_offset_pages` in `tasks.py` (conventions §4, ADR-0012): `limit` given is one request
 for the page at `start` (default 0); `limit` omitted collects every page from `start`
 through core's `paginate_offset`, `PAGE_SIZE` (100, upstream's documented default) a
@@ -259,8 +259,9 @@ where). A lookup whose whole list an agent needs and the default result cap (200
 through (ADR-0016): `list_custom_fields` (500 rows or 128 KB; no filter but `type`, and
 a write needs a type's custom fields whole) and `get_report_data` (128 KB; a report is
 read whole, and its result, no list, is cut to a note and a preview);
-`list_cost_centers` keeps the default bound with a note naming its filters. Every other
-list takes filters or pages, or is short. Where the documentation gives no schema and
+`list_cost_centers` and `list_history` keep the default bound with a note naming their
+filters (the history's note also names `limit`, and core's cut ends with where to
+resume). Every other list takes filters or pages, or is short. Where the documentation gives no schema and
 the shape differs by kind, as the rows of `report/element/data.json` differ by report
 type, the task returns upstream's JSON as sent (`JsonValue`, camelCase keys included)
 and says so in its docstring (decided by Johannes on 2026-10-27); `AS_SENT` in
@@ -276,8 +277,11 @@ raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
 
 ## Write tools
 
-`tasks_write.py` holds the write tasks (`create_*`, `update_*`, `delete_*` for journal
-entries, persons and orders), served by `xippios-cashctrl-mcp-write` only: never by the
+`tasks_write.py` holds the nine write tasks (`create_*`, `update_*`, `delete_*` for
+journal entries, persons and orders: `create_journal_entry`, `update_journal_entry`,
+`delete_journal_entry`, `create_person`, `update_person`, `delete_person`,
+`create_order`, `update_order`, `delete_order`), served by
+`xippios-cashctrl-mcp-write` only: never by the
 read server, never on the HTTP router (`tests/test_tasks_write.py` checks it with
 `assert_write_tools`). The decisions behind them were taken by Johannes in the wave 2
 interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more:
@@ -310,12 +314,16 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
    read, never a write.
 3. **Updates read, merge, send.** Upstream empties every parameter an update omits.
    `update_*` reads the record, maps every parameter `update.json` documents from it
-   (`_journal_values`, `_person_values`), applies the arguments given (not `None`), and
-   sends all of them. A mandatory parameter neither the record nor the call gives
-   raises `InvalidRequestError` before any write; so does a stored list whose shape was
-   never observed (attachments, allocations, bank accounts, children, service periods,
-   insurance contracts, certificate values), a stored key the input table does not
-   document (an address's `titleId`, a contact's `purpose`), and a field whose absence
+   (`_journal_values`, `_person_values`, `_order_values`), applies the arguments given
+   (not `None`), and sends all of them. An order's items go back under the keys the
+   items table documents (`_order_items`, in their `pos`), the computed ones left out;
+   upstream stores the items an update sends anew, with new ids (observed 2026-10-27).
+   A mandatory parameter neither the record nor the call gives raises
+   `InvalidRequestError` before any write; so does a stored list whose shape was never
+   observed (attachments, allocations, bank accounts, children, service periods,
+   insurance contracts, certificate values, an order item's allocations), a stored key
+   the input table does not document (an address's `titleId`, a contact's `purpose`,
+   an order item's `attachments` or `isOptional`), and a field whose absence
    from the read is unknown rather than empty (an insurance's `insuranceNr` and
    `insuranceMemberNr`, an employee's `userId`), unless the call gives or clears it.
    `person/read.json` returns every stored documented field and leaves empty ones out
@@ -325,7 +333,9 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
    cleared is refused, and so is one an update sends only when given (`_UNSENT`:
    `sequence_number_id`). A journal entry an order or a salary run booked (`orderId`,
    `orderBookEntryId`, `salaryBookEntryId`) is refused, by `delete_journal_entry` as
-   well, which reads the entry first, confirmed or not. A confirmed call reads again and
+   well, which reads the entry first, confirmed or not; an order is not refused for
+   being booked, since upstream changes an order's automatic book entries through its
+   items (`docs/upstream/order.md`, Book entry). A confirmed call reads again and
    recomputes, so its payload can differ from the preview's if the record changed. Never
    send a partial record.
 4. **Custom fields** are `customField<ID>` to text (`api/_form.py`'s `CUSTOM_FIELD`),
@@ -335,11 +345,16 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
 5. **Facts for docstrings.** A journal `amount` with a `tax_id` is gross, and order
    items' `unitPrice` was read as gross (observed, `docs/demo-org.md`); previews are
    free; `confirm=true` writes; ids come from `list_accounts`, `list_tax_codes`,
-   `list_persons`, `list_order_categories`. Upstream refuses with HTTP 200 and an
-   `errors` list (`RequestRejected` naming the fields); a delete of an id that no longer
-   exists answers `success: false` with `message` (`RequestRejected`, not
-   `NotFoundError`). `person.nr` is unique: a second person with the same `nr` is
-   refused.
+   `list_persons`, `list_order_categories`, `list_currencies` and the discovery lists:
+   `list_person_categories` (a person's `category_id`), `list_person_titles`
+   (`title_id`), `list_locations` (an employee's `location_id`), `list_account_categories`
+   (the `category_id` that narrows `list_accounts`), `list_cost_centers` (an
+   allocation's `to_cost_center_id`) and `list_custom_fields` (`customField<id>`, by the
+   module's `type`); each write docstring names the lists its ids come from. Upstream
+   refuses with HTTP 200 and an `errors` list (`RequestRejected` naming the fields); a
+   delete of an id that no longer exists answers `success: false` with `message`
+   (`RequestRejected`, not `NotFoundError`). `person.nr` is unique: a second person with
+   the same `nr` is refused.
 6. **Tests.** Record the create, the read the update starts from, the update, the
    delete, in that order, so every record created is deleted again; compute the
    payload offline through the task's preview and pass exactly those pairs to the
@@ -382,10 +397,10 @@ replay-tested with a real value.
   send them as given; a preview's `payload` and `changes` and a performed write's
   `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
   as empty.
-- Fixtures never carry their values: the recorder rewrites an `ssn` or `iban` value to
-  `REDACTED` by name, and its final check refuses only a value that survives the rewrite
-  (How to record a fixture). It does nothing for a location's `qrIban` yet, a compound
-  name (PR 4 adds it); the recorded location holds `null`.
+- Fixtures never carry their values: the recorder rewrites an `ssn`, `iban` or
+  `qrIban` value (a location's QR-IBAN, also as `qr_iban` or `qr-iban`) to `REDACTED` by
+  name, in any letter case, and its final check refuses only a value that survives the
+  rewrite (How to record a fixture); the recorded location holds `null` for both.
 - `get_report_data` returns a report's rows as upstream sends them and drops every key
   named `ssn`, `iban` or `qrIban` from them and from `properties`, in any letter case
   and at any depth (`_report`; ADR-0003, amendment 2026-10-26). Payroll and people
@@ -414,7 +429,8 @@ URL, the header values and both bodies: e-mail addresses to `user@example.com`,
 CashCtrl's API user tags (`API:` and the first four characters of a key, in `createdBy`
 and `lastUpdatedBy`) to `API:REDACTED` and the value of every token-like body field
 (`hash`, `token`, `secret`, `apiKey`, by name; `order/read.json` sends `hash`) and of the
-personal identifiers `ssn` and `iban` (ADR-0017; `person/list.json` sends both, only
+identifiers `ssn`, `iban` and `qrIban` (`qr_iban`, `qr-iban`; ADR-0017;
+`person/list.json` sends `ssn` and `iban`, `location/list.json` `iban` and `qrIban`, only
 ever `null`) to `REDACTED`. Its verify then refuses, in its own words, a fixture that
 still holds the demo host, the subdomain on its own or the key or its token, plain or
 percent-encoded, in the raw texts or in a decoded string of a JSON body (a value behind
@@ -429,13 +445,13 @@ rule above
 refuses. The write stays the recorder's: core's `record` writes as soon as its own
 verify passes, before the recorder's step and final check could run. A compound name such as
 `publicHash` is not scrubbed and goes to review. Grep the file for key patterns, e-mail
-addresses, API user tags, token-like fields and values under `ssn` and `iban` before
-committing (`/record-fixture`, `tests/fixtures/README.md`). Fixtures are never typed in
-by hand.
+addresses, API user tags, token-like fields and values under `ssn`, `iban` and `qrIban`
+before committing (`/record-fixture`, `tests/fixtures/README.md`). Fixtures are never
+typed in by hand.
 
-Writes: `--method POST` is accepted for the eight write paths the write tools call only
+Writes: `--method POST` is accepted for the nine write paths the write tools call only
 (`journal/create|update|delete.json`, `person/create|update|delete.json`,
-`order/create|delete.json`, `WRITE_PATHS`), every other POST and every other method
+`order/create|update|delete.json`, `WRITE_PATHS`), every other POST and every other method
 refused before a request, and a `create.json` only when one of its values carries
 `xippios-live`; the `key=value` pairs go as the form body, in their order, with the
 write tools' `Content-Type` (`application/x-www-form-urlencoded; charset=UTF-8`). Core
@@ -528,7 +544,7 @@ payload it was given, API user tags included, into the public Actions log.
 ## Never
 
 - Never hand-write a fixture, and never commit one without grepping for key patterns
-  and for values under `ssn` and `iban`.
+  and for values under `ssn`, `iban` and `qrIban`.
 - Never record a fixture, run a live test or make a live call against any organisation
   but `demo`; never set `CASHCTRL_ORGS` with real names in a session or a test.
 - Never print, log or commit `CASHCTRL_DEMO_SUBDOMAIN` or any organisation's subdomain.

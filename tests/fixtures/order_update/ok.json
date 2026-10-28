@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-10-27T22:21:25.427938Z",
+  "request": {
+    "body": "id=20&associateId=7&categoryId=4&date=2026-10-24&accountId=4&currencyRate=1&description=xippios-live+fixture+updated&dueDays=30&groupId=20&isDisplayItemGross=false&items=%5B%7B%22accountId%22%3A42%2C%22name%22%3A%22xippios-live+item%22%2C%22unitPrice%22%3A100%2C%22quantity%22%3A1%2C%22taxId%22%3A9%2C%22type%22%3A%22ARTICLE%22%7D%5D&language=DE&nr=xippios-live&statusId=12",
+    "body_base64": false,
+    "content_type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "method": "POST",
+    "url": "https://demo.cashctrl.com/api/v1/order/update.json"
+  },
+  "response": {
+    "body": "{\"success\":true,\"message\":\"Rechnung saved\",\"insertId\":20}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 27 Oct 2026 22:21:24 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

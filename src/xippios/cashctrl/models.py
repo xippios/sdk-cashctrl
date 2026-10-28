@@ -82,6 +82,7 @@ __all__ = [
     "Direction",
     "Filter",
     "FiscalPeriod",
+    "HistoryEntry",
     "InsuranceContractInput",
     "JournalEntry",
     "JournalEntryDetail",
@@ -95,6 +96,7 @@ __all__ = [
     "LocationProjection",
     "NotifyType",
     "Order",
+    "OrderBookEntry",
     "OrderBookTemplate",
     "OrderCategory",
     "OrderCategoryStatus",
@@ -1169,6 +1171,63 @@ class OrderDetail(_OrderFields):
     recurrence_id: JsonValue = Field(default=None, validation_alias="recurrenceId")
 
 
+class OrderBookEntry(UpstreamModel):
+    """One book entry of an order, an entry of ``order/bookentry/list.json``.
+
+    "All the journal book entries that are created for an order (e.g. an invoice or a
+    credit note), either automatically from items or manually by the user, like payments
+    for example" (``docs/upstream/order.md``, Book entry). Typed from the tables of
+    ``order/bookentry/create.json`` and ``update.json``: ``account_id`` (the contra
+    account to the category's), ``amount``, ``currency_id``, ``currency_rate``, ``date``
+    (``YYYY-MM-DD``), ``description``, ``reference``, ``tax_id`` and ``template_id``.
+
+    Typed from observation on 2026-10-27, the entry a seeded purchase order booked
+    (``tests/fixtures/order_bookentry_list/booked.json``): ``id``, ``order_id``,
+    ``type`` (``GENERATED`` for one booked from the items), ``debit_id`` and
+    ``debit_name``, ``credit_id`` and ``credit_name`` (the account's number and
+    localised name), the amounts ``default_currency_amount``, ``net_amount`` and
+    ``tax_amount``, ``rows`` (the bookings per account, tax rows apart, as a journal
+    entry's ``JournalRow``), the flags ``is_allow_tax``, ``original`` and ``separate``,
+    ``name`` (seen empty) and the ``created*``/``last_updated*`` bookkeeping fields.
+    Kept as sent: ``allocations`` (only seen empty), ``cost_center_numbers`` (seen
+    empty) and ``import_entry_id`` (only seen ``null``).
+    """
+
+    id: int
+    order_id: int | None = Field(default=None, validation_alias="orderId")
+    type: str | None = None
+    date: UpstreamDate | None = None
+    description: str | None = None
+    reference: str | None = None
+    name: str | None = None
+    amount: Decimal | None = None
+    default_currency_amount: Decimal | None = Field(
+        default=None, validation_alias="defaultCurrencyAmount"
+    )
+    net_amount: Decimal | None = Field(default=None, validation_alias="netAmount")
+    tax_amount: Decimal | None = Field(default=None, validation_alias="taxAmount")
+    account_id: int | None = Field(default=None, validation_alias="accountId")
+    debit_id: int | None = Field(default=None, validation_alias="debitId")
+    debit_name: str | None = Field(default=None, validation_alias="debitName")
+    credit_id: int | None = Field(default=None, validation_alias="creditId")
+    credit_name: str | None = Field(default=None, validation_alias="creditName")
+    tax_id: int | None = Field(default=None, validation_alias="taxId")
+    template_id: int | None = Field(default=None, validation_alias="templateId")
+    currency_id: int | None = Field(default=None, validation_alias="currencyId")
+    currency_rate: Decimal | None = Field(default=None, validation_alias="currencyRate")
+    is_allow_tax: bool | None = Field(default=None, validation_alias="isAllowTax")
+    original: bool | None = None
+    separate: bool | None = None
+    rows: list[JournalRow] = Field(default_factory=list)
+    allocations: list[JsonValue] = Field(default_factory=list)
+    cost_center_numbers: JsonValue = Field(default=None, validation_alias="costCenterNumbers")
+    import_entry_id: JsonValue = Field(default=None, validation_alias="importEntryId")
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
+    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+
+
 class OrderCategoryStatus(UpstreamModel):
     """One status of an order category, an item of ``OrderCategory.status``.
 
@@ -1565,6 +1624,33 @@ class LocationProjection(_LocationFields):
     What ``list_locations`` returns (ADR-0017): every field of ``Location`` but those two,
     under the same names; ``bank_account_id`` names the bank account instead.
     """
+
+
+class HistoryEntry(UpstreamModel):
+    """One entry of the history, the audit log, an entry of ``history/list.json``.
+
+    ``docs/upstream/common.md``, History, documents the list's parameters only
+    (``orderId``, ``personId``, ``statementId`` among them). Typed from observation on
+    2026-10-27 (``tests/fixtures/history_list/order.json``, a seeded order's): ``id``,
+    ``created`` (when the change was made) and ``created_by`` (who made it: an API user
+    as ``API:`` and the first four characters of its key, as on every record),
+    ``type`` (the module, ``ORDER`` seen), ``change_type`` (``CREATE`` and ``STATUS``
+    in the fixture; ``UPDATE`` seen on 2026-10-27, not in a fixture, since the recording
+    that showed it was overwritten), the record it concerns (``order_id``,
+    ``person_id`` the order's partner, ``statement_id`` only seen ``null``) and
+    ``message``, upstream's text of the change, naming the record (``Rechnung
+    'EK-2026-001' created.``).
+    """
+
+    id: int
+    created: datetime | None = None
+    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    type: str | None = None
+    change_type: str | None = Field(default=None, validation_alias="changeType")
+    order_id: int | None = Field(default=None, validation_alias="orderId")
+    person_id: int | None = Field(default=None, validation_alias="personId")
+    statement_id: int | None = Field(default=None, validation_alias="statementId")
+    message: str | None = None
 
 
 class ReportTreeNode(UpstreamModel):
