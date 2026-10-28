@@ -204,7 +204,9 @@ write server only: never by the read server, never as an HTTP route.
   file (`type` `PAIN`, its default, or `SEPA_PAIN`) or a PDF (`WIRE_PDF`, `CASH_PDF`),
   which its `order/payment/download` delivers afterwards (not wrapped here). Both send
   what they are given, nothing read first. A payment creates no book entry, and
-  CashCtrl documents no way to read, list or delete one. A status id comes from the
+  CashCtrl documents no way to read, list or delete one. `PAIN` needs the sender's and
+  the recipient's bank accounts and the sender's BIC and refuses a date in the past;
+  `CASH_PDF` needed none of them (observed on the demo organisation, 2026-10-29). A status id comes from the
   `status` of the orders' category in `cashctrl_list_order_categories`.
 - **Custom fields**: `custom` maps upstream's names (`customField1`, `customField<ID>`,
   the ids from `cashctrl_list_custom_fields`) to text, sent as

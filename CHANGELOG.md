@@ -39,17 +39,22 @@ All notable changes to this project are documented here. The format follows
   upstream's default `PAIN` when not given. A payment is the pain.001 or PDF payment
   order upstream's `order/payment/download` delivers (not wrapped), creates no book
   entry and has no documented delete, as the docstring says. One wrapper per endpoint,
-  `order_update_status` and `order_payment_create` (D95, conventions 1.22 §2).
-  `order/continue.json` and the book-entry writes stay out.
+  `order_update_status` and `order_payment_create` (D95, conventions 1.22 §2), their
+  fixtures recorded on 2026-10-29 on a marked purchase order with the purchase
+  categories (`order_category_list/purchase`): the status set, the payment as `PAIN`
+  refused (a date in the past, no bank accounts or BIC in the synthetic books) and as
+  `CASH_PDF` created, neither answer with an `insertId`. `order/continue.json` and the
+  book-entry writes stay out.
 - The fixture recorder accepts the two order writes, eleven write paths, for orders
   marked `xippios-live` only: it reads every order their `ids` or `orderIds` name
   (`order/read.json`, one GET each) and refuses the write before it is sent unless each
   is marked (the marker in its description, or as its `nr`), an order it cannot read
   refusing it too (Johannes, 2026-10-28).
 - A live round trip on a marked purchase order of a seeded vendor: created, its status
-  set, its payment created, the order deleted and no journal entry of it left; then
-  `order/payment/download` is probed once with the payment's parameters, never recorded,
-  to see whether the payment outlived its order. The payment of a deleted order is the
+  set, its payment created (`CASH_PDF`, which demo accepts), the order deleted and no
+  journal entry of it left; then `order/payment/download` is probed once with the
+  payment's parameters, never recorded, to see whether the payment outlived its order:
+  on 2026-10-29 it answered HTTP 400, no file. The payment of a deleted order is the
   accepted residue: no book entry, no amount moved, the order gone (Johannes,
   2026-10-28).
 - A download refused with HTTP 200 and `success: false` is raised, never kept as the

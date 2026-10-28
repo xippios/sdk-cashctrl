@@ -472,16 +472,29 @@ the same run; each live test first deletes marked leftovers of an earlier run. N
 record is changed.
 
 One live test, `test_order_status_payment_delete`, creates a marked purchase order of a
-seeded vendor in the purchase invoice category (in its first status, which books, as the
-seeded purchase orders do), sets it to another status of the category, creates its
-payment (`order/payment/create.json`, `PAIN`, every open amount) and deletes the order;
-it then checks that no journal entry of the order is left. Upstream documents no
-payment delete, so every run may leave the payment of a deleted order behind: no book
-entry, no amount moved, the order gone, accepted as residue (Johannes, 2026-10-28). The
-test probes `order/payment/download` once after the delete, with the payment's
-parameters, and records whether upstream still serves the payment's file or refuses
-it (the junit property `payment_download`). Not observed yet: the first live run of the
-test records the answer here.
+seeded vendor in the purchase invoice category (in its first status, Open, which books, as
+the seeded purchase orders do), sets it to another status of the category (Reminded 1,
+the next without a follow-up action), creates its payment (`order/payment/create.json`,
+`CASH_PDF`, every open amount) and deletes the order; it then checks that no journal
+entry of the order is left. Upstream documents no payment delete, so every run may leave
+the payment of a deleted order behind: no book entry, no amount moved, the order gone,
+accepted as residue (Johannes, 2026-10-28). After the delete the test probes
+`order/payment/download` once with the payment's parameters and records whether upstream
+still serves the payment's file or refuses it (the junit property `payment_download`).
+
+Observed on 2026-10-29, while recording (`order_update_status/ok`,
+`order_payment_create/pain` and `/cash_pdf`, the order 26) and in the first live run:
+`order/update_status.json` answers `{"success": true, "message": "Status changed"}`
+and `order/payment/create.json` `"Payment order created"`, neither with an `insertId`.
+`PAIN` is refused here: "The date cannot be in the past." (`date`), and for the order
+"Sender: Bank account must be set.", "Recipient: Bank account must be set." and "Sender:
+BIC must be set.", since neither the organisation nor the vendors hold bank details;
+`CASH_PDF` for the same order and the same past date is created. An order with a
+payment is deleted like any other ("1 document deleted"), and none of its journal
+entries is left. The probe after the delete answered HTTP 400 with `text/plain`,
+recorded as `refusal`: no file is served for the payment of a deleted order; whether
+upstream keeps the payment itself cannot be seen, as the API has no payment read or
+list.
 
 ## Observed write semantics (filled by the first run)
 

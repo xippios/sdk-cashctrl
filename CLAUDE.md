@@ -499,9 +499,9 @@ delete, recorded or run. Record only a record marked `xippios-live`, its writes 
 delete; confirm afterwards with one list per resource (`query=xippios-live`, counts only)
 that nothing is left.
 
-The write fixtures of 2026-10-24 record a journal entry and a person marked
-`xippios-live`, created, read, updated and deleted again in that order, and those of
-2026-10-27 the order 20, created, read, updated, read again and deleted.
+The write fixtures record marked records: a journal entry and a person (2026-10-24)
+and the order 20 (2026-10-27), each created, read, updated and deleted, and the purchase
+order 26's status and payments, `PAIN` refused, `CASH_PDF` created (2026-10-29).
 
 Still grep before committing:
 
