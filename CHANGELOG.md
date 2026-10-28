@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Aligned with sdk-template v0.3.0 by hand, on template v0.2.2 and conventions 1.22
+  (§15 as queue row 118 reads it; no `copier update`, D35, D85): `CLAUDE.md` holds the
+  package's facts and imports the family rules from `.claude/family.md`, a frozen copy
+  of the template's file, its own lines from the former family sections moved into a
+  "CashCtrl specifics" section, into which `tests/fixtures/README.md` is folded and then
+  deleted (G5 (4) of 2026-10-28); the six `.claude/commands` re-based on v0.3.0's text,
+  the core-only `/adopt-release` and the write paths kept; `.claude/settings.json` allows
+  `gh pr merge --auto` and no longer denies `gh pr merge`; `ci.yml`'s CHANGELOG step no
+  longer exempts an adoption PR; `live.yml`'s comments and the PR template's enum item in
+  v0.3.0's wording; `pyproject.toml` pins ruff 0.17.1, the pre-commit hook's rev, sets
+  `junit_family = "xunit1"` and drops the `accounting` keyword; `BULK_TASKS`, empty,
+  beside `MCP_CAPS` (ADR-0019 decision 4), and the adapters' docstrings say core skips
+  it. Core stays at 0.3.0.
+
 ## [0.2.0] - 2026-10-28
 
 The second release. It ships on xippios-core 0.3.0 (`xippios-core~=0.3.0` from PyPI,
