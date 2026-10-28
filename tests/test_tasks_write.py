@@ -13,9 +13,10 @@ The negative update cases change a recorded read in memory (a field removed, a s
 list filled in) and serve it with ``respx``; they are not fixtures, and they say so.
 
 ``update_order_status`` and ``create_order_payment`` (G5 (8) of 2026-10-28) take their
-status ids from the recorded categories (``order_category_list/default``), never a
-guess; until their writes are recorded, a confirmed call is answered by ``respx`` with
-a synthetic ``success`` answer, which no fixture holds, and the test says so.
+status ids from the recorded categories (``order_category_list/default`` and
+``purchase``), never a guess. Their fixtures of 2026-10-29 record the marked purchase
+order 26 (created and deleted through the write tools, not recorded): its status set,
+its payment as ``PAIN`` refused and as ``CASH_PDF`` created.
 """
 
 import inspect
@@ -1645,10 +1646,33 @@ def recorded_invoice_statuses() -> list[int]:
 
 DRAFT, OPEN = recorded_invoice_statuses()[:2]
 """The first two statuses of the invoice category (Draft, then Open in the recording)."""
-SUCCESS = {"success": True, "message": "ok"}
-"""A synthetic success answer for a write not yet recorded; no fixture holds it."""
 PAY_DAY = DAY
 """The payment's execution date: the date of every record the live tests write."""
+PAID = 26
+"""The marked purchase order the status and payment fixtures of 2026-10-29 record."""
+
+
+def recorded_purchase_invoice_status() -> int:
+    """The status the recorded update set, chosen as the live test chooses it.
+
+    From ``order_category_list/purchase`` (recorded on 2026-10-29): the purchase invoice
+    category's next status after the first that names no follow-up action, an open one
+    first (gap, row 242).
+    """
+    raw = load_fixture(_FIXTURES / "order_category_list" / "purchase.json").response.body
+    categories = ListResponse[OrderCategory].model_validate_json(raw or "")
+    (invoice,) = [
+        category
+        for category in categories.data
+        if "<en>Invoice</en>" in (category.name_singular or "") and not category.is_inactive
+    ]
+    _, *others = invoice.status
+    actionless = [status for status in others if not status.action_id]
+    return min(actionless, key=lambda status: (status.is_closed, status.pos or 0)).id
+
+
+REMINDED = recorded_purchase_invoice_status()
+"""The status ``order_update_status/ok`` set on the order 26 (Reminded 1)."""
 
 
 def test_update_order_status_previews_the_payload_without_a_request(
@@ -1664,21 +1688,25 @@ def test_update_order_status_previews_the_payload_without_a_request(
     assert result.meta.request == {"org": DEMO}, "the payload is in data, never twice"
 
 
-def test_update_order_status_with_confirm_sends_the_previewed_payload(
-    respx_mock: respx.MockRouter,
+def test_update_order_status_with_confirm_replays_the_recorded_update(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, fixtures_dir: Path
 ) -> None:
-    """Answered by respx with ``SUCCESS``: the write is not recorded yet."""
-    preview = preview_of(tasks_write.update_order_status(DEMO, [ORDER], OPEN))
-    route = respx_mock.post(f"{BASE}/order/update_status.json").respond(200, json=SUCCESS)
-    result = tasks_write.update_order_status(DEMO, [ORDER], OPEN, confirm=True)
+    preview = preview_of(tasks_write.update_order_status(DEMO, [PAID], REMINDED))
+    recorded = recorded_body(fixtures_dir, "order_update_status", "ok")
+    assert list(preview.payload.items()) == recorded, "the preview is what upstream received"
+    route = replay_fixture("order_update_status", "ok")
+    result = tasks_write.update_order_status(DEMO, [PAID], REMINDED, confirm=True)
     assert route.call_count == 1
     assert len(respx_mock.calls) == 1, "no read before the write"
-    sent = route.calls.last.request
-    assert sent.headers["Content-Type"] == FORM_CONTENT_TYPE
-    assert sent_body(route) == list(preview.payload.items())
+    assert route.calls.last.request.headers["Content-Type"] == FORM_CONTENT_TYPE
+    assert sent_body(route) == recorded
     assert isinstance(result.data, WriteResult)
-    assert (result.data.performed, result.data.message) == (True, "ok")
-    assert result.meta.request == {"org": DEMO, **preview.payload}
+    assert (result.data.performed, result.data.insert_id, result.data.message) == (
+        True,
+        None,
+        "Status changed",
+    )
+    assert result.meta.request == {"org": DEMO, **dict(recorded)}
 
 
 def test_create_order_payment_previews_the_payload_without_a_request(
@@ -1708,20 +1736,53 @@ def test_create_order_payment_previews_the_payload_without_a_request(
     assert result.meta.request == {"org": DEMO}
 
 
-def test_create_order_payment_sends_upstreams_defaults_by_leaving_them_out(
+def test_create_order_payment_leaves_upstreams_defaults_to_upstream(
     respx_mock: respx.MockRouter,
 ) -> None:
     """Without ``amount`` and ``type`` upstream pays every open amount as ``PAIN``."""
     preview = preview_of(tasks_write.create_order_payment(DEMO, PAY_DAY, [ORDER]))
     assert preview.payload == {"date": "2026-10-24", "orderIds": str(ORDER)}
-    route = respx_mock.post(f"{BASE}/order/payment/create.json").respond(200, json=SUCCESS)
-    result = tasks_write.create_order_payment(DEMO, PAY_DAY, [ORDER], confirm=True)
-    assert len(respx_mock.calls) == 1
-    assert sent_body(route) == list(preview.payload.items())
+    assert not respx_mock.calls
+
+
+def test_create_order_payment_with_confirm_replays_the_recorded_payment(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """``CASH_PDF`` for the order 26: created, no ``insertId`` in the answer."""
+    preview = preview_of(tasks_write.create_order_payment(DEMO, PAY_DAY, [PAID], type="CASH_PDF"))
+    recorded = recorded_body(fixtures_dir, "order_payment_create", "cash_pdf")
+    assert list(preview.payload.items()) == recorded, "the preview is what upstream received"
+    route = replay_fixture("order_payment_create", "cash_pdf")
+    result = tasks_write.create_order_payment(DEMO, PAY_DAY, [PAID], type="CASH_PDF", confirm=True)
+    assert len(respx_mock.calls) == 1, "no read before the write"
     assert route.calls.last.request.headers["Content-Type"] == FORM_CONTENT_TYPE
+    assert sent_body(route) == recorded
     assert isinstance(result.data, WriteResult)
+    assert (result.data.insert_id, result.data.message) == (None, "Payment order created")
     assert result.meta.endpoint == "order/payment/create.json"
-    assert result.meta.request == {"org": DEMO, **preview.payload}
+    assert result.meta.request == {"org": DEMO, **dict(recorded)}
+
+
+def test_a_refused_payment_names_the_date_and_the_bank_accounts(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    """``PAIN`` for the order 26 on 2026-10-29: refused, the fields and messages named."""
+    preview = preview_of(tasks_write.create_order_payment(DEMO, PAY_DAY, [PAID], type="PAIN"))
+    recorded = recorded_body(fixtures_dir, "order_payment_create", "pain")
+    assert list(preview.payload.items()) == recorded
+    route = replay_fixture("order_payment_create", "pain")
+    with pytest.raises(RequestRejected) as refused:
+        tasks_write.create_order_payment(DEMO, PAY_DAY, [PAID], type="PAIN", confirm=True)
+    assert sent_body(route) == recorded
+    assert [(error.field, error.message) for error in refused.value.errors] == [
+        ("date", "The date cannot be in the past."),
+        (None, "Rechnung xippios-live: Sender: Bank account must be set."),
+        (None, "Rechnung xippios-live: Recipient: Bank account must be set."),
+        (None, "Rechnung xippios-live: Sender: BIC must be set."),
+    ]
+    assert str(refused.value).startswith(
+        "CashCtrl rejected the request: date: The date cannot be in the past.; "
+    )
 
 
 @pytest.mark.parametrize(
@@ -1772,25 +1833,22 @@ def test_status_and_payment_arguments_are_refused_before_any_request(
 
 @pytest.mark.anyio
 async def test_status_and_payment_through_the_write_server(
-    respx_mock: respx.MockRouter,
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, fixtures_dir: Path
 ) -> None:
-    """The tools preview without a request and write with ``confirm``; the answers are
-    ``SUCCESS``, synthetic, as the writes are not recorded yet."""
-    status = respx_mock.post(f"{BASE}/order/update_status.json").respond(200, json=SUCCESS)
-    payment = respx_mock.post(f"{BASE}/order/payment/create.json").respond(200, json=SUCCESS)
-    arguments = {"org": DEMO, "ids": [ORDER], "status_id": OPEN}
+    """The tools preview without a request and write with ``confirm``: the recordings."""
+    status = replay_fixture("order_update_status", "ok")
+    payment = replay_fixture("order_payment_create", "cash_pdf")
+    arguments = {"org": DEMO, "ids": [PAID], "status_id": REMINDED}
     preview = await mcp_call(write_server, "cashctrl_update_order_status", arguments)
     assert preview["data"] == preview["data"] | {
         "performed": False,
-        "payload": {"ids": str(ORDER), "statusId": str(OPEN)},
+        "payload": dict(recorded_body(fixtures_dir, "order_update_status", "ok")),
     }
-    paying = {"org": DEMO, "date": "2026-10-24", "order_ids": [ORDER], "type": "PAIN"}
+    paying = {"org": DEMO, "date": "2026-10-24", "order_ids": [PAID], "type": "CASH_PDF"}
     planned = await mcp_call(write_server, "cashctrl_create_order_payment", paying)
-    assert planned["data"]["payload"] == {
-        "date": "2026-10-24",
-        "orderIds": str(ORDER),
-        "type": "PAIN",
-    }
+    assert planned["data"]["payload"] == dict(
+        recorded_body(fixtures_dir, "order_payment_create", "cash_pdf")
+    )
     assert not respx_mock.calls
     done = await mcp_call(
         write_server, "cashctrl_update_order_status", {**arguments, "confirm": True}
@@ -2222,6 +2280,25 @@ WRITE_TOOL_CASES: dict[str, tuple[list[tuple[str, str]], dict[str, Any]]] = {
     "preview of an order update": (
         [("order_read", "for_update")],
         {"tool": "cashctrl_update_order", "id": ORDER, "due_days": 30},
+    ),
+    "a performed status update": (
+        [("order_update_status", "ok")],
+        {
+            "tool": "cashctrl_update_order_status",
+            "ids": [PAID],
+            "status_id": REMINDED,
+            "confirm": True,
+        },
+    ),
+    "a performed payment": (
+        [("order_payment_create", "cash_pdf")],
+        {
+            "tool": "cashctrl_create_order_payment",
+            "date": "2026-10-24",
+            "order_ids": [PAID],
+            "type": "CASH_PDF",
+            "confirm": True,
+        },
     ),
     "a performed create": (
         [("order_create", "ok")],
