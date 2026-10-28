@@ -1,8 +1,9 @@
 """MCP server for CashCtrl.
 
-Every task in ``tasks.__all__`` is a read-only tool. No logic lives here (ADR-0001).
-Entry point: ``xippios-cashctrl-mcp``; ``--org <name>`` binds it to one organisation
-(``_cli``, ``_org_lock``).
+Every task in ``tasks.__all__`` is a read-only tool, but those ``tasks.BULK_TASKS``
+names, which core skips: the server is passed ``tasks.__all__`` whole (ADR-0019). No
+logic lives here (ADR-0001). Entry point: ``xippios-cashctrl-mcp``; ``--org <name>``
+binds it to one organisation (``_cli``, ``_org_lock``).
 """
 
 from mcp.server.mcpserver import MCPServer
@@ -39,4 +40,7 @@ server = build()
 
 def run() -> None:
     """Run the server: stdio by default, ``--http`` for streamable HTTP, ``--org`` to bind it."""
+    # Command-line options of the source's own reach core's parser through its hooks
+    # (ADR-0014): _cli.serve calls main(server, add_options=add_org, apply_options=<returns
+    # the server, bound to the organisation --org names>).
     serve(server, build)

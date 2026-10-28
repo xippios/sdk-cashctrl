@@ -1,10 +1,6 @@
-"""Task-shaped functions for CashCtrl.
+"""Task functions, the public API: the adapters serve ``__all__`` (conventions §2).
 
-The public API (ADR-0001, layer 2). A task composes endpoint wrappers from ``api/``,
-resolves pagination and reference lookups, and returns ``Result[T]`` with full
-``ResultMeta``. Write the async version, derive the sync one with ``xippios.core.sync``,
-and list the sync name in ``__all__``: the MCP server and the HTTP router register
-exactly what is named there.
+``/add-endpoint`` adds them.
 
 ``org: str`` is the first, required parameter of every task: the name of a declared
 organisation (``demo``, ``acme``), handed to the endpoint wrappers, which reach CashCtrl
@@ -12,9 +8,6 @@ through ``client_for(org)``. No task spans organisations. ``tests/test_tasks.py`
 every name in ``__all__``. The one exception is ``list_organisations``, the package's
 tenant list (``_tenants.list_task``, ADR-0024): no argument, the declared
 organisations' names only, so an agent can form valid calls.
-
-Docstrings are read by agents: one sentence first, then ``Args:`` with examples of
-valid values for every parameter. ``/add-endpoint`` walks through the whole recipe.
 
 ``meta.endpoint`` is the upstream path after ``/api/v1/`` (``account/list.json``),
 ``meta.tenant`` the organisation the data came from, by name (ADR-0014), and
@@ -123,6 +116,9 @@ __all__ = [
     "list_persons",
     "list_tax_codes",
 ]
+
+# A task named here is Python-only: no tool, no route; the adapters skip it (ADR-0019 decision 4).
+BULK_TASKS: frozenset[str] = frozenset()
 
 MCP_CAPS: Mapping[str, ResultCap] = {
     "get_report_data": ResultCap(
