@@ -206,6 +206,16 @@ UTF-8 round trip is the cost centre's name read back from `account/costcenter/li
 byte for byte (it carries an umlaut); a name not found as sent fails the run with exit
 status 1.
 
+The one run, on 2026-10-28 against the seeded demo organisation, found both lists empty
+and created both records, seven requests in all, every one answered HTTP 200: the
+location, the two lists, the two creates (`customfield/create.json` and
+`account/costcenter/create.json` answer `insertId`, `message` and `success`, `insertId`
+a JSON integer, `1` for each) and the two lists again, each reporting `total` 1;
+`account/costcenter/list.json` answered the name `Verkauf Büromöbel` byte for byte, and
+`number` as the text `"100"`. Refusals: none. The lists recorded right after
+(`tests/fixtures/customfield_list/person.json`,
+`tests/fixtures/account_costcenter_list/default.json`) hold these two records.
+
 ## The books
 
 | | |

@@ -311,12 +311,16 @@ replay-tested with a real value.
   `qrIban` value (a location's QR-IBAN, also as `qr_iban` or `qr-iban`) to `REDACTED` by
   name, in any letter case, and its final check refuses only a value that survives the
   rewrite (How to record a fixture); the recorded location holds `null` for both.
-- `get_report_data` returns a report's rows as upstream sends them and drops every key
-  named `ssn`, `iban` or `qrIban` from them and from `properties`, in any letter case
-  and at any depth (`_report`; ADR-0003, amendment 2026-10-26). Payroll and people
-  reports carry other personal data under names the documentation does not give, which
-  passes; their type cannot be told from the answer without a second request, so they
-  are not refused, though the salary module is outside this package.
+- `get_report_data` refuses payroll and people reports before their data is requested
+  (G5 (1) of 2026-10-28, row 123): a type that starts with `SALARY_`, is `SETTLEMENT` or
+  `WITHHOLDING_TAX_SETTLEMENT`, or ends with `_BY_PERSON` or `_BY_PERSON_CHART`. The
+  answer never names its type, so `_report_type` reads `report/tree.json` once per
+  organisation into a `WeakKeyDictionary` keyed on its client, which `TENANTS.reset()`
+  or a changed variable drops; `get_report_tree` refreshes it; an element the kept tree
+  lacks reads it once more, one still missing is asked of upstream. Every other report
+  comes back as upstream sends it, every key named `ssn`, `iban` or `qrIban` dropped
+  from its rows and `properties`, in any letter case and at any depth (`_report`;
+  ADR-0003, amendment 2026-10-26).
 - A task that fetches them deliberately may return them and says so in its docstring;
   none does.
 
@@ -364,6 +368,8 @@ read here:
 2. `models.py`: an `UpstreamModel` per payload object; dates, numbers and enums typed.
    Upstream's camelCase spellings are accepted with `Field(validation_alias=...)`, never
    `Field(alias=...)`: the adapters serialise by alias, and results stay snake_case.
+   `created_by` and `last_updated_by` are `AuditUser`, which masks CashCtrl's API user
+   tag to `API:REDACTED`, the fixtures' value (G5 (2) of 2026-10-28, row 129).
 3. `api/<operation>.py`: one async wrapper that takes `org` first, calls
    `_client.client_for(org)` and returns models through `xippios.core.parse`.
 4. `tasks.py`: an async task, `org` its first parameter, that composes wrappers and

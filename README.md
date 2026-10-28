@@ -75,7 +75,10 @@ named `<task>_async` (`list_organisations` has none). The tasks are listed in th
 table below. Persons come back without the personal identifiers `ssn` and `iban`
 (`list_persons`, `get_person`, the persons `get_journal_entry` names; ADR-0017),
 locations without their bank account numbers `iban` and `qr_iban` (`list_locations`),
-and report rows without any key named `ssn`, `iban` or `qrIban` (`get_report_data`).
+and report rows without any key named `ssn`, `iban` or `qrIban` (`get_report_data`, which
+refuses payroll and people reports outright). An API user that wrote or changed a record
+shows as `API:REDACTED` in `created_by` and `last_updated_by`, as in the fixtures; CashCtrl
+writes `API:` and the first four characters of its key there.
 
 ## MCP
 
@@ -274,10 +277,10 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET person/category/list.json` (List categories) | `list_person_categories` | `cashctrl_list_person_categories` | available |
 | `GET person/title/list.json` (List titles) | `list_person_titles` | `cashctrl_list_person_titles` | available |
 | `GET account/category/list.json` (List categories) | `list_account_categories` | `cashctrl_list_account_categories` | available; flat, linked by `parent_id` |
-| `GET account/costcenter/list.json` (List cost centers) | `list_cost_centers` | `cashctrl_list_cost_centers` | available; HTTP route is `POST`; no balances yet |
+| `GET account/costcenter/list.json` (List cost centers) | `list_cost_centers` | `cashctrl_list_cost_centers` | available; HTTP route is `POST`; balances of the current fiscal period |
 | `GET location/list.json` (List locations) | `list_locations` | `cashctrl_list_locations` | available; without `iban` and `qr_iban` |
 | `GET report/tree.json` (Get tree of reports) | `get_report_tree` | `cashctrl_get_report_tree` | available |
-| `GET report/element/data.json` (Read JSON data) | `get_report_data` | `cashctrl_get_report_data` | available; rows as upstream sends them |
+| `GET report/element/data.json` (Read JSON data) | `get_report_data` | `cashctrl_get_report_data` | available; rows as upstream sends them; payroll and people reports refused |
 | `GET history/list.json` (List history) | `list_history` | `cashctrl_list_history` | available; paged; HTTP route is `POST` |
 | `POST journal/create.json`, `update.json`, `delete.json` | `create_journal_entry`, `update_journal_entry`, `delete_journal_entry` | `cashctrl_create_journal_entry`, ... | available on the write server only |
 | `POST person/create.json`, `update.json`, `delete.json` | `create_person`, `update_person`, `delete_person` | `cashctrl_create_person`, ... | available on the write server only |
@@ -322,10 +325,14 @@ statement, a VAT settlement, ...) for `fiscal_period` or for `start_date` to
 upstream derives the dates from the period and would ignore the ones given. The report
 comes back as upstream sends it (`data`, the rows, nested; `properties`, the columns
 shown; `total`), under upstream's camelCase names and with amounts as JSON numbers: the
-documentation gives no schema, and the rows differ by report type. Every key named
-`ssn`, `iban` or `qrIban` is dropped from it, in any letter case and at any depth;
-payroll and people reports carry other personal data under undocumented names, and the
-salary module is outside this package.
+documentation gives no schema, and the rows differ by report type. Payroll and people
+reports, which carry personal data under undocumented names, are refused before their
+data is requested: every report whose type (as `get_report_tree` shows it) starts with
+`SALARY_`, is `SETTLEMENT` or `WITHHOLDING_TAX_SETTLEMENT`, or ends with `_BY_PERSON` or
+`_BY_PERSON_CHART`. The type comes from the organisation's report tree, read once per
+organisation and process and kept; a report the tree does not list is asked of
+upstream. Every key named `ssn`, `iban` or `qrIban` is dropped from what comes back, in
+any letter case and at any depth.
 `list_account_categories` is the flat `account/category/list.json`, each category with
 its `parent_id`; `account/category/tree.json` nests the same categories with display
 fields only. `list_custom_fields` takes the module (`type`: `JOURNAL`, `PERSON`,
