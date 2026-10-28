@@ -456,6 +456,23 @@ def test_the_eleven_write_paths_may_be_posted(recorder: ModuleType, endpoint: st
     assert recorder.refusal("post", endpoint) is None
 
 
+@pytest.mark.parametrize("endpoint", ELEVEN)
+def test_a_get_to_a_write_path_is_refused(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+) -> None:
+    """A write is recorded as a POST or not at all (row 242 item 10; the rest is row 245)."""
+    assert recorder.main([endpoint, "get", "ids=26"]) == 1
+    assert not respx_mock.calls, "refused before any request"
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    assert capsys.readouterr().out == (
+        f"not recorded: {endpoint} is a write: it is recorded with --method POST or not at all\n"
+    )
+
+
 @pytest.mark.parametrize("endpoint", ["journal/create.json", "person/create.json"])
 def test_a_create_without_the_marker_is_refused(
     recorder: ModuleType,
@@ -1160,6 +1177,8 @@ def test_every_field_ending_in_iban_becomes_redacted(
         "orgQrIban": "CH00QRTEST",
         "recipientIban": "CH00RECIPIENT",
         "recipient": {"bank": {"payeeIban": "CH00NESTED"}},
+        "bank.iban": "CH00DOTTED",
+        "payee iban": "CH00SPACED",
         "orgName": "Muster Handel AG Demo",
     }
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/order/document/read.json")
@@ -1171,6 +1190,7 @@ def test_every_field_ending_in_iban_becomes_redacted(
     written = json.loads(json.loads(text)["response"]["body"])["data"]
     assert [written[name] for name in ("orgIban", "orgQrIban", "recipientIban")] == ["REDACTED"] * 3
     assert written["recipient"]["bank"]["payeeIban"] == "REDACTED"
+    assert (written["bank.iban"], written["payee iban"]) == ("REDACTED", "REDACTED")
     assert written["orgName"] == "Muster Handel AG Demo"
     assert "review" not in capsys.readouterr().out
 
@@ -1180,8 +1200,9 @@ def test_every_field_ending_in_iban_becomes_redacted(
     [
         (b'{"success": true, "data": {"org\\u0049ban": "CH00ORGTEST"}}', "orgIban"),
         (json.dumps({"data": {"recipientIban": ["CH00RECIPIENT"]}}).encode(), "recipientIban"),
+        (json.dumps({"data": {"bank.iban": 7731}}).encode(), "bank.iban"),
     ],
-    ids=["escaped-name", "array"],
+    ids=["escaped-name", "array", "dotted-name-number"],
 )
 def test_a_compound_iban_the_scrub_cannot_reach_is_never_written(
     recorder: ModuleType,
@@ -1199,6 +1220,20 @@ def test_a_compound_iban_the_scrub_cannot_reach_is_never_written(
     out = capsys.readouterr().out
     assert f"a value other than null or REDACTED under {name}" in out
     assert "CH00" not in out
+
+
+def test_the_recorder_and_the_tasks_share_one_identifier_rule(recorder: ModuleType) -> None:
+    """Row 242 item 12: ``models.is_identifier_key`` decides for both, ``ssn`` whole."""
+    from xippios.cashctrl import models
+
+    assert recorder.is_identifier_key is models.is_identifier_key
+    for name in ("ssn", "SSN", "iban", "qrIban", "qr-iban", "orgIban", "bank.iban", "a iban"):
+        assert recorder.secret_name(name), name
+    for name in ("ssnLabel", "x-ssn", "ibanCount", "publicHash", "orgName"):
+        assert not recorder.secret_name(name), name
+    assert recorder.scrub_token_fields('{"bank.iban": "CH00", "a iban": "CH11"}') == (
+        '{"bank.iban": "REDACTED", "a iban": "REDACTED"}'
+    )
 
 
 def test_a_write_that_sends_an_identifier_is_not_recorded(
@@ -1296,6 +1331,7 @@ def test_a_compound_name_goes_to_review(
         ({"data": [{"qrIban": "CH00TEST"}]}, True),
         ({"QR_IBAN": "CH00TEST"}, True),
         ({"orgIban": "CH00TEST"}, True),
+        ({"bank.iban": "CH00TEST"}, True),
         ({"data": {"recipientIban": 7731}}, True),
         ({"hash": "REDACTED"}, False),
         ({"hash": None}, False),
@@ -1321,6 +1357,7 @@ def test_a_compound_name_goes_to_review(
         "qr-iban",
         "qr-iban-snake-upper",
         "org-iban",
+        "dotted-iban",
         "recipient-iban-number",
         "scrubbed",
         "null",

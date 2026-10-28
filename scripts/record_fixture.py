@@ -35,9 +35,12 @@ never shows a value, and exits with status 1:
   ``key=value`` pairs as a form body, as the write tools do (``api/_form.py``:
   ``application/x-www-form-urlencoded; charset=UTF-8``). Every other POST
   (``order/continue.json``, ``account/create.json``, ``order/bookentry/create.json``,
-  a POST to a list) and every other method is refused before a request is sent, and so is a
-  ``create.json`` whose pairs do not carry the marker ``xippios-live`` (``MARK``) in a
-  value: a write records a marked record, updates it or deletes it, and nothing else.
+  a POST to a list) and every other method is refused before a request is sent, and so
+  are a GET to one of the write paths (a write is recorded as a POST or not at all; the
+  general case is queue row 245) and a ``create.json`` whose pairs do not carry the
+  marker ``xippios-live`` (``MARK``) in a value, ``order/payment/create.json`` excepted,
+  whose orders are the marker: a write records a marked record, a change to it or its
+  delete, and nothing else.
   ``order/update_status.json`` and ``order/payment/create.json`` change orders and carry
   no free text to mark (a payment has no text field): the recorder reads every order
   their ``ids`` or ``orderIds`` name (``order/read.json``, one GET each, through the
@@ -138,6 +141,7 @@ from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response
 
 from xippios.cashctrl._client import DEMO, SOURCE, TENANTS, client_for
 from xippios.cashctrl.api._form import FORM_CONTENT_TYPE
+from xippios.cashctrl.models import is_identifier_key
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -190,23 +194,38 @@ _EMAIL_IN_TEXT = re.compile(
 )
 _SCRUBBED_EMAILS = frozenset({SCRUBBED_EMAIL, SCRUBBED_EMAIL.replace("@", "%40")})
 
-TOKEN_FIELD_NAME = re.compile(r"hash|token|secret|api[_-]?key|ssn|[\w-]*iban", re.IGNORECASE)
-"""Body fields whose value may grant access or identify a person, by name in any case.
+TOKEN_NAME = re.compile(r"hash|token|secret|api[_-]?key", re.IGNORECASE)
+"""Body fields whose value may grant access, by whole name in any case."""
 
-Whole names, but for an IBAN: every name that ends in ``iban``. ``ssn`` and ``iban`` are
-the documented personal identifiers this package keeps out of its projections
-(ADR-0017); ``qrIban`` (``qr_iban``, ``qr-iban``) is the QR-IBAN of the organisation's
-own bank account that ``location/list.json`` sends next to its ``iban``, and
-``order/document/read.json`` sends ``orgIban``, ``orgQrIban`` and ``recipientIban``
-(all only seen ``null``; queue row 243): fixtures never carry their values either.
+
+def secret_name(name: str) -> bool:
+    """Whether a body field's value is rewritten and checked: a token-like name or an identifier.
+
+    A token-like name whole (``TOKEN_NAME``), and a personal identifier by the package's
+    one rule, ``models.is_identifier_key``: ``ssn`` whole and every name that ends in
+    ``iban``, in any case (ADR-0017, queue rows 242 and 243). ``ssn`` and ``iban`` are the
+    documented personal identifiers this package keeps out of its projections;
+    ``qrIban`` (``qr_iban``, ``qr-iban``) is the QR-IBAN of the organisation's own bank
+    account that ``location/list.json`` sends next to its ``iban``, and
+    ``order/document/read.json`` sends ``orgIban``, ``orgQrIban`` and ``recipientIban``
+    (all only seen ``null``): fixtures never carry their values either.
+    """
+    return bool(TOKEN_NAME.fullmatch(name)) or is_identifier_key(name)
+
+
+_RAW_SECRET_NAME = TOKEN_NAME.pattern + r'|ssn|[^"\\]*iban'
+"""``secret_name`` as a raw JSON field name between its quotes, for the raw-text scrub.
+
+Every name that ends in ``iban``, a dot or a space in it included (``bank.iban``); a name
+behind a JSON escape is the decoded checks' to find.
 """
 _TOKEN_FIELD = re.compile(
-    r'(?P<field>"(?:' + TOKEN_FIELD_NAME.pattern + r')"\s*:\s*)"(?:[^"\\]|\\.)*"',
+    r'(?P<field>"(?:' + _RAW_SECRET_NAME + r')"\s*:\s*)"(?:[^"\\]|\\.)*"',
     re.IGNORECASE,
 )
 """A token-like field with a text value in raw JSON: ``"hash": "..."``."""
 _SETTLED_TOKEN_FIELD = re.compile(
-    r'"(?i:' + TOKEN_FIELD_NAME.pattern + r')"\s*:\s*(?:null|"' + REDACTED + r'")'
+    r'"(?i:' + _RAW_SECRET_NAME + r')"\s*:\s*(?:null|"' + REDACTED + r'")'
 )
 """A token-like field whose value is ``null`` or ``"REDACTED"``: no mention to review.
 
@@ -300,12 +319,15 @@ def refusal(method: str, endpoint: str) -> str | None:
     """Why the request must not be sent at all, else ``None``.
 
     Refused: a method other than GET and POST; a POST to anything but ``WRITE_PATHS``;
-    an endpoint without ``.json``.
+    a GET to one of ``WRITE_PATHS`` (queue row 245 holds the general case); an endpoint
+    without ``.json``.
     """
     if method.upper() not in ("GET", "POST"):
         return (
             f"only GET, and POST for the write tools' operations, is recorded, not {method.upper()}"
         )
+    if not is_write(method) and endpoint in WRITE_PATHS:
+        return f"{endpoint} is a write: it is recorded with --method POST or not at all"
     if is_write(method) and endpoint not in WRITE_PATHS:
         return (
             f"a POST is recorded only for one of the eleven write paths the write tools "
@@ -867,7 +889,7 @@ def _unsettled_token_fields(node: Any) -> Iterator[str]:
     """
     if isinstance(node, dict):
         for name, value in node.items():
-            if TOKEN_FIELD_NAME.fullmatch(str(name)) and value is not None and value != REDACTED:
+            if secret_name(str(name)) and value is not None and value != REDACTED:
                 yield str(name)
             yield from _unsettled_token_fields(value)
     elif isinstance(node, list):
@@ -897,7 +919,7 @@ def check(text: str, subdomain: str, key: str) -> tuple[list[str], list[str]]:
     is_json, decoded = _decoded(fixture.get("response", {}).get("body", ""))
     tokens = set(_unsettled_token_fields(decoded)) if is_json else set()
     for name, value in _form(_request_body(fixture)):
-        if TOKEN_FIELD_NAME.fullmatch(name) and value != REDACTED:
+        if secret_name(name) and value != REDACTED:
             tokens.add(name)
         is_json_value, decoded_value = _decoded(value)  # bankAccounts, items, addresses
         if is_json_value:

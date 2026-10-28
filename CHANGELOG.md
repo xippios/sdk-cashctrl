@@ -57,7 +57,8 @@ All notable changes to this project are documented here. The format follows
   marked `xippios-live` only: it reads every order their `ids` or `orderIds` name
   (`order/read.json`, one GET each) and refuses the write before it is sent unless each
   is marked (the marker in its description, or as its `nr`), an order it cannot read
-  refusing it too (Johannes, 2026-10-28).
+  refusing it too (Johannes, 2026-10-28). A GET to one of the write paths is refused
+  (queue row 245 holds the general case).
 - A live round trip on a marked purchase order of a seeded vendor: created, its status
   set, its payment created (`CASH_PDF`, which demo accepts), the order deleted and no
   journal entry of it left; then `order/payment/download` is probed once with the
@@ -130,7 +131,9 @@ All notable changes to this project are documented here. The format follows
   `orgQrIban` and `recipientIban` (only seen `null` in demo) can never be recorded set;
   `ssn` stays a whole name. The count-only fixture greps follow, and `get_report_data`
   drops every key ending in `iban` from report rows by the same rule, not only `iban`
-  and `qrIban` (queue row 243).
+  and `qrIban`. One predicate, `models.is_identifier_key`, decides for both, and the
+  raw-text scrub reaches a name with a dot or a space too (`bank.iban`; queue rows 242
+  and 243).
 - CashCtrl's API user tag (`API:` and the first four characters of the key) no longer
   reaches results: every model's `created_by` and `last_updated_by` masks it to
   `API:REDACTED`, as the fixtures hold it, so a live answer has a fixture's shape;

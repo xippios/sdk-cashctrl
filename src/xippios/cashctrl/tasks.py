@@ -110,6 +110,7 @@ from xippios.cashctrl.models import (
     ReportData,
     ReportTreeNode,
     TaxCode,
+    is_identifier_key,
 )
 
 __all__ = [
@@ -1328,23 +1329,17 @@ async def _report_type(org: str, element_id: int) -> str | None:
     return _keep_report_types(client, tree.data).get(element_id)
 
 
-def _is_identifier(key: str) -> bool:
-    """A key dropped from a report's raw rows: ``ssn``, or a name ending in ``iban``.
-
-    In any letter case: ``iban``, ``qrIban``, ``orgIban``, ``recipientIban`` (ADR-0017,
-    queue rows 123 and 243), the name rule the fixture recorder applies.
-    """
-    name = key.lower()
-    return name == "ssn" or name.endswith("iban")
-
-
 def _without_identifiers(value: JsonValue) -> JsonValue:
-    """``value`` without a key ``_is_identifier`` names, at any depth."""
+    """``value`` without a key ``models.is_identifier_key`` names, at any depth.
+
+    ``ssn`` and every name ending in ``iban``, in any letter case (ADR-0017, queue rows
+    123 and 243), the rule the fixture recorder applies.
+    """
     if isinstance(value, dict):
         return {
             key: _without_identifiers(item)
             for key, item in value.items()
-            if not _is_identifier(key)
+            if not is_identifier_key(key)
         }
     if isinstance(value, list):
         return [_without_identifiers(item) for item in value]

@@ -139,6 +139,7 @@ __all__ = [
     "WriteAnswer",
     "WritePreview",
     "WriteResult",
+    "is_identifier_key",
 ]
 
 
@@ -147,6 +148,18 @@ def _date_part(value: object) -> object:
     if isinstance(value, str) and len(value) > 10 and value[10] in " T":
         return value[:10]
     return value
+
+
+def is_identifier_key(name: str) -> bool:
+    """Whether a payload key names a personal identifier this package keeps out (ADR-0017).
+
+    ``ssn`` by its whole name and every name that ends in ``iban`` (``iban``, ``qrIban``,
+    ``orgIban``, ``recipientIban``, ``bank.iban``), in any letter case (queue rows 123,
+    242 and 243): ``get_report_data`` drops such keys from report rows, and the fixture
+    recorder rewrites and refuses their values by the same rule.
+    """
+    lowered = name.lower()
+    return lowered == "ssn" or lowered.endswith("iban")
 
 
 UpstreamDate = Annotated[date, BeforeValidator(_date_part)]
