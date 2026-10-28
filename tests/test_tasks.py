@@ -13,6 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 import respx
+from pydantic import BeforeValidator
 from xippios.core import InvalidRequestError, NotFoundError, UpstreamModel, sync
 from xippios.core.mcp import build_server, tool_name
 from xippios.core.testing import (
@@ -2366,3 +2367,159 @@ async def test_every_tool_names_its_organisation_as_the_tenant(
     arguments = tool_arguments(tool, case, fixtures_dir)
     payload = await mcp_call(server, tool, {"org": DEMO, **arguments})
     assert payload["meta"]["tenant"] == DEMO
+
+
+# The API user tag (G5 (2) of 2026-10-28, queue row 129). CashCtrl names the API user that
+# wrote a record ``API:`` and the first four characters of its key in ``createdBy`` and
+# ``lastUpdatedBy``; the recorder writes ``API:REDACTED``, and every model masks a live
+# tag to the same, so a live answer has a fixture's shape.
+
+LIVE_TAG = "API:Zq7k"
+"""A tag shaped as upstream writes it, four made-up characters: tests only."""
+AUDIT_KEYS = frozenset({"createdBy", "lastUpdatedBy"})
+"""Where upstream writes who made or last changed a record, at any depth."""
+AUDIT_FIELDS = frozenset({"created_by", "last_updated_by"})
+"""The same fields as every model and every result names them."""
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+def tagged(node: typing.Any, tag: str) -> tuple[typing.Any, int]:
+    """``node`` with every ``createdBy`` and ``lastUpdatedBy`` value made ``tag``, and how many."""
+    if isinstance(node, dict):
+        count = 0
+        changed: dict[str, typing.Any] = {}
+        for name, value in node.items():
+            if name in AUDIT_KEYS:
+                changed[name], count = tag, count + 1
+            else:
+                changed[name], found = tagged(value, tag)
+                count += found
+        return changed, count
+    if isinstance(node, list):
+        items = [tagged(item, tag) for item in node]
+        return [item for item, _ in items], sum(found for _, found in items)
+    return node, 0
+
+
+def audit_values(node: object) -> Iterator[object]:
+    """Every value of a ``created_by`` or ``last_updated_by`` key in a dumped result."""
+    if isinstance(node, dict):
+        for name, value in node.items():
+            if name in AUDIT_FIELDS:
+                yield value
+            else:
+                yield from audit_values(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from audit_values(item)
+
+
+def _audited(fixture: str) -> bool:
+    body = json.loads(load_fixture(FIXTURES / f"{fixture}.json").response.body)
+    return tagged(body, LIVE_TAG)[1] > 0
+
+
+AUDITED_CASES = {tool: case for tool, case in TOOL_CASES.items() if _audited(case[0])}
+"""Every tool whose recorded answer names who wrote its records: each model family once."""
+
+
+def test_the_audited_cases_cover_every_model_family() -> None:
+    reports = {"cashctrl_get_report_tree", "cashctrl_get_report_data"}
+    assert set(TOOL_CASES) - set(AUDITED_CASES) == reports | UNOBSERVED, (
+        "every recorded answer but the reports and the empty ones names who wrote its records"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("tool", "case"), AUDITED_CASES.items(), ids=AUDITED_CASES.keys())
+async def test_every_model_family_masks_a_live_api_user_tag(
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+    tool: str,
+    case: tuple[str, dict[str, typing.Any]],
+) -> None:
+    """On the recorded answer changed in memory: every author put back as a live tag.
+
+    The task's result and the tool's carry ``API:REDACTED`` wherever the answer carried
+    the tag, nested records (a journal entry's ``associates``, an order category's
+    statuses) included, and the tag nowhere.
+    """
+    fixture = recorded(fixtures_dir, *case[0].split("/"))
+    body, count = tagged(json.loads(fixture.response.body), LIVE_TAG)
+    assert count > 0
+    respx_mock.get(str(httpx.URL(fixture.request.url).copy_with(query=None))).respond(
+        200, json=body
+    )
+    arguments = tool_arguments(tool, case, fixtures_dir)
+    task = getattr(tasks, f"{tool.removeprefix('cashctrl_')}_async")
+    result = await task(DEMO, **arguments)
+    users = list(audit_values(result.model_dump(mode="json")["data"]))
+    assert users
+    assert set(users) == {models.API_USER_MASK}
+    payload = await mcp_call(server, tool, {"org": DEMO, **arguments})
+    assert set(audit_values(payload["data"])) == {models.API_USER_MASK}
+    assert LIVE_TAG.lower() not in json.dumps(payload).lower()
+
+
+@pytest.mark.parametrize(
+    ("sent", "kept"),
+    [
+        (LIVE_TAG, "API:REDACTED"),
+        ("api:zq7k", "API:REDACTED"),
+        ("API:Zq-7", "API:REDACTED"),
+        ("API:REDACTED", "API:REDACTED"),
+        ("SYSTEM", "SYSTEM"),
+        ("user@example.com", "user@example.com"),
+        ("Anna Muster", "Anna Muster"),
+        ("XAPI:Zq7k", "XAPI:Zq7k"),
+        ("", ""),
+        (None, None),
+    ],
+)
+def test_the_mask_rewrites_an_api_user_tag_and_nothing_else(sent: str | None, kept: str) -> None:
+    """A text starting with ``API:``, in any letter case, is masked whole; the rest passes."""
+    by_alias = models.HistoryEntry.model_validate({"id": 1, "createdBy": sent})
+    by_name = models.Currency.model_validate(
+        {
+            "id": 1,
+            "code": "CHF",
+            "default": True,
+            "isDefault": True,
+            "auto": False,
+            "isAuto": False,
+            "last_updated_by": sent,
+        }
+    )
+    assert (by_alias.created_by, by_name.last_updated_by) == (kept, kept)
+
+
+def test_every_model_with_an_author_field_masks_it() -> None:
+    """``created_by`` and ``last_updated_by`` are ``AuditUser`` wherever a model has them."""
+    found: list[tuple[str, str]] = []
+    for name in dir(models):
+        model = getattr(models, name)
+        if not (isinstance(model, type) and issubclass(model, UpstreamModel)):
+            continue
+        for field in sorted(AUDIT_FIELDS & set(model.model_fields)):
+            metadata = model.model_fields[field].metadata
+            masks = [
+                item
+                for item in metadata
+                if isinstance(item, BeforeValidator) and item.func is models._mask_api_user
+            ]
+            assert masks, f"{name}.{field} is not AuditUser"
+            found.append((name, field))
+    assert {"FiscalPeriod", "Person", "PersonDetailProjection", "CustomField", "CostCenter"} <= {
+        name for name, _ in found
+    }
+    assert ("HistoryEntry", "created_by") in found
+
+
+def test_no_fixture_carries_an_api_user_tag_but_the_mask(fixtures_dir: Path) -> None:
+    """Fixtures hold ``API:REDACTED`` only, so a replayed answer and a live one look alike."""
+    tags = {
+        tag
+        for path in sorted(fixtures_dir.rglob("*.json"))
+        for tag in re.findall(r"API:[A-Za-z0-9]+", path.read_text(encoding="utf-8"), re.IGNORECASE)
+    }
+    assert tags == {models.API_USER_MASK}

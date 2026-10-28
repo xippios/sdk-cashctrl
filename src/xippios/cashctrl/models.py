@@ -22,6 +22,13 @@ them from its raw rows (``ReportData`` itself keeps what upstream sends), a writ
 does not echo one in ``meta.request`` and its preview shows one as ``REDACTED``, and
 fixtures never carry their values (ADR-0017).
 
+``created_by`` and ``last_updated_by`` are ``AuditUser`` on every model that has them:
+CashCtrl writes an API user there as ``API:`` and the first four characters of its key,
+which every model masks to ``API:REDACTED``, the value the fixture recorder writes, so
+a live answer and a fixture have one shape (G5 (2) of 2026-10-28, queue row 129).
+``SYSTEM`` and a user's name pass as sent. ``HistoryEntry.message`` is upstream's text
+as sent: no recorded message carries a tag.
+
 ``docs/upstream/`` shows no response bodies. Field types come from the create and update
 parameter tables where they describe the field, and from the answers recorded against the
 demo organisation where they do not: on 2026-10-23 and 2026-10-24 for the ledger,
@@ -139,6 +146,29 @@ def _date_part(value: object) -> object:
 UpstreamDate = Annotated[date, BeforeValidator(_date_part)]
 """A date upstream sends with a time of day; the date part is kept."""
 
+API_USER_MASK = "API:REDACTED"
+"""What an API user tag in ``created_by`` or ``last_updated_by`` becomes (``AuditUser``)."""
+
+
+def _mask_api_user(value: object) -> object:
+    """``"API:<four key characters>"`` → ``"API:REDACTED"``; any other value as sent.
+
+    CashCtrl names the API user that wrote a record as ``API:`` and the first four
+    characters of its key (observed on 2026-10-23), and the fixture recorder writes
+    ``API:REDACTED`` instead. A text that starts with ``API:``, the marker in any letter
+    case, is masked whole, whatever follows; ``SYSTEM``, a user's name or e-mail address
+    and ``None`` pass.
+    """
+    if isinstance(value, str) and value[:4].upper() == "API:":
+        return API_USER_MASK
+    return value
+
+
+AuditUser = Annotated[str | None, BeforeValidator(_mask_api_user)]
+"""``created_by`` and ``last_updated_by`` of every model: who wrote the record, an API user's
+tag masked (G5 (2) of 2026-10-28, queue row 129), so a live answer has a fixture's shape
+and no key prefix reaches a result."""
+
 Comparison = Literal["eq", "like", "gt", "lt"]
 """The values of ``comparison`` in a ``filter`` item: "Possible values: eq, like, gt, lt"."""
 
@@ -216,9 +246,9 @@ class FiscalPeriod(UpstreamModel):
     open_month_ids: list[str] = Field(validation_alias="openMonthIds")
     open_salary_month_ids: list[str] = Field(validation_alias="openSalaryMonthIds")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class Currency(UpstreamModel):
@@ -245,9 +275,9 @@ class Currency(UpstreamModel):
     text: str | None = None
     value: str | None = None
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class TaxComponent(UpstreamModel):
@@ -318,9 +348,9 @@ class TaxCode(UpstreamModel):
     is_inactive: bool = Field(validation_alias="isInactive")
     is_flat: bool = Field(validation_alias="isFlat")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class Filter(UpstreamModel):
@@ -367,9 +397,9 @@ class _AccountFields(UpstreamModel):
     cost_center_ids: JsonValue = Field(default=None, validation_alias="costCenterIds")
     cost_center_numbers: JsonValue = Field(default=None, validation_alias="costCenterNumbers")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class Account(_AccountFields):
@@ -551,9 +581,9 @@ class _JournalEntryFields(UpstreamModel):
     notify_user_id: int | None = Field(default=None, validation_alias="notifyUserId")
     notify_email: str | None = Field(default=None, validation_alias="notifyEmail")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class JournalEntry(_JournalEntryFields):
@@ -726,9 +756,9 @@ class _PersonFields(UpstreamModel):
     is_inactive: bool = Field(validation_alias="isInactive")
     is_auto_fill_responsible_person: bool = Field(validation_alias="isAutoFillResponsiblePerson")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class _PersonEntryFields(_PersonFields):
@@ -1087,9 +1117,9 @@ class _OrderFields(UpstreamModel):
     is_remove_stock: bool = Field(validation_alias="isRemoveStock")
     is_credit_note: bool = Field(validation_alias="isCreditNote")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class Order(_OrderFields):
@@ -1223,9 +1253,9 @@ class OrderBookEntry(UpstreamModel):
     cost_center_numbers: JsonValue = Field(default=None, validation_alias="costCenterNumbers")
     import_entry_id: JsonValue = Field(default=None, validation_alias="importEntryId")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class OrderCategoryStatus(UpstreamModel):
@@ -1257,9 +1287,9 @@ class OrderCategoryStatus(UpstreamModel):
     closed: bool
     is_closed: bool = Field(validation_alias="isClosed")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class OrderBookTemplate(UpstreamModel):
@@ -1283,9 +1313,9 @@ class OrderBookTemplate(UpstreamModel):
     allow_tax: bool | None = Field(default=None, validation_alias="allowTax")
     is_allow_tax: bool | None = Field(default=None, validation_alias="isAllowTax")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class OrderCategory(UpstreamModel):
@@ -1368,9 +1398,9 @@ class OrderCategory(UpstreamModel):
     type_name: JsonValue = Field(default=None, validation_alias="typeName")
     value: str | None = None
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 CustomFieldType = Literal[
@@ -1414,9 +1444,9 @@ class CustomField(UpstreamModel):
     values: JsonValue = None
     variable_name: str | None = Field(default=None, validation_alias="variableName")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class PersonCategory(UpstreamModel):
@@ -1445,9 +1475,9 @@ class PersonCategory(UpstreamModel):
     discount_inherited: JsonValue = Field(default=None, validation_alias="discountInherited")
     discount_effective: JsonValue = Field(default=None, validation_alias="discountEffective")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class PersonTitle(UpstreamModel):
@@ -1471,9 +1501,9 @@ class PersonTitle(UpstreamModel):
     text: JsonValue = None
     value: str | None = None
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class AccountCategory(UpstreamModel):
@@ -1509,9 +1539,9 @@ class AccountCategory(UpstreamModel):
     system: bool
     is_system: bool = Field(validation_alias="isSystem")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class CostCenter(UpstreamModel):
@@ -1544,9 +1574,9 @@ class CostCenter(UpstreamModel):
     target_max: Decimal | None = Field(default=None, validation_alias="targetMax")
     attachments: list[JsonValue] = Field(default_factory=list)
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class _LocationFields(UpstreamModel):
@@ -1583,9 +1613,9 @@ class _LocationFields(UpstreamModel):
     inactive: bool
     is_inactive: bool = Field(validation_alias="isInactive")
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     last_updated: datetime | None = Field(default=None, validation_alias="lastUpdated")
-    last_updated_by: str | None = Field(default=None, validation_alias="lastUpdatedBy")
+    last_updated_by: AuditUser = Field(default=None, validation_alias="lastUpdatedBy")
 
 
 class Location(_LocationFields):
@@ -1632,19 +1662,21 @@ class HistoryEntry(UpstreamModel):
     ``docs/upstream/common.md``, History, documents the list's parameters only
     (``orderId``, ``personId``, ``statementId`` among them). Typed from observation on
     2026-10-27 (``tests/fixtures/history_list/order.json``, a seeded order's): ``id``,
-    ``created`` (when the change was made) and ``created_by`` (who made it: an API user
-    as ``API:`` and the first four characters of its key, as on every record),
-    ``type`` (the module, ``ORDER`` seen), ``change_type`` (``CREATE`` and ``STATUS``
-    in the fixture; ``UPDATE`` seen on 2026-10-27, not in a fixture, since the recording
-    that showed it was overwritten), the record it concerns (``order_id``,
-    ``person_id`` the order's partner, ``statement_id`` only seen ``null``) and
-    ``message``, upstream's text of the change, naming the record (``Rechnung
-    'EK-2026-001' created.``).
+    ``created`` (when the change was made) and ``created_by`` (who made it: an API user,
+    which upstream names as ``API:`` and the first four characters of its key, shows as
+    ``API:REDACTED``, as on every record), ``type`` (the module, ``ORDER`` seen),
+    ``change_type`` (``CREATE`` and ``STATUS`` in the fixture; ``UPDATE`` seen on
+    2026-10-27, not in a fixture, since the recording that showed it was overwritten),
+    the record it concerns (``order_id``, ``person_id`` the order's partner,
+    ``statement_id`` only seen ``null``) and ``message``, upstream's text of the change,
+    kept as sent (G5 (12) of 2026-10-28): it names the record (``Rechnung 'EK-2026-001'
+    created.``) and may name a person; no recorded message carries an API user tag, so
+    it is not masked.
     """
 
     id: int
     created: datetime | None = None
-    created_by: str | None = Field(default=None, validation_alias="createdBy")
+    created_by: AuditUser = Field(default=None, validation_alias="createdBy")
     type: str | None = None
     change_type: str | None = Field(default=None, validation_alias="changeType")
     order_id: int | None = Field(default=None, validation_alias="orderId")
