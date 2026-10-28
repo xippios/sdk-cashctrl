@@ -32,14 +32,16 @@ All notable changes to this project are documented here. The format follows
   beside `MCP_CAPS` (ADR-0019 decision 4), and the adapters' docstrings say core skips
   it. Core stays at 0.3.0.
 - `get_report_data` refuses payroll and people reports with `InvalidRequestError` before
-  any data request: a report whose type starts with `SALARY_`, is `SETTLEMENT` or
-  `WITHHOLDING_TAX_SETTLEMENT`, or ends with `_BY_PERSON` or `_BY_PERSON_CHART` (ten of
-  CashCtrl's default report types), the message naming the element, its type and the
+  any data request: a report whose type starts with `SALARY_` or contains `PERSON`, or is
+  `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or `ORG_CHART` (15 of the 41
+  documented report types, ten of them in CashCtrl's default reports;
+  `WITHHOLDING_TAX_RATES` is read), the message naming the element, its type and the
   rule. The type comes from `report/tree.json`, read once per organisation and process
   and kept with the organisation's client, so `TENANTS.reset()` drops it;
   `get_report_tree` refreshes it, and an element the kept tree lacks reads it once more.
   The drop of `ssn`, `iban` and `qrIban` keys stays the second guard (G5 (1) of
-  2026-10-28; closes queue row 123's cashctrl part).
+  2026-10-28, the rule extended to the documented types the demo tree lacks by queue row
+  225; closes queue row 123's cashctrl part).
 - `CustomField` and `CostCenter` re-typed from `customfield/list.json` (`type=PERSON`)
   and `account/costcenter/list.json`, both recorded again with the records the new seed
   mode created (G5 (3) of 2026-10-28): `CustomField` requires `type`, `data_type` and

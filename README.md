@@ -328,8 +328,9 @@ shown; `total`), under upstream's camelCase names and with amounts as JSON numbe
 documentation gives no schema, and the rows differ by report type. Payroll and people
 reports, which carry personal data under undocumented names, are refused before their
 data is requested: every report whose type (as `get_report_tree` shows it) starts with
-`SALARY_`, is `SETTLEMENT` or `WITHHOLDING_TAX_SETTLEMENT`, or ends with `_BY_PERSON` or
-`_BY_PERSON_CHART`. The type comes from the organisation's report tree, read once per
+`SALARY_` or contains `PERSON`, or is `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`,
+`PEOPLE` or `ORG_CHART`; `WITHHOLDING_TAX_RATES`, rates without persons, is read. The
+type comes from the organisation's report tree, read once per
 organisation and process and kept; a report the tree does not list is asked of
 upstream. Every key named `ssn`, `iban` or `qrIban` is dropped from what comes back, in
 any letter case and at any depth.

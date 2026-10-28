@@ -2048,10 +2048,27 @@ REFUSED_TYPES = (
 )
 """The ten payroll and people report types in the recorded tree, as the docstring lists them."""
 RULE = (
-    "payroll and people reports, every type that starts with SALARY_, SETTLEMENT, "
-    "WITHHOLDING_TAX_SETTLEMENT and every type that ends with _BY_PERSON or _BY_PERSON_CHART "
-    "(personal data, ADR-0017)"
+    "payroll and people reports, every type that starts with SALARY_ or contains PERSON, "
+    "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART (personal data, ADR-0017)"
 )
+REFUSED_DOCUMENTED_TYPES = {
+    "SALARY_BOOK_ENTRIES",
+    "SALARY_LIST",
+    "SALARY_TYPES",
+    "SALARY_TYPE_RECAP",
+    "SALARY_CONFIGURATION",
+    "SETTLEMENT",
+    "WITHHOLDING_TAX_SETTLEMENT",
+    "PEOPLE",
+    "ORG_CHART",
+    "RESULT_BY_ARTICLE_PER_PERSON",
+    "EXPENSE_BY_PERSON",
+    "REVENUE_BY_PERSON",
+    "REVENUE_BY_RESPONSIBLE_PERSON",
+    "EXPENSE_BY_PERSON_CHART",
+    "REVENUE_BY_PERSON_CHART",
+}
+"""The 15 of the 41 documented report types the rule refuses (G5 (1), queue row 225)."""
 
 
 def tree_nodes(nodes: list[dict[str, typing.Any]]) -> Iterator[dict[str, typing.Any]]:
@@ -2090,6 +2107,20 @@ def test_the_recorded_tree_holds_the_ten_refused_types() -> None:
     assert not any(tasks._is_refused_report_type(kind) for kind in PASSED_ELEMENTS.values())
 
 
+def test_the_rule_over_every_documented_report_type() -> None:
+    """``report/element/create.json`` lists 41 types; the rule refuses 15 of them."""
+    snapshot = (Path(__file__).resolve().parents[1] / "docs" / "upstream" / "report.md").read_text(
+        encoding="utf-8"
+    )
+    listed = re.search(r"The type of the report\. Possible values: ([A-Z_, ]+)\.", snapshot)
+    assert listed is not None
+    documented = [name.strip() for name in listed.group(1).split(",")]
+    assert len(documented) == 41
+    refused = {name for name in documented if tasks._is_refused_report_type(name)}
+    assert refused == REFUSED_DOCUMENTED_TYPES
+    assert "WITHHOLDING_TAX_RATES" not in refused, "rates, no persons"
+
+
 @pytest.mark.parametrize(
     ("element_id", "report_type"), REFUSED_ELEMENTS.items(), ids=map(str, REFUSED_ELEMENTS)
 )
@@ -2112,12 +2143,21 @@ def test_a_payroll_or_people_report_is_refused_before_any_data_request(
 
 @pytest.mark.parametrize(
     ("element_id", "report_type"),
-    [(1, "SALARY_CONFIGURATION"), (5, "RESULT_BY_PERSON_CHART"), (2, "salary_list")],
+    [
+        (1, "SALARY_CONFIGURATION"),
+        (5, "RESULT_BY_PERSON_CHART"),
+        (2, "salary_list"),
+        (1, "PEOPLE"),
+        (2, "ORG_CHART"),
+        (9, "REVENUE_BY_RESPONSIBLE_PERSON"),
+        (12, "RESULT_BY_ARTICLE_PER_PERSON"),
+    ],
 )
 def test_the_refusal_reads_the_type_from_the_tree_by_pattern(
     respx_mock: respx.MockRouter, fixtures_dir: Path, element_id: int, report_type: str
 ) -> None:
-    """On the recorded tree changed in memory: a type outside the ten, or in lower case."""
+    """On the recorded tree changed in memory: a documented type the demo tree lacks, a made-up
+    one the pattern still names, a type in lower case."""
     body = changed_tree(fixtures_dir, **{f"e{element_id}": report_type})
     respx_mock.get(TREE_URL).respond(200, json=body)
     data = respx_mock.get(DATA_URL).respond(200, json={"total": 0, "data": []})
@@ -2126,13 +2166,19 @@ def test_the_refusal_reads_the_type_from_the_tree_by_pattern(
     assert not data.called
 
 
+@pytest.mark.parametrize("report_type", ["BALANCE", "WITHHOLDING_TAX_RATES"])
 def test_a_payroll_element_retyped_in_the_tree_is_read(
     replay_fixture: Callable[[str, str], respx.Route],
     respx_mock: respx.MockRouter,
     fixtures_dir: Path,
+    report_type: str,
 ) -> None:
-    """The rule follows the tree, not the id: element 24 retyped ``BALANCE`` is read."""
-    respx_mock.get(TREE_URL).respond(200, json=changed_tree(fixtures_dir, e24="BALANCE"))
+    """The rule follows the tree, not the id: element 24 retyped is read.
+
+    ``WITHHOLDING_TAX_RATES``, a documented type the demo tree lacks, lists rates and no
+    persons, so it passes (queue row 225).
+    """
+    respx_mock.get(TREE_URL).respond(200, json=changed_tree(fixtures_dir, e24=report_type))
     data = replay_fixture("report_element_data", "balance_fp2025")
     result = tasks.get_report_data(DEMO, 24, fiscal_period=FP2025)
     assert data.call_count == 1

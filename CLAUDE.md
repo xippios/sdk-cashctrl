@@ -312,15 +312,14 @@ replay-tested with a real value.
   name, in any letter case, and its final check refuses only a value that survives the
   rewrite (How to record a fixture); the recorded location holds `null` for both.
 - `get_report_data` refuses payroll and people reports before their data is requested
-  (G5 (1) of 2026-10-28, row 123): a type that starts with `SALARY_`, is `SETTLEMENT` or
-  `WITHHOLDING_TAX_SETTLEMENT`, or ends with `_BY_PERSON` or `_BY_PERSON_CHART`. The
-  answer never names its type, so `_report_type` reads `report/tree.json` once per
-  organisation into a `WeakKeyDictionary` keyed on its client, which `TENANTS.reset()`
-  or a changed variable drops; `get_report_tree` refreshes it; an element the kept tree
-  lacks reads it once more, one still missing is asked of upstream. Every other report
-  comes back as upstream sends it, every key named `ssn`, `iban` or `qrIban` dropped
-  from its rows and `properties`, in any letter case and at any depth (`_report`;
-  ADR-0003, amendment 2026-10-26).
+  (G5 (1) of 2026-10-28, rows 123 and 225): a type that starts with `SALARY_` or
+  contains `PERSON`, or is `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or
+  `ORG_CHART`. The answer never names its type, so `_report_type` reads
+  `report/tree.json` once per organisation into a `WeakKeyDictionary` keyed on its
+  client, which `TENANTS.reset()` or a changed variable drops; `get_report_tree`
+  refreshes it; an element the kept tree lacks reads it once more, one still missing is
+  asked of upstream. Other reports come back as sent, every key named `ssn`, `iban` or
+  `qrIban` dropped at any depth, in any case (`_report`; ADR-0003, amendment 2026-10-26).
 - A task that fetches them deliberately may return them and says so in its docstring;
   none does.
 

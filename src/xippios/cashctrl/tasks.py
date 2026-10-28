@@ -1160,12 +1160,11 @@ an organisation never sees another's types. Read once per organisation and proce
 """
 _REPORT_TYPES_LOCK = threading.Lock()
 _SALARY_PREFIX = "SALARY_"
-_PAYROLL_TYPES = frozenset({"SETTLEMENT", "WITHHOLDING_TAX_SETTLEMENT"})
-_PEOPLE_SUFFIXES = ("_BY_PERSON", "_BY_PERSON_CHART")
+_REFUSED_TYPES = frozenset({"SETTLEMENT", "WITHHOLDING_TAX_SETTLEMENT", "PEOPLE", "ORG_CHART"})
+_PERSON_PART = "PERSON"
 _REFUSED_REPORT_RULE = (
-    "payroll and people reports, every type that starts with SALARY_, SETTLEMENT, "
-    "WITHHOLDING_TAX_SETTLEMENT and every type that ends with _BY_PERSON or "
-    "_BY_PERSON_CHART"
+    "payroll and people reports, every type that starts with SALARY_ or contains PERSON, "
+    "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART"
 )
 """What ``get_report_data`` refuses, as its refusal states it (ADR-0017)."""
 
@@ -1173,17 +1172,15 @@ _REFUSED_REPORT_RULE = (
 def _is_refused_report_type(report_type: str) -> bool:
     """Whether ``get_report_data`` refuses a report of ``report_type``, in any letter case.
 
-    The rule of G5 (1) of 2026-10-28 (queue row 123), by pattern: a type that starts
-    with ``SALARY_``, is ``SETTLEMENT`` or ``WITHHOLDING_TAX_SETTLEMENT``, or ends with
-    ``_BY_PERSON`` or ``_BY_PERSON_CHART``. CashCtrl's default reports hold ten such:
-    ``SALARY_LIST``, ``SALARY_TYPE_RECAP``, ``SALARY_TYPES``, ``SALARY_BOOK_ENTRIES``,
-    ``SETTLEMENT``, ``WITHHOLDING_TAX_SETTLEMENT``, ``REVENUE_BY_PERSON``,
-    ``EXPENSE_BY_PERSON``, ``REVENUE_BY_PERSON_CHART`` and ``EXPENSE_BY_PERSON_CHART``.
+    The rule of G5 (1) of 2026-10-28 (queue row 123), by pattern, extended to the
+    documented types the demo tree does not show (queue row 225): a type that starts
+    with ``SALARY_`` or contains ``PERSON``, or is ``SETTLEMENT``,
+    ``WITHHOLDING_TAX_SETTLEMENT``, ``PEOPLE`` or ``ORG_CHART``. Of the 41 types
+    ``report/element/create.json`` documents that is 15; ``WITHHOLDING_TAX_RATES``, rates
+    and no persons, passes.
     """
     name = report_type.upper()
-    return (
-        name.startswith(_SALARY_PREFIX) or name in _PAYROLL_TYPES or name.endswith(_PEOPLE_SUFFIXES)
-    )
+    return name.startswith(_SALARY_PREFIX) or name in _REFUSED_TYPES or _PERSON_PART in name
 
 
 def _element_types(nodes: Sequence[ReportTreeNode]) -> dict[int, str | None]:
@@ -1324,12 +1321,12 @@ async def get_report_data_async(
     camelCase names, and amounts are JSON numbers.
 
     Payroll and people reports are refused before their data is requested: a report
-    whose ``type`` starts with ``SALARY_``, is ``SETTLEMENT`` or
-    ``WITHHOLDING_TAX_SETTLEMENT``, or ends with ``_BY_PERSON`` or ``_BY_PERSON_CHART``;
-    among CashCtrl's default reports ``SALARY_LIST``, ``SALARY_TYPE_RECAP``,
-    ``SALARY_TYPES``, ``SALARY_BOOK_ENTRIES``, ``SETTLEMENT``,
-    ``WITHHOLDING_TAX_SETTLEMENT``, ``REVENUE_BY_PERSON``, ``EXPENSE_BY_PERSON``,
-    ``REVENUE_BY_PERSON_CHART`` and ``EXPENSE_BY_PERSON_CHART``. The type is the one
+    whose ``type`` starts with ``SALARY_`` or contains ``PERSON``, or is ``SETTLEMENT``,
+    ``WITHHOLDING_TAX_SETTLEMENT``, ``PEOPLE`` or ``ORG_CHART``; among CashCtrl's default
+    reports ``SALARY_LIST``, ``SALARY_TYPE_RECAP``, ``SALARY_TYPES``,
+    ``SALARY_BOOK_ENTRIES``, ``SETTLEMENT``, ``WITHHOLDING_TAX_SETTLEMENT``,
+    ``REVENUE_BY_PERSON``, ``EXPENSE_BY_PERSON``, ``REVENUE_BY_PERSON_CHART`` and
+    ``EXPENSE_BY_PERSON_CHART``. ``WITHHOLDING_TAX_RATES`` is read. The type is the one
     ``get_report_tree`` shows: the first call for an organisation reads its report tree
     and keeps it, and an element the kept tree does not list reads it once more; one the
     tree does not list at all is asked of upstream as given. From every other report,
