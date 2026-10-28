@@ -201,6 +201,36 @@ def test_a_404_means_the_endpoint_does_not_exist() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "path", ["/order/document/read.pdf?ids=999999", "/order/document/read.pdf?ids=3%2C5&lang=de"]
+)
+def test_a_404_on_a_read_pdf_by_ids_is_not_found(path: str) -> None:
+    """Observed on 2026-10-29: an unknown order's PDF is a 404; upstream signals absence."""
+    error = classify(response(path, 404, b"<title>CashCtrl - 404 Not Found</title>", {}))
+    assert isinstance(error, NotFoundError)
+    assert str(error) == (
+        "CashCtrl: no record has an id asked, HTTP 404 (/order/document/read.pdf)"
+    ), "the path, never the query or the host"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/order/document/read.pdf",
+        "/order/document/read.pdf?ids=",
+        "/order/document/read.pdf?id=3",
+        "/order/document/read.zip?ids=3",
+        "/order/read.json?id=3",
+        "/journal/list.pdf?limit=5",
+    ],
+)
+def test_every_other_404_is_an_unknown_endpoint(path: str) -> None:
+    error = classify(response(path, 404, b"Not here", {}))
+    assert isinstance(error, UpstreamError)
+    assert not isinstance(error, NotFoundError)
+    assert str(error).endswith("(the endpoint does not exist upstream)")
+
+
 def test_core_keeps_mapping_status_retry_after_and_body() -> None:
     plain = {"content-type": "text/plain"}
     auth = classify(response("/account/list.json", 403, b"Forbidden", plain))

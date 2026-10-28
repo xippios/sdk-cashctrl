@@ -1251,6 +1251,102 @@ async def test_get_order_as_a_tool(
     assert payload["data"]["total"] == 7750
 
 
+# The document of the seeded invoice RE-2026-103 (order 3), recorded on 2026-10-29: its
+# sender, recipient, layout, references and mailing; the bank account numbers null.
+
+DOCUMENT_IBANS = frozenset({"org_iban", "org_qr_iban", "recipient_iban"})
+"""The bank account numbers an order's document carries, as ``OrderDocument`` names them."""
+
+
+def test_get_order_document_replays_the_recorded_read(
+    replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
+) -> None:
+    assert recorded_query(recorded(fixtures_dir, "order_document_read", "by_id")) == {"id": "3"}
+    route = replay_fixture("order_document_read", "by_id")
+    result = tasks.get_order_document(DEMO, 3)
+    assert sent_query(route) == {"id": "3"}
+    assert result.meta.endpoint == "order/document/read.json"
+    assert result.meta.request == {"org": DEMO, "id": 3}
+    document = result.data
+    assert isinstance(document, models.OrderDocumentProjection)
+    assert (document.order_id, document.nr, document.category_id, document.associate_id) == (
+        3,
+        "RE-2026-103",
+        4,
+        10,
+    )
+    assert (document.name_singular or "").startswith("<values><de>Rechnung</de>"), "verbatim"
+    assert (document.layout_id, document.template_id, document.language) == (7, 7, "DE")
+    assert (document.org_location_id, document.recipient_address_id) == (1, 8)
+    assert (document.org_bank_account_id, document.recipient_bank_account_id) == (None, None)
+    assert document.recipient_address == "Demo Bau AG\nBeispielgasse 7\n6003 Luzern"
+    assert document.recipient_address_csv == "Demo Bau AG, Beispielgasse 7, 6003 Luzern"
+    assert document.qr_reference == "000000000000000004320261031"
+    assert document.iso11649_reference == document.generated_reference == "RF560000000432026103"
+    assert document.custom_reference is None
+    assert (document.header, document.footer) == ("", "")
+    assert (document.mail_to, document.sent_status_id) == ("user@example.com", 16), "scrubbed"
+    assert (document.is_display_prices, document.is_display_item_gross) == (True, False)
+    assert (document.is_file_replacement, document.is_switch_recipient) == (False, False)
+    dumped = result.model_dump(mode="json")["data"]
+    assert [key for key in dumped if "iban" in key] == []
+    assert {"org_bic", "recipient_bic"} <= set(dumped), "a BIC stays, as PersonProjection's bic"
+
+
+def test_the_order_document_projection_leaves_out_the_ibans_and_nothing_else() -> None:
+    read = set(models.OrderDocument.model_fields)
+    assert read - set(models.OrderDocumentProjection.model_fields) == DOCUMENT_IBANS
+    assert set(models.OrderDocumentProjection.model_fields) < read
+
+
+@pytest.mark.anyio
+async def test_the_order_document_wrapper_stays_faithful(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("order_document_read", "by_id")
+    document = await api.order_document_read(DEMO, 3)
+    assert isinstance(document, models.OrderDocument)
+    assert {name: getattr(document, name) for name in DOCUMENT_IBANS} == dict.fromkeys(
+        DOCUMENT_IBANS
+    ), "only seen null"
+
+
+@pytest.mark.anyio
+async def test_a_live_iban_on_an_order_document_never_reaches_a_result(
+    respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """On the recorded answer changed in memory: the three numbers set to a made-up IBAN.
+
+    The recorder rewrites ``iban`` and ``qrIban`` by whole name only, so a document whose
+    numbers are set would be recorded with them; the projection keeps them out of every
+    result regardless.
+    """
+    fixture = recorded(fixtures_dir, "order_document_read", "by_id")
+    body = json.loads(fixture.response.body)
+    made_up = "CH00 0000 0000 0000 0000 0"
+    body["data"].update(orgIban=made_up, orgQrIban=made_up, recipientIban=made_up)
+    url = str(httpx.URL(fixture.request.url).copy_with(query=None))
+    respx_mock.get(url).respond(200, json=body)
+    assert made_up not in tasks.get_order_document(DEMO, 3).model_dump_json()
+    payload = await mcp_call(server, "cashctrl_get_order_document", {"org": DEMO, "id": 3})
+    assert made_up not in json.dumps(payload)
+    assert (await api.order_document_read(DEMO, 3)).recipient_iban == made_up, "read model"
+
+
+@pytest.mark.anyio
+async def test_get_order_document_as_a_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("order_document_read", "by_id")
+    payload = await mcp_call(server, "cashctrl_get_order_document", {"org": DEMO, "id": 3})
+    assert (payload["data"]["nr"], payload["data"]["qr_reference"]) == (
+        "RE-2026-103",
+        "000000000000000004320261031",
+    )
+    assert payload["meta"]["endpoint"] == "order/document/read.json"
+    assert [key for key in payload["data"] if "iban" in key] == []
+
+
 # The book entries of an order and the history, recorded on 2026-10-27: the entry the
 # seeded purchase order EK-2026-001 (order 5) booked from its items, that order's history,
 # and the history of the order a write fixture created, updated and deleted (order 20),
@@ -2556,6 +2652,7 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
     "cashctrl_get_person": ("person_read/by_id", {}),
     "cashctrl_list_orders": ("order_list/fp2026_sales", {"type": "SALES", "fiscal_period_id": 1}),
     "cashctrl_get_order": ("order_read/by_id", {}),
+    "cashctrl_get_order_document": ("order_document_read/by_id", {}),
     "cashctrl_list_order_categories": ("order_category_list/default", {}),
     "cashctrl_list_custom_fields": ("customfield_list/person", {"type": "PERSON"}),
     "cashctrl_list_person_categories": ("person_category_list/default", {}),
@@ -2758,8 +2855,10 @@ AUDITED_CASES = {tool: case for tool, case in TOOL_CASES.items() if _audited(cas
 
 def test_the_audited_cases_cover_every_model_family() -> None:
     reports = {"cashctrl_get_report_tree", "cashctrl_get_report_data"}
-    assert set(TOOL_CASES) - set(AUDITED_CASES) == reports | UNOBSERVED, (
-        "every recorded answer but the reports and the empty ones names who wrote its records"
+    authorless = {"cashctrl_get_order_document"}  # an order's document names no author
+    assert set(TOOL_CASES) - set(AUDITED_CASES) == reports | authorless | UNOBSERVED, (
+        "every recorded answer but the reports, the order document and the empty ones names "
+        "who wrote its records"
     )
 
 

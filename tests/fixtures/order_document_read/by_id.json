@@ -1,0 +1,49 @@
+{
+  "recorded_at": "2026-10-28T23:00:07.379726Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/order/document/read.json?id=3"
+  },
+  "response": {
+    "body": "{\"success\":true,\"data\":{\"orderId\":3,\"layoutId\":7,\"userId\":null,\"orgLocationId\":1,\"orgBankAccountId\":null,\"recipientAddressId\":8,\"recipientBankAccountId\":null,\"orgAddress\":\"Muster Handel AG (Demo)\\nMusterhof 1\\n8001 Z\u00fcrich\",\"orgIban\":null,\"orgQrIban\":null,\"orgBic\":null,\"recipientAddress\":\"Demo Bau AG\\nBeispielgasse 7\\n6003 Luzern\",\"recipientIban\":null,\"recipientBic\":null,\"header\":\"\",\"footer\":\"\",\"mailTo\":\"user@example.com\",\"mailFrom\":null,\"mailCc\":null,\"mailBcc\":null,\"mailSubject\":\"$documentName $nr - $orgName\",\"mailText\":\"\",\"dateReceived\":null,\"language\":\"DE\",\"nameSingular\":\"<values><de>Rechnung</de><en>Invoice</en><fr>Facture</fr><it>Fattura</it></values>\",\"qrReference\":\"000000000000000004320261031\",\"iso11649Reference\":\"RF560000000432026103\",\"orgAddressCsv\":\"Muster Handel AG (Demo), Musterhof 1, 8001 Z\u00fcrich\",\"recipientAddressCsv\":\"Demo Bau AG, Beispielgasse 7, 6003 Luzern\",\"generatedReference\":\"RF560000000432026103\",\"customReference\":null,\"sentStatusId\":16,\"templateId\":7,\"nr\":\"RE-2026-103\",\"categoryId\":4,\"fileId\":null,\"associateId\":10,\"isSwitchRecipient\":false,\"isDisplayPrices\":true,\"isFileReplacement\":false,\"isDisplayItemGross\":false}}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Wed, 28 Oct 2026 23:00:06 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457-gzip\""
+      ],
+      [
+        "set-cookie",
+        "REDACTED"
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

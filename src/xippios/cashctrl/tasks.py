@@ -17,8 +17,9 @@ stay empty. Every list task sets ``meta.total`` to upstream's ``total``, its cou
 records matching the request (ADR-0012); it is never computed from ``len(data)``.
 
 The persons a task returns are projections without the personal identifiers ``ssn`` and
-``iban`` (ADR-0017, ``_person`` and its neighbours), the locations projections without
-their bank account numbers ``iban`` and ``qr_iban`` (``_location``), and the rows of a
+``iban`` (ADR-0017, ``_person`` and its neighbours), the locations and an order's
+document projections without their bank account numbers (``_location``,
+``_order_document``), and the rows of a
 report, kept as upstream sends them, lose every key named ``ssn``, ``iban`` or
 ``qrIban`` in any letter case and at any depth (``_report``); the endpoint wrappers' read
 models keep them. ``get_report_data`` refuses payroll and people reports by their type,
@@ -97,6 +98,8 @@ from xippios.cashctrl.models import (
     OrderBookEntry,
     OrderCategory,
     OrderDetail,
+    OrderDocument,
+    OrderDocumentProjection,
     OrderType,
     Person,
     PersonCategory,
@@ -118,6 +121,7 @@ __all__ = [
     "get_account",
     "get_journal_entry",
     "get_order",
+    "get_order_document",
     "get_person",
     "get_report_data",
     "get_report_tree",
@@ -911,6 +915,37 @@ async def get_order_async(org: str, id: int) -> Result[OrderDetail]:
     return Result(data=order, meta=_meta(org, "order/read.json", {"id": id}))
 
 
+def _order_document(document: OrderDocument) -> OrderDocumentProjection:
+    """An order's document without ``org_iban``, ``org_qr_iban`` and ``recipient_iban``."""
+    return OrderDocumentProjection.project(document)
+
+
+async def get_order_document_async(org: str, id: int) -> Result[OrderDocumentProjection]:
+    """Read the document of one order: how it is printed and sent, sender and recipient.
+
+    The document is not the order itself (``get_order`` has its items and amounts) but
+    how it goes out: ``nr`` and ``name_singular`` (the kind, e.g. ``Rechnung``), the
+    layout (``layout_id``, ``template_id``) and ``language``, the sender
+    (``org_location_id``, ``org_address`` as printed, ``org_bank_account_id``), the
+    recipient (``associate_id``, ``recipient_address_id``, ``recipient_address`` as
+    printed, ``recipient_bank_account_id``), the ``header`` and ``footer`` texts, the
+    payment references a QR-bill carries (``qr_reference``, ``iso11649_reference``,
+    ``generated_reference``, ``custom_reference``) and what mailing it would use
+    (``mail_to``, ``mail_subject``, ``mail_text``, ``sent_status_id``, the status set
+    after sending). The bank account numbers of the organisation and the recipient
+    (``orgIban``, ``orgQrIban``, ``recipientIban``) are left out. The PDF itself comes
+    from ``download_order_document``, from Python only. An id no order has raises
+    ``NotFoundError`` (assumed, as for ``get_order``).
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        id: The order's ``id`` as ``list_orders`` gives it, e.g. ``3``; not its number
+            ``nr``.
+    """
+    document = _order_document(await api.order_document_read(org, id))
+    return Result(data=document, meta=_meta(org, "order/document/read.json", {"id": id}))
+
+
 async def list_order_book_entries_async(org: str, order_id: int) -> Result[list[OrderBookEntry]]:
     """List the book entries of one order: the journal entries it booked, and its payments.
 
@@ -1524,9 +1559,9 @@ async def download_order_document_async(
     read into a result, kept in memory or cached; no MCP tool or HTTP route serves it
     (``BULK_TASKS``), so where it goes is the caller's choice. ``data`` describes it:
     ``path``, ``bytes``, ``content_type``, ``filename`` and ``retrieved_at``. An id no
-    order has raises ``NotFoundError`` (assumed, as for ``get_order``) and another
-    refusal ``RequestRejected``; either way nothing is written, and a file already at
-    ``dest`` stays as it was.
+    order has raises ``NotFoundError`` (upstream answers it with HTTP 404, observed on
+    2026-10-29) and a refusal ``RequestRejected``; either way nothing is written, and a
+    file already at ``dest`` stays as it was.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1954,6 +1989,7 @@ list_persons = sync(list_persons_async)
 get_person = sync(get_person_async)
 list_orders = sync(list_orders_async)
 get_order = sync(get_order_async)
+get_order_document = sync(get_order_document_async)
 list_order_book_entries = sync(list_order_book_entries_async)
 list_history = sync(list_history_async)
 list_order_categories = sync(list_order_categories_async)

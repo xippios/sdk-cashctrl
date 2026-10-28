@@ -302,9 +302,10 @@ replay-tested with a real value.
   `tasks.py`: `PersonProjection` (`list_persons`), `PersonDetailProjection`
   (`get_person`; each bank account kept without its `iban`, which the projection's own
   validator drops), `JournalEntryDetailProjection` (`get_journal_entry`, its
-  `associates` projected) and `LocationProjection` (`list_locations`, without `iban` and
-  `qr_iban`, both undocumented and only seen `null`). A write preview's `before` is the
-  same projection.
+  `associates` projected), `LocationProjection` (`list_locations`, without `iban` and
+  `qr_iban`, both undocumented and only seen `null`) and `OrderDocumentProjection`
+  (`get_order_document`, without `orgIban`, `orgQrIban` and `recipientIban`, only seen
+  `null`). A write preview's `before` is the same projection.
 - `create_person` and `update_person` take `ssn` and, in `bank_accounts`, `iban`, and
   send them as given; a preview's `payload` and `changes` and a performed write's
   `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
@@ -324,10 +325,9 @@ replay-tested with a real value.
   `qrIban` dropped at any depth, in any case (`_report`; ADR-0003, amendment 2026-10-26).
 - A task that fetches them deliberately may return them and says so in its docstring.
   Two files may carry them, at the caller's path, never in a result or a tool
-  (`BULK_TASKS`; Johannes, 2026-10-28): `export_persons` names `PERSON_COLUMNS`,
-  `PersonProjection`'s fields, unless its caller names columns, `ssn` or `iban` among
-  them deliberately; `download_order_document`'s PDF may carry the organisation's IBAN
-  or QR-IBAN and the recipient's address on its QR-bill, disclosed, not stripped.
+  (`BULK_TASKS`; Johannes, 2026-10-28): `export_persons` names `PERSON_COLUMNS` unless
+  its caller names columns, `ssn` or `iban` among them; `download_order_document`'s PDF
+  may carry the organisation's IBAN or QR-IBAN and the recipient's address (QR-bill).
 
 ## CashCtrl specifics
 
@@ -431,9 +431,9 @@ function that returns a subset of an upstream record builds its model with
 Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
-for an unknown id on a `read.json` by `id` or a `read.pdf` by `ids`; a 404 means an
-unknown endpoint and raises `UpstreamError`. Observed shapes say so, with the date, in
-its docstring.
+for an unknown id on a `read.json` by `id`; a 404 is an unknown endpoint
+(`UpstreamError`), on a `read.pdf` by `ids` an unknown id (`NotFoundError`, observed
+2026-10-29). Observed shapes say so, with the date, in its docstring.
 
 Files (G5 (5) to (7) of 2026-10-28): the wrappers `<module>_list_csv|xlsx|pdf` and
 `order_document_read_pdf` (D95) call `api/_download.py`'s `download`, which streams
@@ -499,9 +499,9 @@ delete, recorded or run. Record only a record marked `xippios-live`, its writes 
 delete; confirm afterwards with one list per resource (`query=xippios-live`, counts only)
 that nothing is left.
 
-The write fixtures record marked records: a journal entry and a person (2026-10-24)
-and the order 20 (2026-10-27), each created, read, updated and deleted, and the purchase
-order 26's status and payments, `PAIN` refused, `CASH_PDF` created (2026-10-29).
+The write fixtures record marked records created, read, updated and deleted again
+(2026-10-24, 2026-10-27) and the purchase order 26's status and payments, `PAIN`
+refused, `CASH_PDF` created (2026-10-29).
 
 Still grep before committing:
 

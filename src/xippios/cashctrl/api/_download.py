@@ -109,8 +109,8 @@ async def download(
             a bad argument (conventions §5) where core's ``download`` raises
             ``ValueError``; nothing is sent.
         RequestRejected: Upstream answered HTTP 200 with ``"success": false``.
-        NotFoundError: The same, for an unknown id of a read by ids
-            (``order/document/read.pdf``).
+        NotFoundError: An id no record has, on a read by ids (``order/document/read.pdf``
+            answers it with HTTP 404, ``classify``).
         ValidationError: Upstream answered JSON that is no refusal.
         XippiosError: Core's taxonomy for any other failure; ``dest`` stays as it was.
     """

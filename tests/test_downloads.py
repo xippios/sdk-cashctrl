@@ -436,6 +436,22 @@ def test_an_unknown_order_is_not_found_and_nothing_is_written(
     assert files(tmp_path) == ["invoice.pdf"], "the refusal is removed"
 
 
+def test_an_unknown_orders_404_is_not_found_and_dest_stays(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    """Observed on 2026-10-29: upstream answers an id no order has with HTTP 404."""
+    respx_mock.get(f"{BASE}/order/document/read.pdf").respond(
+        404, text="<title>CashCtrl - 404 Not Found</title>"
+    )
+    dest = tmp_path / "invoice.pdf"
+    dest.write_bytes(b"the caller's earlier file")
+    with pytest.raises(NotFoundError) as info:
+        tasks.download_order_document(DEMO, [999999], dest)
+    assert str(info.value).endswith("(/order/document/read.pdf)")
+    assert dest.read_bytes() == b"the caller's earlier file"
+    assert files(tmp_path) == ["invoice.pdf"]
+
+
 @pytest.mark.parametrize(
     "content_type", [JSON_UTF8, "application/json", "Application/JSON ; charset=UTF-8"]
 )

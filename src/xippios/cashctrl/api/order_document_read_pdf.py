@@ -5,9 +5,9 @@ documents in one PDF file."), one parameter, ``ids`` (mandatory, CSV, "The IDs o
 multiple orders, comma-separated."). The document is the order as upstream renders it
 for its recipient; an invoice's carries the QR-bill, with the organisation's IBAN or
 QR-IBAN and the recipient's address. The file is written by ``_download.download``,
-which raises a refusal sent as HTTP 200 instead of writing it (queue row 142); an unknown
-id is assumed to be refused as ``read.json`` refuses one (``NotFoundError``, not
-observed).
+which raises a refusal sent as HTTP 200 instead of writing it (queue row 142). An id no
+order has is answered with HTTP 404 (observed on 2026-10-29), which ``_client.classify``
+raises as ``NotFoundError`` for a ``read.pdf`` asked by ``ids``.
 """
 
 import os
@@ -37,7 +37,7 @@ async def order_document_read_pdf(
         dest: The file to write, in a directory that exists.
 
     Raises:
-        NotFoundError: An id no order has (assumed, as for ``order/read.json``).
+        NotFoundError: An id no order has (HTTP 404, observed on 2026-10-29).
         RequestRejected: Upstream refused the download otherwise; ``dest`` is left as it
             was.
     """

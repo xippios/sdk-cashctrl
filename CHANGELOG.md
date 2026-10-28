@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `get_order_document` (`order/document/read.json`, the tool
+  `cashctrl_get_order_document`): one order's document, how it is printed and sent: its
+  layout and language, the sender's and the recipient's address as printed, the payment
+  references of the QR-bill and the mailing defaults. `OrderDocument` is typed from the
+  answer recorded on 2026-10-29; the task returns `OrderDocumentProjection`, without
+  `orgIban`, `orgQrIban` and `recipientIban` (G5 (5) of 2026-10-28; ADR-0017). The
+  recorder rewrites `iban` and `qrIban` by whole name only, so these compound names are
+  neither rewritten nor refused: the recorded document holds `null` for all three.
 - Five file tasks, `download_order_document` and the list exports
   `export_journal_entries`, `export_accounts`, `export_persons` and `export_orders`,
   named in `BULK_TASKS`: Python only, no MCP tool or HTTP route (G5 (5) and (6) of
@@ -60,9 +68,11 @@ All notable changes to this project are documented here. The format follows
 - A download refused with HTTP 200 and `success: false` is raised, never kept as the
   file: core writes a 2xx body unread (queue row 142), so `api/_download.py` streams to a
   temporary file beside `dest` and reads `Content-Type` first. JSON goes through
-  `classify`, which now reads a `read.pdf` by `ids` as a read by id (`RequestRejected`;
-  `NotFoundError` for an unknown order, assumed alike to `read.json`, not observed); the
-  file is removed and a file already at `dest` stays as it was.
+  `classify` (`RequestRejected`, or `NotFoundError` for a read by ids); the file is
+  removed and a file already at `dest` stays as it was. An id no order has is answered
+  with HTTP 404 (observed on 2026-10-29): `classify` raises `NotFoundError` for a 404 on
+  a `read.pdf` asked by `ids` and keeps every other 404 an unknown endpoint's
+  `UpstreamError` (queue row 235).
 - `scripts/seed_demo.py --discovery`, the seeder's second mode: one custom field on
   persons (`Kundenreferenz`, `TEXT`) and one cost centre (`100 Verkauf Büromöbel`) in a
   demo organisation seeded before. It keeps guards 1 and 2 and has its own guard 3: both
