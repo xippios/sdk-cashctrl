@@ -1578,8 +1578,9 @@ class CostCenter(UpstreamModel):
     Typed from observation on 2026-10-28 (``tests/fixtures/account_costcenter_list/
     default.json``, the one cost centre ``scripts/seed_demo.py --discovery`` created):
     ``id``; the balances of the fiscal period asked for (``fiscalPeriodId``, "from which
-    we retrieve the balances", else the current one) as ``opening_amount`` and
-    ``end_amount``, as ``Account`` has them (``0`` seen, no amount allocated);
+    we retrieve the balances"; without it the current one, assumed, since upstream
+    documents no default) as ``opening_amount`` and ``end_amount``, as ``Account`` has
+    them (``0`` seen, no amount allocated);
     ``attachment_count``; the twin ``inactive``; and the ``created*``/``last_updated*``
     bookkeeping fields. Only seen ``null`` and kept as sent: ``category_name`` and
     ``target_display``.

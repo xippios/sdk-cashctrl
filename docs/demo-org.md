@@ -460,8 +460,10 @@ the first write:
 - `fiscalperiod/create.json` with `type=EARLIEST` creates the calendar year before the
   earliest existing one; the seeder uses it only when the earliest period starts on
   2026-01-01, and checks afterwards that a period covers 2025.
-- Nothing else is created or changed: no accounts, tax codes, locations, settings,
-  salary, files, inventory or custom fields.
+- Nothing else is created or changed by the first mode: no accounts, tax codes,
+  locations, settings, salary, files, inventory or custom fields. The one custom field
+  and the one cost centre the demo organisation holds come from the second mode, The
+  discovery records (`--discovery`) above.
 
 The write tools' live tests and write fixtures create records marked `xippios-live`
 (title, company or description, and `nr`), dated 2026-10-24, and delete them again in

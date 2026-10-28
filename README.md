@@ -277,7 +277,7 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET person/category/list.json` (List categories) | `list_person_categories` | `cashctrl_list_person_categories` | available |
 | `GET person/title/list.json` (List titles) | `list_person_titles` | `cashctrl_list_person_titles` | available |
 | `GET account/category/list.json` (List categories) | `list_account_categories` | `cashctrl_list_account_categories` | available; flat, linked by `parent_id` |
-| `GET account/costcenter/list.json` (List cost centers) | `list_cost_centers` | `cashctrl_list_cost_centers` | available; HTTP route is `POST`; balances of the current fiscal period |
+| `GET account/costcenter/list.json` (List cost centers) | `list_cost_centers` | `cashctrl_list_cost_centers` | available; HTTP route is `POST`; balances assumed of the current fiscal period |
 | `GET location/list.json` (List locations) | `list_locations` | `cashctrl_list_locations` | available; without `iban` and `qr_iban` |
 | `GET report/tree.json` (Get tree of reports) | `get_report_tree` | `cashctrl_get_report_tree` | available |
 | `GET report/element/data.json` (Read JSON data) | `get_report_data` | `cashctrl_get_report_data` | available; rows as upstream sends them; payroll and people reports refused |

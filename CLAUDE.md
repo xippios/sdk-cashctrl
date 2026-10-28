@@ -390,8 +390,8 @@ Step 5, the docstring for agents, is the family's; then:
    `sent_urls(route)` or `sent_query(route)` with `recorded_query(fixture)`, never a
    request from `route.calls`), a case in `TOOL_CASES` (which
    checks `meta.tenant` and snake_case keys for every tool; a tool whose recorded
-   answer is empty goes into `UNOBSERVED`, whose models' field names are checked
-   instead, and a field kept as upstream sends it into `AS_SENT`), a live smoke test in
+   answer is empty goes into `UNOBSERVED`, whose models' field names are checked as
+   well, and a field kept as upstream sends it into `AS_SENT`), a live smoke test in
    `test_live.py` that takes the `demo_org` fixture.
 
 A list that documents `start` and `limit` (journal, persons, orders, history) pages through
