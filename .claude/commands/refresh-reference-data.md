@@ -21,9 +21,9 @@ every tenant, if any.
 
 None is packaged yet, so `scripts/refresh_reference.py`, `params.py`, `enums.py` and
 `reference/` are gone (the note above). When a task needs a value set, bring them back
-from the `render_enums` port deleted here: `git show a963cbd:<path>` (the tip of
-sdk-cashctrl#13), or, once that is on `main`, `git show <commit>^:<path>` with
-`<commit>` from `git log --diff-filter=D -1 -- scripts/refresh_reference.py`. Not from
+from the `render_enums` port deleted here: `git show dfb65ce:<path>` (dfb65ce on main,
+the merge of #13), or `git show <commit>^:<path>` with `<commit>`, the commit that
+deleted it, from `git log --diff-filter=D -1 -- scripts/refresh_reference.py`. Not from
 template v0.2.2's scaffold: its script imports `render_str_enums` and
 `render_int_enums`, which core 0.3.0 removed. Make the script the generator of step 3;
 its `--render-only` regenerates `enums.py` from the packaged `reference/*.json` alone,
