@@ -51,6 +51,7 @@ from xippios.cashctrl.api.order_category_list import (
 )
 from xippios.cashctrl.api.order_create import order_create, order_fields
 from xippios.cashctrl.api.order_delete import order_delete
+from xippios.cashctrl.api.order_document_read import order_document_read
 from xippios.cashctrl.api.order_document_read_pdf import (
     order_document_read_pdf,
     order_document_read_pdf_params,
@@ -115,6 +116,7 @@ __all__ = [
     "order_category_list_params",
     "order_create",
     "order_delete",
+    "order_document_read",
     "order_document_read_pdf",
     "order_document_read_pdf_params",
     "order_fields",

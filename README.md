@@ -66,20 +66,22 @@ invoices = tasks.list_orders("demo", type="SALES", fiscal_period_id=current.id)
 ```
 
 Every task returns `Result[T]`: `data` holds models that mirror CashCtrl's payloads
-under upstream's names in snake_case (`is_current`, `end_amount`), in Python and in every
-tool and route result alike (the report rows of `get_report_data` excepted, which come
-as upstream sends them, and the file tasks' `Downloaded`, which describes a file; Files
-below), `meta` the upstream operation, the parameters as sent under
-upstream's names (`onlyActive`), the organisation as `tenant`, when they were fetched
-and, for a list, `total`, upstream's count of the matching records. Async twins are
-named `<task>_async` (`list_organisations` has none). The tasks are listed in the status
-table below. Persons come back without the personal identifiers `ssn` and `iban`
+under upstream's names in snake_case (`is_current`, `end_amount`), in Python and in
+every tool and route result alike (the report rows of `get_report_data` excepted, which
+come as upstream sends them, and the file tasks' `Downloaded`, which describes a file;
+Files below), `meta` the upstream operation, the parameters as sent under upstream's
+names (`onlyActive`), the organisation as `tenant`, when they were fetched and, for a
+list, `total`, upstream's count of the matching records. Async twins are named
+`<task>_async` (`list_organisations` has none). The tasks are listed in the status table
+below. Persons come back without the personal identifiers `ssn` and `iban`
 (`list_persons`, `get_person`, the persons `get_journal_entry` names; ADR-0017),
-locations without their bank account numbers `iban` and `qr_iban` (`list_locations`),
-and report rows without any key named `ssn`, `iban` or `qrIban` (`get_report_data`, which
-refuses payroll and people reports outright). An API user that wrote or changed a record
-shows as `API:REDACTED` in `created_by` and `last_updated_by`, as in the fixtures; CashCtrl
-writes `API:` and the first four characters of its key there.
+locations and an order's document without their bank account numbers (`iban` and
+`qr_iban`, `list_locations`; `orgIban`, `orgQrIban` and `recipientIban`,
+`get_order_document`), and report rows without any key named `ssn`, `iban` or `qrIban`
+(`get_report_data`, which refuses payroll and people reports outright). An API user that
+wrote or changed a record shows as `API:REDACTED` in `created_by` and `last_updated_by`,
+as in the fixtures; CashCtrl writes `API:` and the first four characters of its key
+there.
 
 ## MCP
 
@@ -308,6 +310,7 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET person/read.json` (Read person) | `get_person` | `cashctrl_get_person` | available |
 | `GET order/list.json` (List orders) | `list_orders` | `cashctrl_list_orders` | available; paged; HTTP route is `POST` |
 | `GET order/read.json` (Read order) | `get_order` | `cashctrl_get_order` | available |
+| `GET order/document/read.json` (Read document) | `get_order_document` | `cashctrl_get_order_document` | available; layout, sender, recipient, payment references; without `orgIban`, `orgQrIban` and `recipientIban`; the PDF from `download_order_document` |
 | `GET order/bookentry/list.json` (List book entries) | `list_order_book_entries` | `cashctrl_list_order_book_entries` | available; one order's (`order_id`, sent as `id`) |
 | `GET order/category/list.json` (List categories) | `list_order_categories` | `cashctrl_list_order_categories` | available |
 | `GET customfield/list.json` (List custom fields) | `list_custom_fields` | `cashctrl_list_custom_fields` | available; one module (`type`) a call |

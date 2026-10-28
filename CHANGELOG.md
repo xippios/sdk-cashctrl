@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `get_order_document` (`order/document/read.json`, the tool
+  `cashctrl_get_order_document`): one order's document, how it is printed and sent: its
+  layout and language, the sender's and the recipient's address as printed, the payment
+  references of the QR-bill and the mailing defaults. `OrderDocument` is typed from the
+  answer recorded on 2026-10-29; the task returns `OrderDocumentProjection`, without
+  `orgIban`, `orgQrIban` and `recipientIban` (G5 (5) of 2026-10-28; ADR-0017). The
+  recorder rewrites `iban` and `qrIban` by whole name only, so these compound names are
+  neither rewritten nor refused: the recorded document holds `null` for all three.
 - Five file tasks, `download_order_document` and the list exports
   `export_journal_entries`, `export_accounts`, `export_persons` and `export_orders`,
   named in `BULK_TASKS`: Python only, no MCP tool or HTTP route (G5 (5) and (6) of

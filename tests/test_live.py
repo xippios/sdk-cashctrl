@@ -43,19 +43,19 @@ for the document of an order that does not exist and expects ``NotFoundError`` a
 file: CashCtrl's refusal sent as HTTP 200 with JSON, which core would write as the file
 (queue row 142).
 
-The calls of one run: 29 for the reads (17, 9 for the discovery lists and the reports:
-one each, and the tree ``get_report_data`` reads first, and 3 for the book entries of an
-order, with the list of purchase orders they read first, and the history), 5 for the
-files (the list of sales orders, the order's PDF, the refused PDF of an unknown order,
-the journal export, the person export), 4 lookups
-(accounts, tax codes, customers, the sales categories), 9 for the journal (sweep,
-create, the sweep's query seeing the new entry, the update's preview, the update as read
-and write, the read back, the delete as read and write), 7 for a person (the same
-without the query, the delete one call), 10 for an order (sweep, create, the update's
-preview, two updates as read and write, the first without items and the second with,
-each read back, the delete) and 2 for the refused delete of an entry an order booked
-(the list, the delete's read); 66 in all, one more per leftover swept, two for a journal
-entry.
+The calls of one run: 31 for the reads (17, 9 for the discovery lists and the reports:
+one each, and the tree ``get_report_data`` reads first, 3 for the book entries of an
+order, with the list of purchase orders they read first, and the history, and 2 for an
+order's document, with the list of sales orders it reads first), 5 for the files (the
+list of sales orders, the order's PDF, the refused PDF of an unknown order, the journal
+export, the person export), 4 lookups (accounts, tax codes, customers, the sales
+categories), 9 for the journal (sweep, create, the sweep's query seeing the new entry,
+the update's preview, the update as read and write, the read back, the delete as read
+and write), 7 for a person (the same without the query, the delete one call), 10 for an
+order (sweep, create, the update's preview, two updates as read and write, the first
+without items and the second with, each read back, the delete) and 2 for the refused
+delete of an entry an order booked (the list, the delete's read); 68 in all, one more
+per leftover swept, two for a journal entry.
 """
 
 import json
@@ -237,6 +237,16 @@ async def test_list_history(demo_org: str) -> None:
     assert result.meta.total >= len(result.data)
     created = [entry.created for entry in result.data if entry.created is not None]
     assert created == sorted(created, reverse=True), "newest first, upstream's default"
+
+
+async def test_get_order_document(demo_org: str, fiscal_periods: dict[str, int]) -> None:
+    # The document of a seeded sales order of 2026; its id comes from the list.
+    period = fiscal_periods["2026"]
+    orders = await tasks.list_orders_async(demo_org, type="SALES", fiscal_period_id=period, limit=1)
+    (listed,) = orders.data
+    result = await tasks.get_order_document_async(demo_org, listed.id)
+    assert result.meta.request == {"org": demo_org, "id": listed.id}
+    assert result.meta.endpoint == "order/document/read.json"
 
 
 def media_type(content_type: str | None) -> str:
