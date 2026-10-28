@@ -33,6 +33,16 @@ creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10
 That refusal is checked live once, read-only: a delete without ``confirm`` of an entry a
 seeded purchase order booked, found with GET calls, is refused before any preview.
 
+``update_order_status`` and ``create_order_payment`` are tested on one marked purchase
+order of a seeded vendor (G5 (8) of 2026-10-28; Johannes, 2026-10-28): created, its
+status set to another status of its category (the purchase categories listed live),
+read back, its payment created, the order deleted. Upstream documents no payment
+delete, so a payment of a deleted order is the accepted residue (no book entry, no
+amount moved, the order gone): the test then checks that no journal entry of the order
+is left and probes ``order/payment/download`` once with the payment's parameters, a
+binary answer never recorded, asserting only that upstream answered and recording
+which, ``file`` or ``refusal``, as the property ``payment_download`` (``--junitxml``).
+
 The file tasks tested live write into pytest's temporary directory and assert the
 file's size and content type only: one seeded sales order's document, its id from the
 list, the journal of 2025 as CSV, five entries, and the persons as CSV with the columns
@@ -47,19 +57,21 @@ The calls of one run: 29 for the reads (17, 9 for the discovery lists and the re
 one each, and the tree ``get_report_data`` reads first, and 3 for the book entries of an
 order, with the list of purchase orders they read first, and the history), 5 for the
 files (the list of sales orders, the order's PDF, the refused PDF of an unknown order,
-the journal export, the person export), 4 lookups
-(accounts, tax codes, customers, the sales categories), 9 for the journal (sweep,
+the journal export, the person export), 5 lookups
+(accounts, tax codes, customers, vendors, the sales categories), 9 for the journal (sweep,
 create, the sweep's query seeing the new entry, the update's preview, the update as read
 and write, the read back, the delete as read and write), 7 for a person (the same
 without the query, the delete one call), 10 for an order (sweep, create, the update's
 preview, two updates as read and write, the first without items and the second with,
-each read back, the delete) and 2 for the refused delete of an entry an order booked
-(the list, the delete's read); 66 in all, one more per leftover swept, two for a journal
-entry.
+each read back, the delete), 9 for an order's status and payment (the purchase
+categories, sweep, create, the status, its read back, the payment, the delete, the
+purchase orders' journal entries, the download probe) and 2 for the refused delete of an
+entry an order booked (the list, the delete's read); 76 in all, one more per leftover
+swept, two for a journal entry.
 """
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -76,6 +88,7 @@ from xippios.cashctrl.models import (
     JournalEntryDetailProjection,
     OrderCategory,
     OrderDetail,
+    PaymentType,
     PersonDetail,
     PersonDetailProjection,
     WritePreview,
@@ -295,22 +308,27 @@ async def test_the_document_of_an_unknown_order_is_not_found(demo_org: str, tmp_
 def write_ids(fiscal_periods: dict[str, int]) -> dict[str, int]:
     """The ids the write tests book with, looked up once: never constants.
 
-    Accounts 1020 and 3200 by number, the tax code ``UN1`` by code, the first customer
-    that no live test created (a leftover of an interrupted run could be one), and the
-    2026 fiscal period.
+    Accounts 1020, 3200 and 4200 by number, the tax codes ``UN1`` and ``VN1`` by code,
+    the first customer and the first vendor that no live test created (a leftover of an
+    interrupted run could be one), and the 2026 fiscal period.
     """
     names = TENANTS.names()
     assert names == (DEMO,), "live tests run against the demo organisation and nothing else"
-    numbers = Filter(comparison="eq", field="number", value=["1020", "3200"])
+    numbers = Filter(comparison="eq", field="number", value=["1020", "3200", "4200"])
     accounts = {a.number: a.id for a in tasks.list_accounts(DEMO, filter=[numbers]).data}
     taxes = {tax.code: tax.id for tax in tasks.list_tax_codes(DEMO).data}
     customers = tasks.list_persons(DEMO, only_customers=True, limit=20).data
     customer = next(person for person in customers if not marked(person.company, person.nr))
+    vendors = tasks.list_persons(DEMO, only_vendors=True, limit=20).data
+    vendor = next(person for person in vendors if not marked(person.company, person.nr))
     return {
         "bank": accounts["1020"],
         "revenue": accounts["3200"],
+        "purchases": accounts["4200"],
         "un1": taxes["UN1"],
+        "vn1": taxes["VN1"],
         "customer": customer.id,
+        "vendor": vendor.id,
         "fp2026": fiscal_periods["2026"],
     }
 
@@ -688,3 +706,102 @@ async def test_order_create_update_delete(
     finally:
         if created is not None:
             await api.order_delete(demo_org, [created])
+
+
+PAYMENT_TYPE: PaymentType = "PAIN"
+"""The payment the live test creates: ``PAIN``, upstream's default, a pain.001 file."""
+
+
+async def test_order_status_payment_delete(
+    demo_org: str,
+    write_ids: dict[str, int],
+    record_property: Callable[[str, object], None],
+) -> None:
+    """A marked purchase order: created, its status set, its payment created, deleted.
+
+    The purchase invoice category and its statuses come from ``list_order_categories``
+    (``PURCHASE``), live; the order is created in the category's first status, which
+    books (upstream's default, as the seeded purchase orders show), and set to the next
+    status that names no follow-up action (``action_id`` empty), an open one first. Its
+    payment pays every open amount (``PAIN``). The payment's residue is accepted
+    (Johannes, 2026-10-28): upstream documents no payment delete, so once the order is
+    deleted the test checks that no journal entry of the order is left and probes
+    ``order/payment/download`` once with the payment's parameters through the demo
+    client, a binary answer never recorded: whether the payment survived its order's
+    deletion is recorded as the property ``payment_download``, ``file`` or ``refusal``.
+    """
+    purchase_categories = await tasks.list_order_categories_async(demo_org, type="PURCHASE")
+    (invoice,) = [
+        category
+        for category in purchase_categories.data
+        if "<en>Invoice</en>" in (category.name_singular or "") and not category.is_inactive
+    ]
+    first, *others = invoice.status
+    actionless = [status for status in others if not status.action_id]
+    assert actionless, "the purchase invoice category has no second status without an action"
+    target = min(actionless, key=lambda status: (status.is_closed, status.pos or 0))
+    leftovers = await tasks.list_orders_async(
+        demo_org, query=MARK, fiscal_period_id=write_ids["fp2026"], limit=50
+    )
+    for order in leftovers.data:
+        if marked(order.description, order.nr):
+            performed(await tasks_write.delete_order_async(demo_org, order.id, confirm=True))
+    created: int | None = None
+    try:
+        result = await tasks_write.create_order_async(
+            demo_org,
+            associate_id=write_ids["vendor"],
+            category_id=invoice.id,
+            date=DAY,
+            nr=MARK,
+            description=f"{MARK} payment test",
+            status_id=first.id,
+            items=[
+                {  # type: ignore[list-item]
+                    "account_id": write_ids["purchases"],
+                    "name": f"{MARK} item",
+                    "unit_price": Decimal("100.00"),
+                    "tax_id": write_ids["vn1"],
+                }
+            ],
+            confirm=True,
+        )
+        created = performed(result).insert_id
+        assert isinstance(created, int)
+        planned = await tasks_write.update_order_status_async(demo_org, [created], target.id)
+        assert isinstance(planned.data, WritePreview)
+        status = await tasks_write.update_order_status_async(
+            demo_org, [created], target.id, confirm=True
+        )
+        performed(status)
+        assert status.meta.request == {"org": demo_org, **planned.data.payload}
+        read_back = (await tasks.get_order_async(demo_org, created)).data
+        assert read_back.status_id == target.id
+        paying = await tasks_write.create_order_payment_async(
+            demo_org, DAY, [created], type=PAYMENT_TYPE
+        )
+        assert isinstance(paying.data, WritePreview)
+        payment = await tasks_write.create_order_payment_async(
+            demo_org, DAY, [created], type=PAYMENT_TYPE, confirm=True
+        )
+        performed(payment)
+        assert payment.meta.request == {"org": demo_org, **paying.data.payload}
+        deleted = await tasks_write.delete_order_async(demo_org, created, confirm=True)
+        assert performed(deleted).message
+        gone, created = created, None
+    finally:
+        if created is not None:
+            await api.order_delete(demo_org, [created])
+    booked = await tasks.list_journal_entries_async(
+        demo_org, fiscal_period_id=write_ids["fp2026"], only_purchase=True, limit=50
+    )
+    assert not [entry.id for entry in booked.data if entry.order_id == gone], (
+        "a journal entry of the deleted order is left"
+    )
+    response = await client_for(demo_org).request(
+        "GET", "/order/payment/download", params=paying.data.payload, raise_on_error=False
+    )
+    assert response.status_code < 500, "upstream answered"
+    kind = media_type(response.headers.get("content-type"))
+    outcome = "file" if response.status_code == 200 and kind != "application/json" else "refusal"
+    record_property("payment_download", f"{outcome} (HTTP {response.status_code}, {kind})")

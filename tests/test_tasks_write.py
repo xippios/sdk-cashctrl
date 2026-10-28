@@ -1647,7 +1647,8 @@ DRAFT, OPEN = recorded_invoice_statuses()[:2]
 """The first two statuses of the invoice category (Draft, then Open in the recording)."""
 SUCCESS = {"success": True, "message": "ok"}
 """A synthetic success answer for a write not yet recorded; no fixture holds it."""
-PAY_DAY = date(2026, 10, 30)
+PAY_DAY = DAY
+"""The payment's execution date: the date of every record the live tests write."""
 
 
 def test_update_order_status_previews_the_payload_without_a_request(
@@ -1696,7 +1697,7 @@ def test_create_order_payment_previews_the_payload_without_a_request(
     preview = preview_of(result)
     assert preview.endpoint == "order/payment/create.json"
     assert list(preview.payload.items()) == [
-        ("date", "2026-10-30"),
+        ("date", "2026-10-24"),
         ("orderIds", f"{ORDER},21"),
         ("amount", "50.00"),
         ("isCombine", "false"),
@@ -1712,7 +1713,7 @@ def test_create_order_payment_sends_upstreams_defaults_by_leaving_them_out(
 ) -> None:
     """Without ``amount`` and ``type`` upstream pays every open amount as ``PAIN``."""
     preview = preview_of(tasks_write.create_order_payment(DEMO, PAY_DAY, [ORDER]))
-    assert preview.payload == {"date": "2026-10-30", "orderIds": str(ORDER)}
+    assert preview.payload == {"date": "2026-10-24", "orderIds": str(ORDER)}
     route = respx_mock.post(f"{BASE}/order/payment/create.json").respond(200, json=SUCCESS)
     result = tasks_write.create_order_payment(DEMO, PAY_DAY, [ORDER], confirm=True)
     assert len(respx_mock.calls) == 1
@@ -1783,10 +1784,10 @@ async def test_status_and_payment_through_the_write_server(
         "performed": False,
         "payload": {"ids": str(ORDER), "statusId": str(OPEN)},
     }
-    paying = {"org": DEMO, "date": "2026-10-30", "order_ids": [ORDER], "type": "PAIN"}
+    paying = {"org": DEMO, "date": "2026-10-24", "order_ids": [ORDER], "type": "PAIN"}
     planned = await mcp_call(write_server, "cashctrl_create_order_payment", paying)
     assert planned["data"]["payload"] == {
-        "date": "2026-10-30",
+        "date": "2026-10-24",
         "orderIds": str(ORDER),
         "type": "PAIN",
     }
@@ -1826,12 +1827,12 @@ def test_the_status_and_payment_wrappers_build_upstreams_fields() -> None:
         "statusId": str(OPEN),
     }
     assert api.order_payment_create_fields(date=PAY_DAY, order_ids=[3]) == {
-        "date": "2026-10-30",
+        "date": "2026-10-24",
         "orderIds": "3",
     }
     assert api.order_payment_create_fields(
         date=PAY_DAY, order_ids=[3, 5], is_combine=True, amount=Decimal("12.5")
-    ) == {"date": "2026-10-30", "orderIds": "3,5", "amount": "12.5", "isCombine": "true"}
+    ) == {"date": "2026-10-24", "orderIds": "3,5", "amount": "12.5", "isCombine": "true"}
 
 
 # The confirm gate --------------------------------------------------------------------

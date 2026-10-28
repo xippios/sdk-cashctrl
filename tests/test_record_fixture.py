@@ -487,7 +487,7 @@ def test_a_create_without_the_marker_is_refused(
 ORDER_READ = f"https://{REAL}.cashctrl.com/api/v1/order/read.json"
 ORDER_WRITE_CASES = [
     ("order/update_status.json", "ids", ["statusId=16"]),
-    ("order/payment/create.json", "orderIds", ["date=2026-10-30", "type=PAIN"]),
+    ("order/payment/create.json", "orderIds", ["date=2026-10-24", "type=PAIN"]),
 ]
 """Each order write, the field naming its orders, and the rest of its pairs."""
 
