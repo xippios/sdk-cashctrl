@@ -40,8 +40,8 @@ list, the journal of 2025 as CSV, five entries, and the persons as CSV with the 
 exports stand for the four, which share one download path (G5 (7) of 2026-10-28):
 ``export_accounts`` and ``export_orders`` have no live test of their own. One more asks
 for the document of an order that does not exist and expects ``NotFoundError`` and no
-file: CashCtrl's refusal sent as HTTP 200 with JSON, which core would write as the file
-(queue row 142).
+file: CashCtrl answers it with HTTP 404 (observed on 2026-10-29), which ``classify``
+maps to ``NotFoundError`` on a ``read.pdf`` by ``ids`` (queue row 235).
 
 The calls of one run: 31 for the reads (17, 9 for the discovery lists and the reports:
 one each, and the tree ``get_report_data`` reads first, 3 for the book entries of an
@@ -292,8 +292,8 @@ async def test_export_persons_with_the_default_columns(demo_org: str, tmp_path: 
 
 
 async def test_the_document_of_an_unknown_order_is_not_found(demo_org: str, tmp_path: Path) -> None:
-    # Upstream refuses with HTTP 200 and JSON (queue row 142); anything else fails here:
-    # a file written, another error, or no error.
+    # Upstream answers HTTP 404, NotFoundError for a read.pdf by ids (queue row 235);
+    # anything else fails here: a file written, another error, or no error.
     dest = tmp_path / "missing.pdf"
     with pytest.raises(NotFoundError) as info:
         await tasks.download_order_document_async(demo_org, [999999], dest)

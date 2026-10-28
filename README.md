@@ -253,8 +253,9 @@ only: no MCP tool and no HTTP route serves them, since no tool hands an agent a 
 path (`BULK_TASKS`, ADR-0019). Each streams the file to `dest`, the path the caller
 gives; nothing is read into the result, kept in memory or cached, and `data` describes
 the file (`path`, `bytes`, `content_type`, `filename`, `retrieved_at`). A refusal
-CashCtrl sends as HTTP 200 raises (`RequestRejected`; `NotFoundError` for an unknown
-order id) and writes nothing, and a file already at `dest` stays as it was.
+raises and writes nothing, and a file already at `dest` stays as it was:
+`RequestRejected` for one CashCtrl sends as HTTP 200, `NotFoundError` for an unknown
+order id, which CashCtrl answers with HTTP 404.
 
 - **Cut at 100.** Upstream exports at most `limit` records, 100 when `limit` is left
   out (the account export, like its list, takes no `limit`): read the list task's

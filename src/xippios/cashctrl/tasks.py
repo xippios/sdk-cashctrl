@@ -1559,9 +1559,9 @@ async def download_order_document_async(
     read into a result, kept in memory or cached; no MCP tool or HTTP route serves it
     (``BULK_TASKS``), so where it goes is the caller's choice. ``data`` describes it:
     ``path``, ``bytes``, ``content_type``, ``filename`` and ``retrieved_at``. An id no
-    order has raises ``NotFoundError`` (assumed, as for ``get_order``) and another
-    refusal ``RequestRejected``; either way nothing is written, and a file already at
-    ``dest`` stays as it was.
+    order has raises ``NotFoundError`` (upstream answers it with HTTP 404, observed on
+    2026-10-29) and a refusal ``RequestRejected``; either way nothing is written, and a
+    file already at ``dest`` stays as it was.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.

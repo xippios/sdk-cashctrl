@@ -431,9 +431,9 @@ function that returns a subset of an upstream record builds its model with
 Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
-for an unknown id on a `read.json` by `id` or a `read.pdf` by `ids`; a 404 means an
-unknown endpoint and raises `UpstreamError`. Observed shapes say so, with the date, in
-its docstring.
+for an unknown id on a `read.json` by `id`; a 404 is an unknown endpoint
+(`UpstreamError`), on a `read.pdf` by `ids` an unknown id (`NotFoundError`, observed
+2026-10-29). Observed shapes say so, with the date, in its docstring.
 
 Files (G5 (5) to (7) of 2026-10-28): the wrappers `<module>_list_csv|xlsx|pdf` and
 `order_document_read_pdf` (D95) call `api/_download.py`'s `download`, which streams
