@@ -118,9 +118,7 @@ Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 is deliberately not 
    a long-window quota, and CashCtrl documents none, nor a window for
    `x-cashctrl-requests-left`; its 429 asks only for delays, a pace refusal. With no
    window to give it, a policy would take its default of an hour and turn one 429
-   without `Retry-After` into an hour of refusals once a call's retries are spent. A
-   429 stays `RateLimitError`, with `Retry-After` when upstream sends it, and the
-   self-imposed pace stands.
+   without `Retry-After` into an hour of refusals once a call's retries are spent.
 5. **Pauses are stated** by core's adapters: `error: RateLimitError: ... (retry after N s)`
    over MCP, a 429 problem with `retry_after` and `Retry-After` over HTTP.
 
@@ -138,10 +136,11 @@ src/xippios/cashctrl/
   errors.py        RequestRejected (HTTP 200 with success:false) and FieldError
   models.py        pydantic models mirroring upstream payloads (UpstreamModel), and the
                    projections tasks return without ssn and iban (ADR-0017)
-  api/             endpoint wrappers, one module per upstream operation; _form.py encodes and posts writes
-  tasks.py         task functions and list_organisations; __all__ is what the adapters register,
-                   MCP_CAPS the per-tool result caps (list_custom_fields, list_cost_centers,
-                   get_report_data, list_history)
+  api/             endpoint wrappers, one module per upstream operation; _form.py encodes and posts writes,
+                   _download.py streams files
+  tasks.py         task functions and list_organisations; __all__ is what the adapters register but
+                   BULK_TASKS, the file tasks (Python only); MCP_CAPS the per-tool result caps
+                   (list_custom_fields, list_cost_centers, get_report_data, list_history)
   tasks_write.py   confirm-gated write tasks for the separate write server (Write tools below)
   mcp_write.py     xippios-cashctrl-mcp-write entry point
   mcp.py           xippios-cashctrl-mcp entry point
@@ -159,6 +158,7 @@ tests/
                    the adapters serving exactly the tasks, task shapes and docstrings, the
                    README status table, the template tag, the core bound
   test_tasks.py    structural checks on every task plus per-task replay tests
+  test_downloads.py  the file tasks on synthetic bytes mounted by respx; a refusal leaves no file
   test_tasks_write.py  the write tasks: previews send nothing, writes replay, updates fail
                    closed; the write server's own test (assert_write_tools)
   test_registry.py organisation declaration, lookup and per-organisation clients
@@ -320,16 +320,20 @@ replay-tested with a real value.
   refreshes it; an element the kept tree lacks reads it once more, one still missing is
   asked of upstream. Other reports come back as sent, every key named `ssn`, `iban` or
   `qrIban` dropped at any depth, in any case (`_report`; ADR-0003, amendment 2026-10-26).
-- A task that fetches them deliberately may return them and says so in its docstring;
-  none does.
+- A task that fetches them deliberately may return them and says so in its docstring.
+  Two files may carry them, at the caller's path, never in a result or a tool
+  (`BULK_TASKS`; Johannes, 2026-10-28): `export_persons` names `PERSON_COLUMNS`,
+  `PersonProjection`'s fields, unless its caller names columns, `ssn` or `iban` among
+  them deliberately; `download_order_document`'s PDF may carry the organisation's IBAN
+  or QR-IBAN and the recipient's address on its QR-bill, disclosed, not stripped.
 
 ## CashCtrl specifics
 
 What `.claude/family.md` says holds here as well. The subsections below, named after its
-sections, hold the lines of cashctrl's own that this file's family sections carried
-before the split: where the family text and this section differ (`org` first and
-`client_for(org)` where it names `_client.client`, the demo-only recorder where it names
-`record_sync`, the live command, the updates), this section is cashctrl's form.
+sections, hold cashctrl's own lines: where the family text and this section differ
+(`org` first and `client_for(org)` where it names `_client.client`, the demo-only
+recorder where it names `record_sync`, the live command, the updates), this section is
+cashctrl's form.
 
 ### Workflow rules
 
@@ -402,24 +406,21 @@ request. `meta.total` is upstream's `total` on every list task, never `len(data)
 
 Lookups (accounts, currencies, tax codes, fiscal periods, account and person categories,
 titles, cost centers, locations, custom fields) are tasks too, named `list_<thing>`, so
-agents can form valid calls; they serve the organisation's own data
-live and are never packaged: a multi-tenant source packages no tenant data. Nor does the
-package ship a value set `docs/upstream/` fixes, since no task needs one yet, so the
-reference-data scaffolding (`params.py`, `enums.py`, `reference/`,
-`scripts/refresh_reference.py`) is gone until a documented value set is needed; then it
-comes back from the `render_enums` port deleted here, not from template v0.2.2's
-scaffold, whose script needs renderers core 0.3.0 removed (`/refresh-reference-data` says
-where). A lookup whose whole list an agent needs and the default result cap (200 rows or
-64 KB) would cut gets a cap of its own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes
-through (ADR-0016): `list_custom_fields` (500 rows or 128 KB; no filter but `type`, and
-a write needs a type's custom fields whole) and `get_report_data` (128 KB; a report is
-read whole, and its result, no list, is cut to a note and a preview);
-`list_cost_centers` and `list_history` keep the default bound with a note naming their
-filters (the history's note also names `limit`, and core's cut ends with where to
-resume). Every other list takes filters or pages, or is short. Where the documentation gives no schema and
-the shape differs by kind, as the rows of `report/element/data.json` differ by report
-type, the task returns upstream's JSON as sent (`JsonValue`, camelCase keys included)
-and says so in its docstring (decided by Johannes on 2026-10-27); `AS_SENT` in
+agents can form valid calls; they serve the organisation's own data live and are never
+packaged: a multi-tenant source packages no tenant data, nor a value set
+`docs/upstream/` fixes (the reference-data scaffolding is gone, Workflow rules;
+`/refresh-reference-data` says from where it comes back). A lookup whose whole list an
+agent needs and the default result cap (200 rows or 64 KB) would cut gets a cap of its
+own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (ADR-0016):
+`list_custom_fields` (500 rows or 128 KB; no filter but `type`, and a write needs a
+type's custom fields whole) and `get_report_data` (128 KB; a report is read whole, and
+its result, no list, is cut to a note and a preview); `list_cost_centers` and
+`list_history` keep the default bound with a note naming their filters (the history's
+note also names `limit`, and core's cut ends with where to resume). Every other list
+takes filters or pages, or is short. Where the documentation gives no schema and the
+shape differs by kind, as the rows of `report/element/data.json` differ by report type,
+the task returns upstream's JSON as sent (`JsonValue`, camelCase keys included) and says
+so in its docstring (decided by Johannes on 2026-10-27); `AS_SENT` in
 `tests/test_tasks.py` names those fields for the snake_case check. A task-shaped
 function that returns a subset of an upstream record builds its model with
 `UpstreamModel.project`; nothing is renamed or computed, parsing a value
@@ -428,8 +429,19 @@ function that returns a subset of an upstream record builds its model with
 Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
-for an unknown id on a `read.json` read by id; a 404 means an unknown endpoint and
-raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
+for an unknown id on a `read.json` by `id` or a `read.pdf` by `ids`; a 404 means an
+unknown endpoint and raises `UpstreamError`. Observed shapes say so, with the date, in
+its docstring.
+
+Files (G5 (5) to (7) of 2026-10-28): the wrappers `<module>_list_csv|xlsx|pdf` and
+`order_document_read_pdf` (D95) call `api/_download.py`'s `download`, which streams
+through core's `download` into a temporary file beside `dest` and renames it there: a
+file lands where the caller says, and nothing is read into a result, held in memory or
+cached. Core writes a 2xx body unread (row 142), so `download` reads `Content-Type`
+first: JSON is a refusal sent as HTTP 200, whose head goes through `classify`; the file
+is removed and `dest` left as it was. The recorder never records a binary body or a
+file endpoint, so a file wrapper has no fixture directory: `tests/test_downloads.py`
+mounts synthetic bytes, and `test_live.py` downloads one order document and one export.
 
 ### How to record a fixture
 
@@ -442,8 +454,8 @@ request on a retry), and builds the fixture in memory with core's
 allow_binary=False)` (conventions §10):
 credentials scrubbed and the key and its token made `REDACTED` where they appear as
 given. Core's verify searches plain values only: it refuses the exchange when the key
-or its token is still there as given, and when a body is not UTF-8 text (exports are out
-of scope). Everything else is the recorder's own step, `TenantScrub`, on the `Fixture`
+or its token is still there as given, and when a body is not UTF-8 text (the recorder
+records no file). Everything else is the recorder's own step, `TenantScrub`, on the `Fixture`
 core returns, before the one write (ADR-0024, decision 4; copied from core's former
 `Scrub(host=..., rewrite=...)`): the demo host, in any case, IDNA or percent-encoded,
 becomes `demo.cashctrl.com` in the URL, the headers and both bodies; the key and its
@@ -528,10 +540,8 @@ for testing (the demo organisation, ADR-0024) and cleans up after itself. Only i
 secrets `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`: the template renders the
 scaffold's `CASHCTRL_API_KEY`, which nothing reads, so the workflow names the pair by
 hand, and both org secrets must give sdk-cashctrl access for the nightly run to pass.
-`--tb=short` is the template's own from v0.3.0, no longer an addition by hand, and every
-live run here uses it: pytest's long traceback prints each frame's arguments, so a failed
-parse would print the upstream payload it was given, API user tags included, into the
-public Actions log.
+Every live run here takes `--tb=short`, for the reason `.claude/family.md` gives
+(Commands): a failed parse would print an upstream payload into the public log.
 
 ### Never
 
