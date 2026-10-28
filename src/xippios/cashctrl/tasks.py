@@ -1638,15 +1638,15 @@ async def export_journal_entries_async(
         columns: The columns of the file, field names of ``journal/list.json`` as upstream
             spells them, e.g. ``["dateAdded", "title", "amount"]``; upstream's own when
             left out.
-        only_collective: ``true`` for collective entries only.
-        only_cost_centers: ``true`` for entries with cost centers only.
-        only_imported: ``true`` for imported entries only.
-        only_manual: ``true`` for manual entries only.
-        only_notes: ``true`` for entries with notes only.
-        only_purchase: ``true`` for entries booked by purchase orders only.
-        only_salary: ``true`` for salary entries only.
-        only_sales: ``true`` for entries booked by sales orders only.
-        only_untaxed: ``true`` for untaxed entries only.
+        only_collective: ``True`` for collective entries only.
+        only_cost_centers: ``True`` for entries with cost centers only.
+        only_imported: ``True`` for imported entries only.
+        only_manual: ``True`` for manual entries only.
+        only_notes: ``True`` for entries with notes only.
+        only_purchase: ``True`` for entries booked by purchase orders only.
+        only_salary: ``True`` for salary entries only.
+        only_sales: ``True`` for entries booked by sales orders only.
+        only_untaxed: ``True`` for untaxed entries only.
         sort: The column to sort by, e.g. ``dateAdded`` (upstream's default).
         dir: ``DESC`` (upstream's default) or ``ASC``.
         start: The offset of the first entry, e.g. ``100``; upstream's default is 0.
@@ -1731,9 +1731,9 @@ async def export_accounts_async(
         category_id: Only the accounts of one account category, e.g. ``1``.
         fiscal_period_id: The fiscal period whose balances the file shows, an ``id``
             from ``list_fiscal_periods``, e.g. ``2``; the current one when left out.
-        only_active: ``true`` to leave out inactive accounts.
-        only_cost_centers: ``true`` to export only accounts with cost centers.
-        only_notes: ``true`` to export only accounts with notes.
+        only_active: ``True`` to leave out inactive accounts.
+        only_cost_centers: ``True`` to export only accounts with cost centers.
+        only_notes: ``True`` to export only accounts with notes.
         sort: The column to sort by, e.g. ``number`` (upstream's default) or ``name``.
         dir: ``ASC`` (upstream's default) or ``DESC``.
     """
@@ -1817,16 +1817,16 @@ async def export_persons_async(
             spells them, e.g. ``["nr", "name", "city"]``; the fields of ``list_persons``
             when left out, without ``ssn`` and ``iban``.
         category_id: Only the persons of one person category, e.g. ``1``.
-        only_active: ``true`` to leave out inactive persons.
-        only_customers: ``true`` for customers only.
-        only_vendors: ``true`` for vendors only.
-        only_employees: ``true`` for employees only.
-        only_insurances: ``true`` for insurances only.
-        only_families: ``true`` for families only.
-        only_notes: ``true`` for persons with notes only.
-        only_with_images: ``true`` for persons with images only.
-        only_without_category: ``true`` for persons without a category only.
-        only_without_role: ``true`` for persons without a role only.
+        only_active: ``True`` to leave out inactive persons.
+        only_customers: ``True`` for customers only.
+        only_vendors: ``True`` for vendors only.
+        only_employees: ``True`` for employees only.
+        only_insurances: ``True`` for insurances only.
+        only_families: ``True`` for families only.
+        only_notes: ``True`` for persons with notes only.
+        only_with_images: ``True`` for persons with images only.
+        only_without_category: ``True`` for persons without a category only.
+        only_without_role: ``True`` for persons without a role only.
         sort: The column to sort by, e.g. ``name`` (upstream's default) or ``nr``.
         dir: ``ASC`` (upstream's default) or ``DESC``.
         start: The offset of the first person, e.g. ``100``; upstream's default is 0.
@@ -1926,10 +1926,10 @@ async def export_orders_async(
         person_id: Only the orders of one person, an ``id`` from ``list_persons``,
             e.g. ``10``.
         group_id: Only the orders of one order group (dossier), e.g. ``3``.
-        only_open: ``true`` for open orders only (a status like Open, not Paid).
-        only_overdue: ``true`` for orders past their due date only.
-        only_cost_centers: ``true`` for orders with cost centers only.
-        only_notes: ``true`` for orders with notes only.
+        only_open: ``True`` for open orders only (a status like Open, not Paid).
+        only_overdue: ``True`` for orders past their due date only.
+        only_cost_centers: ``True`` for orders with cost centers only.
+        only_notes: ``True`` for orders with notes only.
         sort: The column to sort by, e.g. ``date`` (upstream's default) or ``nr``.
         dir: ``DESC`` (upstream's default) or ``ASC``.
         start: The offset of the first order, e.g. ``100``; upstream's default is 0.

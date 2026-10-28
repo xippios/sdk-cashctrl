@@ -33,15 +33,16 @@ creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10
 That refusal is checked live once, read-only: a delete without ``confirm`` of an entry a
 seeded purchase order booked, found with GET calls, is refused before any preview.
 
-The file tasks tested live write into pytest's temporary directory and assert the
-file's size and content type only: one seeded sales order's document, its id from the
-list, the journal of 2025 as CSV, five entries, and the persons as CSV with the columns
-``export_persons`` names by default, which upstream must accept (queue row 235). The two
-exports stand for the four, which share one download path (G5 (7) of 2026-10-28):
-``export_accounts`` and ``export_orders`` have no live test of their own. One more asks
-for the document of an order that does not exist and expects ``NotFoundError`` and no
-file: CashCtrl answers it with HTTP 404 (observed on 2026-10-29), which ``classify``
-maps to ``NotFoundError`` on a ``read.pdf`` by ``ids`` (queue row 235).
+The file tasks tested live write into pytest's temporary directory and assert the file's
+size and content type only: one seeded sales order's document, its id from the list, the
+journal of 2025 as CSV, at most five entries (``limit=5``), and the persons as CSV with
+the columns ``export_persons`` names by default, which upstream must accept (queue row
+235). The two exports stand for the four, which share one download path (G5 (7) of
+2026-10-28): ``export_accounts`` and ``export_orders`` have no live test of their own.
+One more asks for the document of an order that does not exist and expects
+``NotFoundError`` and no file: CashCtrl answers it with HTTP 404 (observed on
+2026-10-29), which ``classify`` maps to ``NotFoundError`` on a ``read.pdf`` by ``ids``
+(queue row 235).
 
 The calls of one run: 31 for the reads (17, 9 for the discovery lists and the reports:
 one each, and the tree ``get_report_data`` reads first, 3 for the book entries of an
