@@ -88,6 +88,7 @@ __all__ = [
     "CustomField",
     "CustomFieldType",
     "Direction",
+    "ExportFormat",
     "Filter",
     "FiscalPeriod",
     "HistoryEntry",
@@ -175,6 +176,11 @@ Comparison = Literal["eq", "like", "gt", "lt"]
 
 Direction = Literal["ASC", "DESC"]
 """The values of ``dir`` on every list that documents it: "Possible values: ASC, DESC"."""
+
+ExportFormat = Literal["csv", "xlsx", "pdf"]
+"""The file a list export writes, the extension of its path: ``list.csv``, ``list.xlsx``,
+``list.pdf`` ("Export to CSV", "Export to Excel", "Export to PDF" of the journal, account,
+person and order lists)."""
 
 
 class ListResponse[T](UpstreamModel):
