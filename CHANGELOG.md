@@ -79,8 +79,9 @@ All notable changes to this project are documented here. The format follows
   module was part of the public API (`__init__.py`). The fixture recorder, the upstream
   refresh and the seeder stay. `/refresh-reference-data` does not apply until a
   documented value set is needed; then the scaffold comes back from the `render_enums`
-  port deleted here (`git show a963cbd:scripts/refresh_reference.py`), not from template
-  v0.2.2's, whose script needs renderers core 0.3.0 removed.
+  port deleted here (`git show dfb65ce:scripts/refresh_reference.py`, dfb65ce on main,
+  the merge of #13), not from template v0.2.2's, whose script needs renderers core 0.3.0
+  removed.
 
 ## [0.1.0] - 2026-10-26
 
