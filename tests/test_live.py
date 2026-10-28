@@ -46,15 +46,16 @@ The first run, on 2026-10-29, recorded ``refusal (HTTP 400, text/plain)``: no fi
 served for the payment of a deleted order; whether upstream keeps the payment itself
 cannot be seen, as the API has no payment read or list.
 
-The file tasks tested live write into pytest's temporary directory and assert the
-file's size and content type only: one seeded sales order's document, its id from the
-list, the journal of 2025 as CSV, five entries, and the persons as CSV with the columns
-``export_persons`` names by default, which upstream must accept (queue row 235). The two
-exports stand for the four, which share one download path (G5 (7) of 2026-10-28):
-``export_accounts`` and ``export_orders`` have no live test of their own. One more asks
-for the document of an order that does not exist and expects ``NotFoundError`` and no
-file: CashCtrl answers it with HTTP 404 (observed on 2026-10-29), which ``classify``
-maps to ``NotFoundError`` on a ``read.pdf`` by ``ids`` (queue row 235).
+The file tasks tested live write into pytest's temporary directory and assert the file's
+size and content type only: one seeded sales order's document, its id from the list, the
+journal of 2025 as CSV, at most five entries (``limit=5``), and the persons as CSV with
+the columns ``export_persons`` names by default, which upstream must accept (queue row
+235). The two exports stand for the four, which share one download path (G5 (7) of
+2026-10-28): ``export_accounts`` and ``export_orders`` have no live test of their own.
+One more asks for the document of an order that does not exist and expects
+``NotFoundError`` and no file: CashCtrl answers it with HTTP 404 (observed on
+2026-10-29), which ``classify`` maps to ``NotFoundError`` on a ``read.pdf`` by ``ids``
+(queue row 235).
 
 The calls of one run: 31 for the reads (17, 9 for the discovery lists and the reports:
 one each, and the tree ``get_report_data`` reads first, 3 for the book entries of an

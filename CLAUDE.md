@@ -297,7 +297,7 @@ value under `iban` in a body to `REDACTED`, so a projection that kept one could 
 replay-tested with a real value.
 
 - The endpoint wrappers' read models stay faithful and carry them (`Person`,
-  `PersonDetail`, `JournalEntryDetail.associates`, `Location`; ADR-0003).
+  `PersonDetail`, `JournalEntryDetail.associates`, `Location`, `OrderDocument`; ADR-0003).
 - The tasks return projections without them, built with `UpstreamModel.project` in
   `tasks.py`: `PersonProjection` (`list_persons`), `PersonDetailProjection`
   (`get_person`; each bank account kept without its `iban`, which the projection's own
