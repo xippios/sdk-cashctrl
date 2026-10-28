@@ -51,7 +51,8 @@ register. `tests/test_seed_demo.py` checks the rule against the data and this do
    currencies, tax codes, person and order categories, persons, the journal and orders,
    and may create currencies, fiscal periods, persons, journal entries and orders. After
    seeding, the role may be reduced to read-only; the write tools' live tests and write
-   fixtures need it to create, update and delete persons, journal entries and orders.
+   fixtures need it to create, update and delete persons, journal entries and orders,
+   and to set an order's status and create an order's payment.
 5. Put the two variables into `~/github/sdk/.envrc` and run `direnv allow`:
    `CASHCTRL_DEMO_SUBDOMAIN` (the one label before `.cashctrl.com`) and
    `CASHCTRL_DEMO_API_KEY`. The subdomain is treated like the key: never in a file of
@@ -469,6 +470,18 @@ The write tools' live tests and write fixtures create records marked `xippios-li
 (title, company or description, and `nr`), dated 2026-10-24, and delete them again in
 the same run; each live test first deletes marked leftovers of an earlier run. No seeded
 record is changed.
+
+One live test, `test_order_status_payment_delete`, creates a marked purchase order of a
+seeded vendor in the purchase invoice category (in its first status, which books, as the
+seeded purchase orders do), sets it to another status of the category, creates its
+payment (`order/payment/create.json`, `PAIN`, every open amount) and deletes the order;
+it then checks that no journal entry of the order is left. Upstream documents no
+payment delete, so every run may leave the payment of a deleted order behind: no book
+entry, no amount moved, the order gone, accepted as residue (Johannes, 2026-10-28). The
+test probes `order/payment/download` once after the delete, with the payment's
+parameters, and records whether upstream still serves the payment's file or refuses
+it (the junit property `payment_download`). Not observed yet: the first live run of the
+test records the answer here.
 
 ## Observed write semantics (filled by the first run)
 

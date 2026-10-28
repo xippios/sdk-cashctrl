@@ -26,14 +26,19 @@ recorded. If the demo pair ever points at an organisation that is not that synth
 one, stop: never record from it. These policies stand all the same, and each refusal
 writes nothing and exits non-zero:
 
-- **GET, and POST for the nine write paths only.** `--method POST` is accepted for
+- **GET, and POST for the eleven write paths only.** `--method POST` is accepted for
   exactly the operations the write tools call: `journal/create.json`,
   `journal/update.json`, `journal/delete.json`, `person/create.json`,
   `person/update.json`, `person/delete.json`, `order/create.json`,
-  `order/update.json`, `order/delete.json`. Every other POST (`update_status.json`,
+  `order/update.json`, `order/delete.json`, `order/update_status.json`,
+  `order/payment/create.json`. Every other POST (`order/continue.json`,
   `order/bookentry/create.json`, ...) and every other method is refused before a
   request is sent, and so is a `create.json` none of whose pairs carries
-  `xippios-live`. A POST sends the `key=value` pairs
+  `xippios-live`. `order/update_status.json` and `order/payment/create.json` carry no
+  text to mark: the recorder first reads every order their `ids` or `orderIds` name
+  (`order/read.json`, one GET each) and refuses the write unless each is marked
+  (`xippios-live` in its description, or as its `nr`); an order it cannot read refuses
+  it too. A POST sends the `key=value` pairs
   as the form body, in their order, as the write tools send theirs
   (`application/x-www-form-urlencoded; charset=UTF-8`). A recorded write changes the
   demo organisation: the recorder says so, names the `insertId` upstream answered, and
@@ -78,7 +83,7 @@ writes nothing and exits non-zero:
    `src/xippios/cashctrl/api/`. Parameters are named as upstream names them
    (`fiscalPeriodId`).
    Recordings are `.json` endpoints: reads (`list.json`, `read.json`) and the write
-   tools' `create.json`, `update.json` and `delete.json`. Exports (PDF, Excel, ZIP) are
+   tools' `create.json`, `update.json`, `delete.json` and `update_status.json`. Exports (PDF, Excel, ZIP) are
    out of scope, and the recorder also refuses a body that is not UTF-8 text, because
    it can be neither scrubbed nor reviewed. For a write, compute the form fields
    offline through the task's preview (`confirm=False`, which sends nothing for a
