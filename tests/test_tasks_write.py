@@ -11,6 +11,11 @@ preview is what upstream receives.
 
 The negative update cases change a recorded read in memory (a field removed, a stored
 list filled in) and serve it with ``respx``; they are not fixtures, and they say so.
+
+``update_order_status`` and ``create_order_payment`` (G5 (8) of 2026-10-28) take their
+status ids from the recorded categories (``order_category_list/default``), never a
+guess; until their writes are recorded, a confirmed call is answered by ``respx`` with
+a synthetic ``success`` answer, which no fixture holds, and the test says so.
 """
 
 import inspect
@@ -54,6 +59,8 @@ from xippios.cashctrl.models import (
     JournalEntryDetail,
     JournalEntryDetailProjection,
     JournalItemInput,
+    ListResponse,
+    OrderCategory,
     OrderDetail,
     OrderItemInput,
     PersonAddressInput,
@@ -241,10 +248,12 @@ async def assert_write_tools(
 async def test_the_write_server_serves_write_tasks_only() -> None:
     """Conventions §8: a write server, its tools exactly the write tasks, confirm last.
 
-    So the organisation list, a reference tool, stays on the read server. Nine write
-    tasks: create, update and delete for journal entries, persons and orders.
+    So the organisation list, a reference tool, stays on the read server. Eleven write
+    tasks: create, update and delete for journal entries, persons and orders, an order's
+    status and an order's payment (G5 (8) of 2026-10-28).
     """
-    assert len(WRITE_TASKS) == 9
+    assert len(WRITE_TASKS) == 11
+    assert {"update_order_status", "create_order_payment"} <= WRITE_TASKS.keys()
     await assert_write_tools(
         write_server,
         list(WRITE_TASKS.values()),
@@ -1058,10 +1067,13 @@ def test_every_boolean_update_parameter_is_a_flag(task: Callable[..., Any]) -> N
 
 
 def test_every_update_task_has_a_table() -> None:
-    """The write tasks named ``update_*`` are exactly those with a table here."""
-    assert {name for name in tasks_write.__all__ if name.startswith("update_")} == set(
-        UPDATE_TABLES
-    )
+    """The write tasks named ``update_*`` are exactly those with a table here, but one.
+
+    ``update_order_status`` calls ``order/update_status.json``, no ``update.json``: it
+    sends the ids and the status it is given, no record to read and merge.
+    """
+    updates = {name for name in tasks_write.__all__ if name.startswith("update_")}
+    assert updates - {"update_order_status"} == set(UPDATE_TABLES)
 
 
 def test_the_update_takes_every_documented_parameter_but_the_unsent_from_the_record(
@@ -1613,6 +1625,215 @@ def test_delete_order_previews_the_order_then_deletes(
     assert result.data.message == "1 document deleted"
 
 
+# Order statuses and payments ----------------------------------------------------------
+
+
+def recorded_invoice_statuses() -> list[int]:
+    """The status ids of the default invoice category, in their order, as recorded.
+
+    From ``order_category_list/default`` (recorded on 2026-10-24): never a guessed id.
+    """
+    raw = load_fixture(_FIXTURES / "order_category_list" / "default.json").response.body
+    categories = ListResponse[OrderCategory].model_validate_json(raw or "")
+    (invoice,) = [
+        category
+        for category in categories.data
+        if "<en>Invoice</en>" in (category.name_singular or "") and not category.is_inactive
+    ]
+    return [status.id for status in invoice.status]
+
+
+DRAFT, OPEN = recorded_invoice_statuses()[:2]
+"""The first two statuses of the invoice category (Draft, then Open in the recording)."""
+SUCCESS = {"success": True, "message": "ok"}
+"""A synthetic success answer for a write not yet recorded; no fixture holds it."""
+PAY_DAY = date(2026, 10, 30)
+
+
+def test_update_order_status_previews_the_payload_without_a_request(
+    respx_mock: respx.MockRouter,
+) -> None:
+    result = tasks_write.update_order_status(DEMO, [ORDER, 21], OPEN)
+    assert not respx_mock.calls, "nothing is read and nothing is sent"
+    preview = preview_of(result)
+    assert preview.endpoint == "order/update_status.json"
+    assert list(preview.payload.items()) == [("ids", f"{ORDER},21"), ("statusId", str(OPEN))]
+    assert (preview.before, preview.changes) == (None, None)
+    assert (result.meta.endpoint, result.meta.tenant) == ("order/update_status.json", DEMO)
+    assert result.meta.request == {"org": DEMO}, "the payload is in data, never twice"
+
+
+def test_update_order_status_with_confirm_sends_the_previewed_payload(
+    respx_mock: respx.MockRouter,
+) -> None:
+    """Answered by respx with ``SUCCESS``: the write is not recorded yet."""
+    preview = preview_of(tasks_write.update_order_status(DEMO, [ORDER], OPEN))
+    route = respx_mock.post(f"{BASE}/order/update_status.json").respond(200, json=SUCCESS)
+    result = tasks_write.update_order_status(DEMO, [ORDER], OPEN, confirm=True)
+    assert route.call_count == 1
+    assert len(respx_mock.calls) == 1, "no read before the write"
+    sent = route.calls.last.request
+    assert sent.headers["Content-Type"] == FORM_CONTENT_TYPE
+    assert sent_body(route) == list(preview.payload.items())
+    assert isinstance(result.data, WriteResult)
+    assert (result.data.performed, result.data.message) == (True, "ok")
+    assert result.meta.request == {"org": DEMO, **preview.payload}
+
+
+def test_create_order_payment_previews_the_payload_without_a_request(
+    respx_mock: respx.MockRouter,
+) -> None:
+    result = tasks_write.create_order_payment(
+        DEMO,
+        PAY_DAY,
+        [ORDER, 21],
+        amount=Decimal("50.00"),
+        is_combine=False,
+        status_id=OPEN,
+        type="CASH_PDF",
+    )
+    assert not respx_mock.calls
+    preview = preview_of(result)
+    assert preview.endpoint == "order/payment/create.json"
+    assert list(preview.payload.items()) == [
+        ("date", "2026-10-30"),
+        ("orderIds", f"{ORDER},21"),
+        ("amount", "50.00"),
+        ("isCombine", "false"),
+        ("statusId", str(OPEN)),
+        ("type", "CASH_PDF"),
+    ], "the order of the parameter table"
+    assert (preview.before, preview.changes) == (None, None)
+    assert result.meta.request == {"org": DEMO}
+
+
+def test_create_order_payment_sends_upstreams_defaults_by_leaving_them_out(
+    respx_mock: respx.MockRouter,
+) -> None:
+    """Without ``amount`` and ``type`` upstream pays every open amount as ``PAIN``."""
+    preview = preview_of(tasks_write.create_order_payment(DEMO, PAY_DAY, [ORDER]))
+    assert preview.payload == {"date": "2026-10-30", "orderIds": str(ORDER)}
+    route = respx_mock.post(f"{BASE}/order/payment/create.json").respond(200, json=SUCCESS)
+    result = tasks_write.create_order_payment(DEMO, PAY_DAY, [ORDER], confirm=True)
+    assert len(respx_mock.calls) == 1
+    assert sent_body(route) == list(preview.payload.items())
+    assert route.calls.last.request.headers["Content-Type"] == FORM_CONTENT_TYPE
+    assert isinstance(result.data, WriteResult)
+    assert result.meta.endpoint == "order/payment/create.json"
+    assert result.meta.request == {"org": DEMO, **preview.payload}
+
+
+@pytest.mark.parametrize(
+    ("call", "message"),
+    [
+        (lambda: tasks_write.update_order_status(DEMO, [], OPEN), "ids takes a list of at least"),
+        (
+            lambda: tasks_write.update_order_status(DEMO, ORDER, OPEN),  # type: ignore[arg-type]
+            "ids takes a list of at least one order id, e.g. [20], not 20",
+        ),
+        (
+            lambda: tasks_write.update_order_status(DEMO, "20,21", OPEN),  # type: ignore[arg-type]
+            "ids takes a list",
+        ),
+        (
+            lambda: tasks_write.update_order_status(DEMO, [ORDER, 0, True], OPEN),
+            "ids: an id is a whole number of at least 1, not 0, True",
+        ),
+        (
+            lambda: tasks_write.update_order_status(DEMO, [ORDER], 0),
+            "status_id must be a status id from list_order_categories",
+        ),
+        (
+            lambda: tasks_write.update_order_status(DEMO, [ORDER], None),  # type: ignore[arg-type]
+            "status_id must be a status id",
+        ),
+        (
+            lambda: tasks_write.create_order_payment(DEMO, PAY_DAY, []),
+            "order_ids takes a list of at least one order id",
+        ),
+        (
+            lambda: tasks_write.create_order_payment(DEMO, PAY_DAY, [ORDER], status_id=-1),
+            "status_id must be a status id",
+        ),
+        (
+            lambda: tasks_write.create_order_payment(DEMO, PAY_DAY, [ORDER], type="SWIFT"),  # type: ignore[arg-type]
+            "type must be one of PAIN, SEPA_PAIN, WIRE_PDF, CASH_PDF, not 'SWIFT'",
+        ),
+    ],
+)
+def test_status_and_payment_arguments_are_refused_before_any_request(
+    respx_mock: respx.MockRouter, call: Callable[[], Any], message: str
+) -> None:
+    with pytest.raises(InvalidRequestError, match=re.escape(message)):
+        call()
+    assert not respx_mock.calls
+
+
+@pytest.mark.anyio
+async def test_status_and_payment_through_the_write_server(
+    respx_mock: respx.MockRouter,
+) -> None:
+    """The tools preview without a request and write with ``confirm``; the answers are
+    ``SUCCESS``, synthetic, as the writes are not recorded yet."""
+    status = respx_mock.post(f"{BASE}/order/update_status.json").respond(200, json=SUCCESS)
+    payment = respx_mock.post(f"{BASE}/order/payment/create.json").respond(200, json=SUCCESS)
+    arguments = {"org": DEMO, "ids": [ORDER], "status_id": OPEN}
+    preview = await mcp_call(write_server, "cashctrl_update_order_status", arguments)
+    assert preview["data"] == preview["data"] | {
+        "performed": False,
+        "payload": {"ids": str(ORDER), "statusId": str(OPEN)},
+    }
+    paying = {"org": DEMO, "date": "2026-10-30", "order_ids": [ORDER], "type": "PAIN"}
+    planned = await mcp_call(write_server, "cashctrl_create_order_payment", paying)
+    assert planned["data"]["payload"] == {
+        "date": "2026-10-30",
+        "orderIds": str(ORDER),
+        "type": "PAIN",
+    }
+    assert not respx_mock.calls
+    done = await mcp_call(
+        write_server, "cashctrl_update_order_status", {**arguments, "confirm": True}
+    )
+    paid = await mcp_call(
+        write_server, "cashctrl_create_order_payment", {**paying, "confirm": True}
+    )
+    assert (done["data"]["performed"], paid["data"]["performed"]) == (True, True)
+    assert (status.call_count, payment.call_count) == (1, 1)
+    refused = await mcp_call_text(
+        write_server, "cashctrl_create_order_payment", {**paying, "type": "SWIFT"}
+    )
+    assert refused.startswith("error: InvalidRequestError: type: ")
+    assert payment.call_count == 1
+
+
+@pytest.mark.anyio
+async def test_the_payment_tool_lists_the_payment_types() -> None:
+    tools = {tool.name: tool for tool in await write_server.list_tools()}
+    schema = tools["cashctrl_create_order_payment"].input_schema
+    assert schema["required"] == ["org", "date", "order_ids"]
+    kinds = schema["properties"]["type"]["anyOf"][0]
+    assert kinds == {"enum": ["PAIN", "SEPA_PAIN", "WIRE_PDF", "CASH_PDF"], "type": "string"}
+    assert tools["cashctrl_update_order_status"].input_schema["required"] == [
+        "org",
+        "ids",
+        "status_id",
+    ]
+
+
+def test_the_status_and_payment_wrappers_build_upstreams_fields() -> None:
+    assert api.order_update_status_fields(ids=[3, 5], status_id=OPEN) == {
+        "ids": "3,5",
+        "statusId": str(OPEN),
+    }
+    assert api.order_payment_create_fields(date=PAY_DAY, order_ids=[3]) == {
+        "date": "2026-10-30",
+        "orderIds": "3",
+    }
+    assert api.order_payment_create_fields(
+        date=PAY_DAY, order_ids=[3, 5], is_combine=True, amount=Decimal("12.5")
+    ) == {"date": "2026-10-30", "orderIds": "3,5", "amount": "12.5", "isCombine": "true"}
+
+
 # The confirm gate --------------------------------------------------------------------
 
 NOT_TRUE: list[Any] = ["false", "no", 1, [0], "true", 1.0]
@@ -1648,6 +1869,17 @@ def test_an_order_update_writes_only_when_confirm_is_true(
     result = tasks_write.update_order(DEMO, ORDER, description="x", confirm=confirm)
     assert isinstance(result.data, WritePreview)
     assert (read.call_count, write.called) == (1, False), "the read only, never the write"
+
+
+@pytest.mark.parametrize("confirm", NOT_TRUE, ids=[repr(value) for value in NOT_TRUE])
+def test_a_status_or_a_payment_writes_only_when_confirm_is_true(
+    respx_mock: respx.MockRouter, confirm: Any
+) -> None:
+    status = tasks_write.update_order_status(DEMO, [ORDER], OPEN, confirm=confirm)
+    payment = tasks_write.create_order_payment(DEMO, PAY_DAY, [ORDER], confirm=confirm)
+    assert isinstance(status.data, WritePreview)
+    assert isinstance(payment.data, WritePreview)
+    assert not respx_mock.calls, "no request at all"
 
 
 @pytest.mark.parametrize("confirm", NOT_TRUE, ids=[repr(value) for value in NOT_TRUE])

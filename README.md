@@ -136,9 +136,10 @@ behind a gateway that authenticates.
 
 ## Write tools
 
-Nine tools create, change and delete journal entries, persons and orders. They are
-tasks in `xippios.cashctrl.tasks_write` (re-exported from `xippios.cashctrl`), served
-by the write server only: never by the read server, never as an HTTP route.
+Eleven tools create, change and delete journal entries, persons and orders, set the
+status of orders and create the payment of orders. They are tasks in
+`xippios.cashctrl.tasks_write` (re-exported from `xippios.cashctrl`), served by the
+write server only: never by the read server, never as an HTTP route.
 
 | Upstream operation | Task function | MCP tool |
 | --- | --- | --- |
@@ -151,6 +152,8 @@ by the write server only: never by the read server, never as an HTTP route.
 | `POST order/create.json` (Create order) | `create_order` | `cashctrl_create_order` |
 | `POST order/update.json` (Update order) | `update_order` | `cashctrl_update_order` |
 | `POST order/delete.json` (Delete orders) | `delete_order` | `cashctrl_delete_order` |
+| `POST order/update_status.json` (Update status) | `update_order_status` | `cashctrl_update_order_status` |
+| `POST order/payment/create.json` (Create payment) | `create_order_payment` | `cashctrl_create_order_payment` |
 
 - **The confirm gate.** Every write tool takes `confirm`, last, `false` by default.
   Without it nothing is written: the result is a preview, `performed: false`, with
@@ -158,10 +161,10 @@ by the write server only: never by the read server, never as an HTTP route.
   names: booleans `true`/`false`, dates `YYYY-MM-DD`, lists as JSON, custom fields as
   XML; `ssn` and an `iban` as `REDACTED`, as in `meta.request` after a write), `before`
   (for an update or a delete, the record as it is now, as the read tools show it) and
-  `changes` (for an update). A create's preview sends no request; an update's or a
-  delete's sends one read and never a write. With `confirm=true` the write is sent and
-  the result is `performed: true` with `insert_id` (the new record's id; an update
-  answers the record's own) and upstream's `message`. Call once without `confirm`, show
+  `changes` (for an update). A create's preview sends no request, nor does a status's
+  or a payment's; an update's or a delete's sends one read and never a write. With
+  `confirm=true` the write is sent and the result is `performed: true` with `insert_id`
+  (the new record's id; an update answers the record's own) and upstream's `message`. Call once without `confirm`, show
   the preview, then confirm. Only `confirm=True` writes: from Python anything else
   (`"false"`, `1`) previews; over MCP the schema turns `"true"`, `"yes"`, `"1"`, `1`
   into true and `"false"`, `"no"`, `"0"`, `0` into false, and refuses anything else.
@@ -194,6 +197,15 @@ by the write server only: never by the read server, never as an HTTP route.
   booked; an unknown id is `NotFoundError` there. A person or an order that no longer
   exists, or an entry deleted between that read and the delete, is refused by upstream
   (`RequestRejected`).
+- **Statuses and payments.** `update_order_status` sets the status `status_id` on the
+  orders `ids` names; `create_order_payment` creates the payment of the orders
+  `order_ids` names, dated `date`, for `amount` per order or, without it, every open
+  amount. CashCtrl documents a payment as the payment order for e-banking, a pain.001
+  file (`type` `PAIN`, its default, or `SEPA_PAIN`) or a PDF (`WIRE_PDF`, `CASH_PDF`),
+  which its `order/payment/download` delivers afterwards (not wrapped here). Both send
+  what they are given, nothing read first. A payment creates no book entry, and
+  CashCtrl documents no way to read, list or delete one. A status id comes from the
+  `status` of the orders' category in `cashctrl_list_order_categories`.
 - **Custom fields**: `custom` maps upstream's names (`customField1`, `customField<ID>`,
   the ids from `cashctrl_list_custom_fields`) to text, sent as
   `<values><customField1>...</customField1></values>`, values escaped. An update keeps
@@ -327,6 +339,8 @@ subdomain): set the `httpx` logger to WARNING.
 | `POST journal/create.json`, `update.json`, `delete.json` | `create_journal_entry`, `update_journal_entry`, `delete_journal_entry` | `cashctrl_create_journal_entry`, ... | available on the write server only |
 | `POST person/create.json`, `update.json`, `delete.json` | `create_person`, `update_person`, `delete_person` | `cashctrl_create_person`, ... | available on the write server only |
 | `POST order/create.json`, `update.json`, `delete.json` | `create_order`, `update_order`, `delete_order` | `cashctrl_create_order`, ... | available on the write server only |
+| `POST order/update_status.json` (Update status) | `update_order_status` | `cashctrl_update_order_status` | available on the write server only |
+| `POST order/payment/create.json` (Create payment) | `create_order_payment` | `cashctrl_create_order_payment` | available on the write server only; no book entry, no delete documented |
 
 `lang` (`de`, `fr`, `it`, `en`), which upstream takes on every request and which matters
 mostly for error messages and exports, is not exposed yet. `list_accounts` checks `dir`

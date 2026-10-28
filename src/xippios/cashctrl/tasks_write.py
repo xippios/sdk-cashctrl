@@ -1,4 +1,4 @@
-"""Write tasks for CashCtrl: create, update and delete journal entries, persons and orders.
+"""Write tasks for CashCtrl: journal entries, persons and orders, order statuses and payments.
 
 Served only by ``xippios-cashctrl-mcp-write``, never by the read-only server and never
 on the HTTP router (conventions §8). List the sync names in ``__all__``.
@@ -34,6 +34,10 @@ into ``False``, and refuses anything else. The decisions taken for these tools o
 6. **Deletes** preview the record they would delete. A journal delete reads the entry,
    confirmed or not, and refuses one an order or a salary run booked (2026-10-24).
 7. Core's form bodies (``data=``) carry the fields (``api/_form.py``).
+8. **Order statuses and payments** (G5 (8) of 2026-10-28): ``update_order_status`` and
+   ``create_order_payment`` send the fields they are given, nothing read first, so a
+   preview sends no request. A payment creates no book entry, and upstream documents
+   no way to delete it.
 
 ``meta.endpoint`` is the write operation (``journal/create.json``) and ``meta.tenant``
 the organisation. ``meta.request`` is ``org`` plus the form fields as sent when the
@@ -75,6 +79,7 @@ from xippios.cashctrl.models import (
     NotifyType,
     OrderDetail,
     OrderItemInput,
+    PaymentType,
     PersonAddressInput,
     PersonContactInput,
     PersonDetail,
@@ -90,12 +95,14 @@ from xippios.cashctrl.tasks import _journal_entry_detail, _meta, _person_detail
 __all__ = [
     "create_journal_entry",
     "create_order",
+    "create_order_payment",
     "create_person",
     "delete_journal_entry",
     "delete_order",
     "delete_person",
     "update_journal_entry",
     "update_order",
+    "update_order_status",
     "update_person",
 ]
 
@@ -110,6 +117,7 @@ NOTIFY_TYPES: tuple[str, ...] = get_args(NotifyType)
 RECURRENCES: tuple[str, ...] = get_args(Recurrence)
 LANGUAGES: tuple[str, ...] = get_args(Language)
 COLORS: tuple[str, ...] = get_args(Color)
+PAYMENT_TYPES: tuple[str, ...] = get_args(PaymentType)
 
 
 IDENTIFIERS = frozenset({"ssn"})
@@ -226,6 +234,34 @@ def _inputs[M: BaseModel](
                 where = ".".join(str(part) for part in detail["loc"])
                 problems.append(f"{name}[{index}].{where}: {detail['msg']}")
     return parsed
+
+
+def _ids(name: str, values: object, problems: list[str]) -> list[int]:
+    """``values`` as a list of at least one order id; problems collected.
+
+    Every id is a whole number of at least 1, as ``_check_id`` takes one: a list of
+    them, not one id on its own nor a text such as ``"20,21"``, which the task joins.
+    """
+    if isinstance(values, str | bytes | Mapping) or not isinstance(values, Sequence) or not values:
+        problems.append(f"{name} takes a list of at least one order id, e.g. [20], not {values!r}")
+        return []
+    wrong = [value for value in values if not _whole(value) or value < 1]
+    if wrong:
+        listed = ", ".join(repr(value) for value in wrong)
+        problems.append(f"{name}: an id is a whole number of at least 1, not {listed}")
+        return []
+    return list(values)
+
+
+def _check_status(status_id: object, problems: list[str], *, required: bool) -> None:
+    """``status_id`` is a status's id from ``list_order_categories``, or ``None`` if allowed."""
+    if status_id is None and not required:
+        return
+    if not _whole(status_id) or status_id < 1:
+        problems.append(
+            f"status_id must be a status id from list_order_categories, a whole number of "
+            f"at least 1, not {status_id!r}"
+        )
 
 
 def _check_associate(associate_id: object, problems: list[str]) -> None:
@@ -1971,6 +2007,104 @@ async def delete_order_async(org: str, id: int, *, confirm: bool = False) -> Res
     return _performed(org, endpoint, fields, answer)
 
 
+async def update_order_status_async(
+    org: str, ids: list[int], status_id: int, *, confirm: bool = False
+) -> Result[OrderOutcome]:
+    """Set the status of one or more orders; without confirm=true it only previews the change.
+
+    Without ``confirm`` nothing is written and no request is sent: the preview
+    (``performed`` false) holds the ``payload`` CashCtrl would receive, ``ids``
+    comma-separated and ``statusId``, and shows no order (``before`` is empty; read one
+    with ``get_order``). ``confirm=true`` sends it (``order/update_status.json``) without
+    reading the orders first; the result is ``performed`` true with upstream's
+    ``message``. A status belongs to an order category: take ``status_id`` from the
+    ``status`` list of the orders' category in ``list_order_categories`` (``type``
+    ``SALES`` or ``PURCHASE``), never a guess, and the order ids from ``list_orders``.
+    That list says what a status does: ``is_book`` (the order books its journal entries
+    in it), ``is_closed`` (it completes the order) and ``action_id`` (what follows it).
+    Upstream checks the change and refuses it with its message.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        ids: The orders, their ``id`` from ``list_orders``, e.g. ``[20]`` or ``[20, 21]``;
+            not their numbers ``nr``.
+        status_id: The new status, an ``id`` from the ``status`` of the orders' category
+            in ``list_order_categories``, e.g. ``16``.
+        confirm: ``true`` sets the status; ``false`` (the default) only previews it.
+    """
+    problems: list[str] = []
+    orders = _ids("ids", ids, problems)
+    _check_status(status_id, problems, required=True)
+    _refuse(problems)
+    fields = api.order_update_status_fields(ids=orders, status_id=status_id)
+    endpoint = "order/update_status.json"
+    if confirm is not True:
+        return _preview(org, endpoint, fields)
+    answer = await api.order_update_status(org, fields)
+    return _performed(org, endpoint, fields, answer)
+
+
+async def create_order_payment_async(
+    org: str,
+    date: date,
+    order_ids: list[int],
+    *,
+    amount: Decimal | None = None,
+    is_combine: bool | None = None,
+    status_id: int | None = None,
+    type: PaymentType | None = None,
+    confirm: bool = False,
+) -> Result[OrderOutcome]:
+    """Create the payment order (pain.001 or PDF) of orders; without confirm=true a preview.
+
+    Without ``confirm`` nothing is written and no request is sent: the preview
+    (``performed`` false) holds the ``payload`` CashCtrl would receive. ``confirm=true``
+    creates the payment (``order/payment/create.json``); the result is ``performed`` true
+    with upstream's ``message``. Upstream documents a payment as the payment order for
+    e-banking, an ISO 20022 pain.001 file (``PAIN``, ``SEPA_PAIN``) or a PDF
+    (``WIRE_PDF``, ``CASH_PDF``), which is downloaded afterwards with the same parameters
+    through ``order/payment/download``, not wrapped by this package; created first, it
+    lets upstream match the payments of a camt.052/053/054 file later. It creates no book
+    entry (upstream: "for that see Book entries"), and upstream documents no way to read,
+    list or delete it. The order ids come from ``list_orders``, ``status_id`` from the
+    ``status`` of the orders' category in ``list_order_categories``. Upstream checks the
+    payment and refuses it naming the fields.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        date: The execution date of the payment, e.g. ``2026-10-30``.
+        order_ids: The orders to pay, their ``id`` from ``list_orders``, e.g. ``[21]``;
+            not their numbers ``nr``.
+        amount: A partial amount per order, e.g. ``100.00``; every open amount when left
+            out.
+        is_combine: ``true`` merges several payments to the same payee into one
+            transaction.
+        status_id: The status the orders get, an ``id`` from the ``status`` of their
+            category in ``list_order_categories``, e.g. ``51``; not sent when left out.
+        type: The payment and its file: ``PAIN`` (pain.001, upstream's default),
+            ``SEPA_PAIN``, ``WIRE_PDF`` or ``CASH_PDF``.
+        confirm: ``true`` creates the payment; ``false`` (the default) only previews it.
+    """
+    problems: list[str] = []
+    orders = _ids("order_ids", order_ids, problems)
+    _check_status(status_id, problems, required=False)
+    _choices(problems, type=(type, PAYMENT_TYPES))
+    _refuse(problems)
+    fields = api.order_payment_create_fields(
+        date=date,
+        order_ids=orders,
+        amount=amount,
+        is_combine=is_combine,
+        status_id=status_id,
+        type=type,
+    )
+    endpoint = "order/payment/create.json"
+    if confirm is not True:
+        return _preview(org, endpoint, fields)
+    answer = await api.order_payment_create(org, fields)
+    return _performed(org, endpoint, fields, answer)
+
+
 create_journal_entry = sync(create_journal_entry_async)
 update_journal_entry = sync(update_journal_entry_async)
 delete_journal_entry = sync(delete_journal_entry_async)
@@ -1980,3 +2114,5 @@ delete_person = sync(delete_person_async)
 create_order = sync(create_order_async)
 update_order = sync(update_order_async)
 delete_order = sync(delete_order_async)
+update_order_status = sync(update_order_status_async)
+create_order_payment = sync(create_order_payment_async)
