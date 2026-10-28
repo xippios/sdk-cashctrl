@@ -44,6 +44,8 @@ from xippios.cashctrl.models import (
     PersonProjection,
 )
 
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+"""The recorded fixtures, for what the module computes at import (``fixtures_dir`` in tests)."""
 TENANT_LIST = "list_organisations"
 """The package's tenant list (``_tenants.list_task``, ADR-0024): no ``org``, no async twin."""
 ORG_TASK_NAMES = [name for name in tasks.__all__ if name != TENANT_LIST]
@@ -1861,6 +1863,7 @@ def test_get_report_tree_replays_the_default_reports(
 def test_get_report_data_replays_the_balance_sheet_of_2025(
     replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
 ) -> None:
+    replay_fixture("report_tree", "default")
     route = replay_fixture("report_element_data", "balance_fp2025")
     result = tasks.get_report_data(DEMO, 1, fiscal_period=FP2025)
     sent = sent_query(route)
@@ -1896,12 +1899,15 @@ def test_get_report_data_replays_the_balance_sheet_of_2025(
 
 
 def test_get_report_data_drops_identifier_keys_at_any_depth(
-    respx_mock: respx.MockRouter, fixtures_dir: Path
+    replay_fixture: Callable[[str, str], respx.Route],
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
 ) -> None:
     """On the recorded balance sheet changed in memory: no recorded report holds them.
 
-    A payroll or people report's rows may carry ``ssn`` or ``iban`` (ADR-0017; the demo
-    organisation has no payroll), so the keys are injected in three letter cases, in a
+    A report the type rule lets through may still carry ``ssn`` or ``iban`` in its rows
+    (ADR-0017; one the tree does not list, or a type the rule does not name), so the
+    drop stays the second guard: the keys are injected in three letter cases, in a
     top-level row, in a row two levels down and in ``properties``. The task drops them
     and changes nothing else; the wrapper keeps them (ADR-0003).
     """
@@ -1913,6 +1919,7 @@ def test_get_report_data_drops_identifier_keys_at_any_depth(
     nested["IBAN"] = IBAN
     nested["qrIban"] = IBAN
     changed["properties"]["columns"][0]["Ssn"] = SSN
+    replay_fixture("report_tree", "default")
     respx_mock.get(f"{BASE}/report/element/data.json").respond(200, json=changed)
     result = tasks.get_report_data(DEMO, 1, fiscal_period=FP2025)
     assert result.data.data == original["data"], "the keys are gone, nothing else changed"
@@ -1928,6 +1935,7 @@ def test_get_report_data_sends_the_dates_as_upstream_reads_them(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     """What is sent; the answer is the recorded one, which matches any query on the path."""
+    replay_fixture("report_tree", "default")
     route = replay_fixture("report_element_data", "balance_fp2025")
     result = tasks.get_report_data(
         DEMO,
@@ -1980,10 +1988,230 @@ def test_get_report_data_refuses_before_anything_is_sent(
     assert not respx_mock.calls
 
 
+# Payroll and people reports, refused by type (G5 (1) of 2026-10-28, queue row 123): the type
+# comes from the report tree, read once per organisation and kept until TENANTS.reset().
+
+DATA_URL = f"{BASE}/report/element/data.json"
+TREE_URL = f"{BASE}/report/tree.json"
+REFUSED_TYPES = (
+    "SALARY_LIST",
+    "SALARY_TYPE_RECAP",
+    "SALARY_TYPES",
+    "SALARY_BOOK_ENTRIES",
+    "SETTLEMENT",
+    "WITHHOLDING_TAX_SETTLEMENT",
+    "REVENUE_BY_PERSON",
+    "EXPENSE_BY_PERSON",
+    "REVENUE_BY_PERSON_CHART",
+    "EXPENSE_BY_PERSON_CHART",
+)
+"""The ten payroll and people report types in the recorded tree, as the docstring lists them."""
+RULE = (
+    "payroll and people reports, every type that starts with SALARY_, SETTLEMENT, "
+    "WITHHOLDING_TAX_SETTLEMENT and every type that ends with _BY_PERSON or _BY_PERSON_CHART "
+    "(personal data, ADR-0017)"
+)
+
+
+def tree_nodes(nodes: list[dict[str, typing.Any]]) -> Iterator[dict[str, typing.Any]]:
+    """Every node of a recorded tree body, depth first."""
+    for node in nodes:
+        yield node
+        yield from tree_nodes(node.get("data") or [])
+
+
+def recorded_elements() -> dict[int, str]:
+    """The recorded tree's element ids and their report types."""
+    body = json.loads(load_fixture(FIXTURES / "report_tree" / "default.json").response.body)
+    return {n["elementId"]: n["type"] for n in tree_nodes(body["data"]) if n.get("elementId")}
+
+
+ELEMENTS = recorded_elements()
+REFUSED_ELEMENTS = {e: kind for e, kind in ELEMENTS.items() if kind in REFUSED_TYPES}
+PASSED_ELEMENTS = {e: kind for e, kind in ELEMENTS.items() if kind not in REFUSED_TYPES}
+
+
+def changed_tree(fixtures_dir: Path, **types: str) -> dict[str, typing.Any]:
+    """The recorded tree with the types of some elements changed (``e24="BALANCE"``)."""
+    body = recorded_body(fixtures_dir, "report_tree", "default")
+    for node in tree_nodes(body["data"]):
+        changed = types.get(f"e{node.get('elementId')}")
+        if changed is not None:
+            node["type"] = changed
+    return body
+
+
+def test_the_recorded_tree_holds_the_ten_refused_types() -> None:
+    assert set(REFUSED_ELEMENTS.values()) == set(REFUSED_TYPES)
+    assert len(REFUSED_ELEMENTS) == 18, "SALARY_TYPE_RECAP and SALARY_TYPES twice, SETTLEMENT x7"
+    assert len(PASSED_ELEMENTS) == 20
+    assert all(tasks._is_refused_report_type(kind) for kind in REFUSED_TYPES)
+    assert not any(tasks._is_refused_report_type(kind) for kind in PASSED_ELEMENTS.values())
+
+
+@pytest.mark.parametrize(
+    ("element_id", "report_type"), REFUSED_ELEMENTS.items(), ids=map(str, REFUSED_ELEMENTS)
+)
+def test_a_payroll_or_people_report_is_refused_before_any_data_request(
+    replay_fixture: Callable[[str, str], respx.Route],
+    respx_mock: respx.MockRouter,
+    element_id: int,
+    report_type: str,
+) -> None:
+    """On the recorded tree: the message names the element, its type and the rule, no row."""
+    tree = replay_fixture("report_tree", "default")
+    data = respx_mock.get(DATA_URL).respond(200, json={"total": 0, "data": []})
+    with pytest.raises(InvalidRequestError) as refused:
+        tasks.get_report_data(DEMO, element_id, fiscal_period=FP2025)
+    assert refused.value.message == (
+        f"report element {element_id} is of type {report_type}: get_report_data refuses {RULE}"
+    )
+    assert (tree.call_count, data.call_count) == (1, 0)
+
+
+@pytest.mark.parametrize(
+    ("element_id", "report_type"),
+    [(1, "SALARY_CONFIGURATION"), (5, "RESULT_BY_PERSON_CHART"), (2, "salary_list")],
+)
+def test_the_refusal_reads_the_type_from_the_tree_by_pattern(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, element_id: int, report_type: str
+) -> None:
+    """On the recorded tree changed in memory: a type outside the ten, or in lower case."""
+    body = changed_tree(fixtures_dir, **{f"e{element_id}": report_type})
+    respx_mock.get(TREE_URL).respond(200, json=body)
+    data = respx_mock.get(DATA_URL).respond(200, json={"total": 0, "data": []})
+    with pytest.raises(InvalidRequestError, match=re.escape(f"is of type {report_type}:")):
+        tasks.get_report_data(DEMO, element_id, fiscal_period=FP2025)
+    assert not data.called
+
+
+def test_a_payroll_element_retyped_in_the_tree_is_read(
+    replay_fixture: Callable[[str, str], respx.Route],
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+) -> None:
+    """The rule follows the tree, not the id: element 24 retyped ``BALANCE`` is read."""
+    respx_mock.get(TREE_URL).respond(200, json=changed_tree(fixtures_dir, e24="BALANCE"))
+    data = replay_fixture("report_element_data", "balance_fp2025")
+    result = tasks.get_report_data(DEMO, 24, fiscal_period=FP2025)
+    assert data.call_count == 1
+    assert result.meta.request["elementId"] == 24
+
+
+def test_every_other_report_is_read_and_the_tree_once(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """The recorded tree's 20 other elements: one tree read for them all (one data answer)."""
+    tree = replay_fixture("report_tree", "default")
+    data = replay_fixture("report_element_data", "balance_fp2025")
+    for element_id in PASSED_ELEMENTS:
+        tasks.get_report_data(DEMO, element_id, fiscal_period=FP2025)
+    assert (tree.call_count, data.call_count) == (1, len(PASSED_ELEMENTS))
+    assert {request.url.params["elementId"] for request, _ in data.calls} == {
+        str(element_id) for element_id in PASSED_ELEMENTS
+    }
+
+
+def test_the_tree_is_read_once_per_organisation_and_again_after_a_reset(
+    replay_fixture: Callable[[str, str], respx.Route],
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kept per organisation's client: ``TENANTS.reset()`` drops it, another org reads its own."""
+    tree = replay_fixture("report_tree", "default")
+    data = replay_fixture("report_element_data", "balance_fp2025")
+    tasks.get_report_data(DEMO, 1, fiscal_period=FP2025)
+    tasks.get_report_data(DEMO, 2, fiscal_period=FP2025)
+    with pytest.raises(InvalidRequestError, match="is of type SALARY_LIST"):
+        tasks.get_report_data(DEMO, 24, fiscal_period=FP2025)
+    assert (tree.call_count, data.call_count) == (1, 2)
+
+    TENANTS.reset()
+    with pytest.raises(InvalidRequestError, match="is of type SALARY_LIST"):
+        tasks.get_report_data(DEMO, 24, fiscal_period=FP2025)
+    assert (tree.call_count, data.call_count) == (2, 2), "read again after the reset"
+
+    monkeypatch.setenv(TENANTS.list_var, "xa")
+    monkeypatch.setenv(TENANTS.var("xa", "SUBDOMAIN"), "xa-books")
+    other_host = "https://xa-books.cashctrl.com/api/v1"
+    other = respx_mock.get(f"{other_host}/report/tree.json").respond(
+        200, json={"total": 1, "data": []}
+    )
+    respx_mock.get(f"{other_host}/report/element/data.json").respond(
+        200, json={"total": 0, "data": []}
+    )
+    tasks.get_report_data("xa", 24, fiscal_period=FP2025)
+    assert other.call_count == 1, "xa's own tree, which lists no element 24: upstream answers"
+    assert tree.call_count == 2, "demo's tree is not read for xa"
+
+
+def test_get_report_tree_keeps_the_types_it_returns(
+    replay_fixture: Callable[[str, str], respx.Route],
+    respx_mock: respx.MockRouter,
+) -> None:
+    """An agent reads the tree, then a report: no second tree read."""
+    tree = replay_fixture("report_tree", "default")
+    data = respx_mock.get(DATA_URL).respond(200, json={"total": 0, "data": []})
+    tasks.get_report_tree(DEMO)
+    with pytest.raises(InvalidRequestError, match="is of type SETTLEMENT"):
+        tasks.get_report_data(DEMO, 28, fiscal_period=FP2025)
+    assert (tree.call_count, data.call_count) == (1, 0)
+
+
+def test_an_element_the_kept_tree_lacks_reads_the_tree_once_more(
+    replay_fixture: Callable[[str, str], respx.Route],
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+) -> None:
+    """The miss path, on the recorded tree with an element 99 added in memory.
+
+    A cold read that lacks the element asks upstream (fidelity, ADR-0003); a kept tree
+    that lacks it is read once more, and the element found there is judged by its type;
+    one still missing is asked of upstream, the identifier drop the guard.
+    """
+    recorded_tree = recorded_body(fixtures_dir, "report_tree", "default")
+    grown = json.loads(json.dumps(recorded_tree))
+    payroll = grown["data"][5]["data"]
+    payroll.append({**payroll[0], "id": "element-99", "elementId": 99, "type": "SALARY_LIST"})
+    answers = [recorded_tree, recorded_tree, grown]
+    tree = respx_mock.get(TREE_URL).mock(
+        side_effect=lambda request: httpx.Response(200, json=answers.pop(0))
+    )
+    data = replay_fixture("report_element_data", "balance_fp2025")
+
+    tasks.get_report_data(DEMO, 98, fiscal_period=FP2025)
+    assert (tree.call_count, data.call_count) == (1, 1), "a cold read lacks 98: upstream answers"
+    tasks.get_report_data(DEMO, 97, fiscal_period=FP2025)
+    assert (tree.call_count, data.call_count) == (2, 2), "read once more, still lacking 97"
+    with pytest.raises(InvalidRequestError, match="report element 99 is of type SALARY_LIST"):
+        tasks.get_report_data(DEMO, 99, fiscal_period=FP2025)
+    assert (tree.call_count, data.call_count) == (3, 2), "read once more, 99 found and refused"
+    with pytest.raises(InvalidRequestError, match="report element 99 is of type SALARY_LIST"):
+        tasks.get_report_data(DEMO, 99, fiscal_period=FP2025)
+    assert tree.call_count == 3, "kept now"
+
+
+@pytest.mark.anyio
+async def test_a_refused_report_is_an_error_text_for_the_tool(
+    replay_fixture: Callable[[str, str], respx.Route],
+    respx_mock: respx.MockRouter,
+) -> None:
+    replay_fixture("report_tree", "default")
+    data = respx_mock.get(DATA_URL).respond(200, json={"total": 0, "data": []})
+    arguments = {"org": DEMO, "element_id": 35, "fiscal_period": FP2025}
+    text = await mcp_call_text(server, "cashctrl_get_report_data", arguments)
+    assert text == (
+        "error: InvalidRequestError: report element 35 is of type WITHHOLDING_TAX_SETTLEMENT: "
+        f"get_report_data refuses {RULE}"
+    )
+    assert not data.called
+
+
 @pytest.mark.anyio
 async def test_get_report_data_as_a_tool(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
+    replay_fixture("report_tree", "default")
     replay_fixture("report_element_data", "balance_fp2025")
     arguments = {"org": DEMO, "element_id": 1, "fiscal_period": FP2025}
     payload = await mcp_call(server, "cashctrl_get_report_data", arguments)
@@ -2007,6 +2235,7 @@ async def test_a_report_over_its_cap_is_a_note_naming_the_period_parameters(
     The recorded balance sheet, about 17 KB, fits the 128 KB the tool has, so the bound is
     lowered here and the note kept; the cut is core's (``cap_result``).
     """
+    replay_fixture("report_tree", "default")
     replay_fixture("report_element_data", "balance_fp2025")
     cap = dataclasses.replace(tasks.MCP_CAPS["get_report_data"], max_bytes=2_000)
     capped = build_server(SOURCE, [tasks.get_report_data], caps={"get_report_data": cap})
@@ -2258,6 +2487,17 @@ AS_SENT: dict[str, frozenset[str]] = {"cashctrl_get_report_data": frozenset({"da
 """Fields of a tool's ``data`` that hold upstream's JSON as sent (``JsonValue``, decided by
 Johannes on 2026-10-27): their own names are snake_case, the keys inside them upstream's."""
 SNAKE_CASES = {tool: case for tool, case in TOOL_CASES.items() if tool not in UNOBSERVED}
+READ_FIRST: dict[str, tuple[str, ...]] = {"report_element_data": ("report_tree/default",)}
+"""Fixtures a task reads before the one its case names: ``get_report_data`` reads the report
+tree first, for the report's type (G5 (1) of 2026-10-28)."""
+
+
+def replay_case(replay_fixture: Callable[[str, str], respx.Route], fixture: str) -> respx.Route:
+    """Mount ``fixture`` (``<endpoint>/<case>``) and what its task reads first."""
+    endpoint, case = fixture.split("/")
+    for first in READ_FIRST.get(endpoint, ()):
+        replay_fixture(*first.split("/"))
+    return replay_fixture(endpoint, case)
 
 
 def test_every_task_has_a_tool_case() -> None:
@@ -2304,7 +2544,7 @@ async def test_tool_results_carry_snake_case_keys(
     ``meta.request`` is not checked: it records the parameters as sent, under upstream's
     names (``onlyActive``).
     """
-    replay_fixture(*case[0].split("/"))
+    replay_case(replay_fixture, case[0])
     arguments = tool_arguments(tool, case, fixtures_dir)
     payload = await mcp_call(server, tool, {"org": DEMO, **arguments})
     assert snake_case_violations(payload["data"], AS_SENT.get(tool, frozenset())) == []
@@ -2328,7 +2568,7 @@ def test_route_results_carry_snake_case_keys(
     app.include_router(router)
     path = f"/cashctrl/{tool.removeprefix('cashctrl_')}"
     (route,) = [r for r in router.routes if isinstance(r, APIRoute) and r.path == path]
-    replay_fixture(*case[0].split("/"))
+    replay_case(replay_fixture, case[0])
     arguments = {"org": DEMO, **tool_arguments(tool, case, fixtures_dir)}
     client = TestClient(app)
     if route.methods == {"POST"}:
@@ -2348,7 +2588,7 @@ def test_every_task_names_its_organisation_as_the_tenant(
     case: tuple[str, dict[str, typing.Any]],
 ) -> None:
     """``meta.tenant`` is ``org``, by name (ADR-0014); ``org`` stays in ``meta.request``."""
-    replay_fixture(*case[0].split("/"))
+    replay_case(replay_fixture, case[0])
     task = getattr(tasks, tool.removeprefix("cashctrl_"))
     result = task(DEMO, **tool_arguments(tool, case, fixtures_dir))
     assert result.meta.tenant == DEMO
@@ -2363,7 +2603,7 @@ async def test_every_tool_names_its_organisation_as_the_tenant(
     tool: str,
     case: tuple[str, dict[str, typing.Any]],
 ) -> None:
-    replay_fixture(*case[0].split("/"))
+    replay_case(replay_fixture, case[0])
     arguments = tool_arguments(tool, case, fixtures_dir)
     payload = await mcp_call(server, tool, {"org": DEMO, **arguments})
     assert payload["meta"]["tenant"] == DEMO
@@ -2380,7 +2620,6 @@ AUDIT_KEYS = frozenset({"createdBy", "lastUpdatedBy"})
 """Where upstream writes who made or last changed a record, at any depth."""
 AUDIT_FIELDS = frozenset({"created_by", "last_updated_by"})
 """The same fields as every model and every result names them."""
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 def tagged(node: typing.Any, tag: str) -> tuple[typing.Any, int]:
