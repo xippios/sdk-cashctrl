@@ -68,7 +68,8 @@ invoices = tasks.list_orders("demo", type="SALES", fiscal_period_id=current.id)
 Every task returns `Result[T]`: `data` holds models that mirror CashCtrl's payloads
 under upstream's names in snake_case (`is_current`, `end_amount`), in Python and in every
 tool and route result alike (the report rows of `get_report_data` excepted, which come
-as upstream sends them), `meta` the upstream operation, the parameters as sent under
+as upstream sends them, and the file tasks' `Downloaded`, which describes a file; Files
+below), `meta` the upstream operation, the parameters as sent under
 upstream's names (`onlyActive`), the organisation as `tenant`, when they were fetched
 and, for a list, `total`, upstream's count of the matching records. Async twins are
 named `<task>_async` (`list_organisations` has none). The tasks are listed in the status

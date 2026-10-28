@@ -42,7 +42,11 @@ in ``BULK_TASKS``: Python only, no tool and no route (ADR-0019 decision 4). Each
 one file to the path its caller gives and returns core's ``Downloaded``; ``meta.endpoint``
 is the file's operation (``journal/list.csv``) and ``meta.retrieved_at`` the time the
 file was complete. A refusal sent as HTTP 200 is raised, never written
-(``api/_download.py``, queue row 142).
+(``api/_download.py``, queue row 142). A file may hold what a projection leaves out, at
+its caller's request or as upstream renders it: the person export names
+``PERSON_COLUMNS`` unless its caller names columns, ``ssn`` or ``iban`` among them
+deliberately, and an invoice's QR-bill may carry the organisation's IBAN or QR-IBAN
+(ADR-0017; Johannes, 2026-10-28).
 """
 
 import os

@@ -1,14 +1,15 @@
 """Live smoke tests: skipped unless XIPPIOS_LIVE_TESTS=1 (conventions §10).
 
-Every task function gets a live smoke test here, next to the reachability check. Every
-live test takes the ``demo_org`` fixture: live runs reach the demo organisation only, whose
-books are synthetic (``scripts/seed_demo.py``). Each read test makes one call, but the
-reads, which first look an id up in a list (account 1020 by number, the first journal
-entry, person and sales order), ``list_order_book_entries``, which first lists the
-purchase orders for one that books, and ``get_report_data``, which first reads the report
-tree for the balance sheet's element id (the tree it keeps, so a payroll report of it is
-refused with no request). ``fiscal_periods`` looks the fiscal periods up
-once for the module: the API user's current period is 2025, and the orders are in 2026.
+Every task function gets a live smoke test here, next to the reachability check, three
+list exports excepted (below). Every live test takes the ``demo_org`` fixture: live runs
+reach the demo organisation only, whose books are synthetic (``scripts/seed_demo.py``).
+Each read test makes one call, but the reads, which first look an id up in a list
+(account 1020 by number, the first journal entry, person and sales order),
+``list_order_book_entries``, which first lists the purchase orders for one that books,
+and ``get_report_data``, which first reads the report tree for the balance sheet's
+element id (the tree it keeps, so a payroll report of it is refused with no request).
+``fiscal_periods`` looks the fiscal periods up once for the module: the API user's
+current period is 2025, and the orders are in 2026.
 
 The write tools are tested live per resource, one test that calls each of its write
 tools once with ``confirm=True`` (create, update, delete), so that every record a test
@@ -32,9 +33,11 @@ creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10
 That refusal is checked live once, read-only: a delete without ``confirm`` of an entry a
 seeded purchase order booked, found with GET calls, is refused before any preview.
 
-The two file tasks tested live write into pytest's temporary directory and assert the
+The file tasks tested live write into pytest's temporary directory and assert the
 file's size and content type only: one seeded sales order's document, its id from the
-list, and the journal of 2025 as CSV, five entries.
+list, and the journal of 2025 as CSV, five entries. That one export stands for the four,
+which share one download path (G5 (7) of 2026-10-28): ``export_accounts``,
+``export_persons`` and ``export_orders`` have no live test of their own.
 
 The calls of one run: 29 for the reads (17, 9 for the discovery lists and the reports:
 one each, and the tree ``get_report_data`` reads first, and 3 for the book entries of an
