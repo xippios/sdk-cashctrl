@@ -87,8 +87,8 @@ Core's plugin does the rest (ADR-0013): no network outside a test marked `live` 
 `CASHCTRL_DEMO_API_KEY` named in `xippios_placeholder_key_envs`. The demo organisation is
 synthetic: invented books seeded by `scripts/seed_demo.py` and described in
 `docs/demo-org.md`, never a copy of real books. So the recorder records any module and
-any amount; it still scrubs e-mail addresses, API user tags, token-like body fields and
-the identifiers `ssn`, `iban` and `qrIban`, in the request body as well (How to record a
+any amount; it still scrubs e-mail addresses, API user tags, token-like body fields,
+`ssn` and every name ending in `iban`, in the request body as well (How to record a
 fixture), and refuses any method but GET and POST, a POST to anything but the eleven
 write paths, a create without the marker `xippios-live` or an order write naming an
 unmarked order, and any endpoint but `.json`. Writes against demo create a record marked
@@ -189,9 +189,9 @@ docs/demo-org.md   the synthetic demo organisation: why, how to create and seed 
 `tasks_write.py` holds eleven write tasks, `create_*`, `update_*` and `delete_*` for
 journal entries, persons and orders, `update_order_status` and `create_order_payment`,
 served by `xippios-cashctrl-mcp-write` only: never by the read server, never on the HTTP
-router (`assert_write_tools` in `tests/test_tasks_write.py`). Johannes decided them in
-the wave 2 interview of 2026-10-23 and its follow-up of 2026-10-24; the recipe for one
-more:
+router (`assert_write_tools` in `tests/test_tasks_write.py`). Johannes decided the first
+nine in the interviews of 2026-10-23/24 and 2026-10-27, the last two in G5 (8) of
+2026-10-28; the recipe for one more:
 
 1. **Layer 1.** `api/<module>_create.py` (and `_update`, `_delete`): a `<module>_fields`
    builder takes every parameter the create table documents, snake_cased, and returns
@@ -220,7 +220,7 @@ more:
    result twice. A create's preview sends nothing; an update's or a delete's sends one
    read, never a write.
 3. **Updates read, merge, send.** Upstream empties every parameter an update omits.
-   `update_*` reads the record, maps every parameter `update.json` documents from it
+   An `update.json` task reads the record, maps every parameter it documents from it
    (`_journal_values`, `_person_values`, `_order_values`), applies the arguments given
    (not `None`), and sends all of them. An order's items go back under the keys the
    items table documents (`_order_items`, in their `pos`), the computed ones left out;
@@ -276,7 +276,7 @@ more:
    `finally` deletes it through the wrapper if an assertion failed first. An update is
    previewed, confirmed and read back: the changed field holds the new value and every
    other derived field is unchanged.
-7. **Statuses and payments** (G5 (8) of 2026-10-28): `update_order_status` and
+7. **Statuses and payments**: `update_order_status` and
    `create_order_payment` send the fields given, nothing read: a preview sends no
    request. A payment (pain.001 or PDF) books nothing and has no documented delete: the
    live test deletes the paid order and leaves the payment, accepted residue (Johannes,
@@ -313,7 +313,7 @@ replay-tested with a real value.
 - Fixtures never carry their values: the recorder rewrites the value of `ssn` and of
   every name ending in `iban` (`qrIban`, `orgIban`, ...; row 243) to `REDACTED`, in any
   letter case, and its final check refuses a value that survives the rewrite (How to
-  record a fixture); the recorded location holds `null` for both.
+  record a fixture); the recorded location holds `null` for `iban` and `qrIban`.
 - `get_report_data` refuses payroll and people reports before their data is requested
   (G5 (1) of 2026-10-28, rows 123 and 225): a type that starts with `SALARY_` or
   contains `PERSON`, or is `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or
@@ -465,10 +465,9 @@ header values and both bodies: e-mail addresses to `user@example.com`, CashCtrl'
 user tags (`API:` and the first four characters of a key, in `createdBy` and
 `lastUpdatedBy`) to `API:REDACTED` and the value of every token-like body field (`hash`,
 `token`, `secret`, `apiKey`, by name; `order/read.json` sends `hash`) and of the
-identifiers, `ssn` and every name ending in `iban` (ADR-0017, row 243; `person/list.json`
-sends `ssn` and `iban`, `location/list.json` `iban` and `qrIban`,
-`order/document/read.json` `orgIban`, `orgQrIban` and `recipientIban`, only ever `null`)
-to `REDACTED`. Its verify then refuses, in its own words, a fixture still
+identifiers, `ssn` and every name ending in `iban` (ADR-0017, row 243; seen only `null`,
+in `person/list.json`, `location/list.json` and `order/document/read.json`) to
+`REDACTED`. Its verify then refuses, in its own words, a fixture still
 holding the demo host, the subdomain alone or the key or its token, plain or
 percent-encoded, raw or in a decoded string of a JSON body. A response in which the key
 was redacted is written but goes to review (exit status 1). The recorder's final check
@@ -486,8 +485,8 @@ are never typed in by hand.
 Writes: `--method POST` is accepted for the eleven write paths the write tools call only
 (`journal/`, `person/` and `order/create|update|delete.json`, `order/update_status.json`,
 `order/payment/create.json`, `WRITE_PATHS`), any other POST or method refused before a
-request; a `create.json` only when one of its values carries `xippios-live`, and the two
-order writes only after `order/read.json` found every order their `ids` or `orderIds`
+request; a `create.json` only when one of its values carries `xippios-live` (the
+payment's excepted: its orders are the marker), and the two order writes only after `order/read.json` found every order their `ids` or `orderIds`
 name marked (`xippios-live` in `description`, or as `nr`), fail closed
 (`unmarked_orders`); the `key=value` pairs go as the form body, in their order, with the
 write tools' `Content-Type` (`application/x-www-form-urlencoded; charset=UTF-8`). The
@@ -495,7 +494,7 @@ recorder's rewrite and final check cover the request body core records too (raw,
 form field decoded, each JSON value's strings), a form field `ssn` or an `iban` inside
 `bankAccounts` included, so a write that sends one is not recorded. After the request it
 says that the demo organisation changed, names the `insertId` and asks for the matching
-delete, recorded or run. Record only a record marked `xippios-live`, its writes and its
+delete, recorded or run; after a payment, that it stays behind (no delete documented). Record only a record marked `xippios-live`, its writes and its
 delete; confirm afterwards with one list per resource (`query=xippios-live`, counts only)
 that nothing is left.
 

@@ -34,15 +34,17 @@ writes nothing and exits non-zero:
   `order/payment/create.json`. Every other POST (`order/continue.json`,
   `order/bookentry/create.json`, ...) and every other method is refused before a
   request is sent, and so is a `create.json` none of whose pairs carries
-  `xippios-live`. `order/update_status.json` and `order/payment/create.json` carry no
-  text to mark: the recorder first reads every order their `ids` or `orderIds` name
+  `xippios-live`, `order/payment/create.json` excepted, whose orders are the marker.
+  `order/update_status.json` and `order/payment/create.json` carry no text to mark: the recorder first reads every order their `ids` or `orderIds` name
   (`order/read.json`, one GET each) and refuses the write unless each is marked
   (`xippios-live` in its description, or as its `nr`); an order it cannot read refuses
   it too. A POST sends the `key=value` pairs
   as the form body, in their order, as the write tools send theirs
   (`application/x-www-form-urlencoded; charset=UTF-8`). A recorded write changes the
   demo organisation: the recorder says so, names the `insertId` upstream answered, and
-  asks for the matching delete. Record only a record marked `xippios-live` (in its
+  asks for the matching delete; after a payment it says that the payment stays behind,
+  since upstream documents no payment delete (an accepted residue, Johannes,
+  2026-10-28). Record only a record marked `xippios-live` (in its
   title, company or description, and `nr` where it has one), its update and its
   delete, in that order, so that every record created is deleted again; never touch a
   seeded record. Afterwards confirm with one list per resource (`query=xippios-live`,
@@ -85,11 +87,12 @@ writes nothing and exits non-zero:
    `src/xippios/cashctrl/api/`. Parameters are named as upstream names them
    (`fiscalPeriodId`).
    Recordings are `.json` endpoints: reads (`list.json`, `read.json`) and the write
-   tools' `create.json`, `update.json`, `delete.json` and `update_status.json`. Exports (PDF, Excel, ZIP) are
-   out of scope, and the recorder also refuses a body that is not UTF-8 text, because
-   it can be neither scrubbed nor reviewed. For a write, compute the form fields
-   offline through the task's preview (`confirm=False`, which sends nothing for a
-   create; an update's preview replays the recorded read) and pass exactly those pairs,
+   tools' `create.json`, `update.json`, `delete.json` and `update_status.json`. Exports
+   (PDF, Excel, ZIP) are out of scope, and the recorder also refuses a body that is not
+   UTF-8 text, because it can be neither scrubbed nor reviewed. For a write, compute the
+   form fields offline through the task's preview (`confirm=False`, which sends nothing
+   for a create, a status or a payment; an `update.json`'s preview replays the recorded
+   read) and pass exactly those pairs,
    in that order: the tests compare the preview's `payload` with the recorded request
    body.
 3. Record, from the repository root:

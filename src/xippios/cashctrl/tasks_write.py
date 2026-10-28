@@ -12,17 +12,19 @@ into ``False``, and refuses anything else. The decisions taken for these tools o
 
 1. **Preview.** While ``confirm`` is false a task writes nothing and returns a
    ``WritePreview``: the exact form ``payload`` upstream would receive (upstream names,
-   encoded values) and, for an update or a delete, the record as it is now (``before``),
-   for an update next to the ``changes``. A create's preview sends no request; an
-   update's or a delete's sends one read, never a write. With ``confirm`` true the
-   result is a ``WriteResult`` (``performed``, ``insert_id``, ``message``).
-2. **Updates fail closed.** Upstream treats every parameter an update leaves out as
-   empty. An ``update_*`` task therefore reads the record (``read.json``), applies the
-   caller's changes, and sends every parameter the ``update.json`` table documents,
-   derived from the record. A mandatory parameter that neither the record nor the call
-   gives, or a stored list it cannot carry over (a shape never observed, such as
-   attachments or allocations), stops it with ``InvalidRequestError`` before anything
-   is written; it never sends a partial record.
+   encoded values) and, for an ``update.json`` or a delete, the record as it is now
+   (``before``), for an update next to the ``changes``. A create's preview sends no
+   request, nor does a status's or a payment's (item 8); an ``update.json``'s or a
+   delete's sends one read, never a write. With ``confirm`` true the result is a
+   ``WriteResult`` (``performed``, ``insert_id``, ``message``).
+2. **Updates fail closed.** Upstream treats every parameter an ``update.json`` leaves
+   out as empty. ``update_journal_entry``, ``update_person`` and ``update_order``
+   therefore read the record (``read.json``), apply the caller's changes, and send
+   every parameter the ``update.json`` table documents, derived from the record. A
+   mandatory parameter that neither the record nor the call gives, or a stored list it
+   cannot carry over (a shape never observed, such as attachments or allocations),
+   stops it with ``InvalidRequestError`` before anything is written; none sends a
+   partial record. ``update_order_status`` reads nothing (item 8).
 3. **Custom fields.** Every create and update task takes ``custom``, a mapping from
    upstream's custom field names (``customField<ID>``) to text, sent as the XML upstream
    documents, every value escaped. An update keeps every stored custom value it is not
@@ -2022,7 +2024,11 @@ async def update_order_status_async(
     ``SALES`` or ``PURCHASE``), never a guess, and the order ids from ``list_orders``.
     That list says what a status does: ``is_book`` (the order books its journal entries
     in it), ``is_closed`` (it completes the order) and ``action_id`` (what follows it).
-    Upstream checks the change and refuses it with its message.
+    A status with an ``action_id`` (``CATEGORY_<id>``, ``BOOK_TEMPLATE_<id>``, or one the
+    documentation does not list, such as ``CREATE_PAYMENT_ORDER`` on the purchase
+    invoices' "Payment ordered") triggers an action; upstream documents only that its app
+    asks the user first, not what this call does, and the live test avoids such
+    statuses. Upstream checks the change and refuses it with its message.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
