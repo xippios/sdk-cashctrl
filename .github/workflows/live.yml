@@ -8,8 +8,9 @@
 # reach the reserved demo organisation only, declared by CASHCTRL_DEMO_SUBDOMAIN and
 # CASHCTRL_DEMO_API_KEY, so those two org secrets replace the rendered CASHCTRL_API_KEY,
 # which nothing reads; CASHCTRL_ORGS is never set.
-# Also by hand: --tb=short, since pytest's long traceback prints each frame's arguments,
-# an upstream payload among them, into this public log.
+# --tb=short is the template's own from v0.3.0, no longer an addition by hand: pytest's
+# long traceback prints each frame's arguments, an upstream payload among them, into this
+# public log.
 # From template v0.2.2 on this file is cashctrl's own and is never re-rendered (D35), so
 # its pins are bumped by hand (conventions §13).
 name: Live
