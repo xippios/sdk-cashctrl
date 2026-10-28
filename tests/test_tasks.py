@@ -49,6 +49,8 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 TENANT_LIST = "list_organisations"
 """The package's tenant list (``_tenants.list_task``, ADR-0024): no ``org``, no async twin."""
 ORG_TASK_NAMES = [name for name in tasks.__all__ if name != TENANT_LIST]
+TOOL_TASK_NAMES = [name for name in ORG_TASK_NAMES if name not in tasks.BULK_TASKS]
+"""The tasks the adapters serve: the file tasks of ``BULK_TASKS`` are Python only."""
 EVERY_TASK: dict[str, Callable[..., object]] = {
     f"{module.__name__.rsplit('.', 1)[-1]}.{name}": getattr(module, name)
     for module in (tasks, tasks_write)
@@ -2592,7 +2594,8 @@ def replay_case(replay_fixture: Callable[[str, str], respx.Route], fixture: str)
 
 
 def test_every_task_has_a_tool_case() -> None:
-    assert set(TOOL_CASES) == {tool_name(SOURCE, getattr(tasks, n)) for n in ORG_TASK_NAMES}
+    """Every task a tool serves; the file tasks are tested in ``tests/test_downloads.py``."""
+    assert set(TOOL_CASES) == {tool_name(SOURCE, getattr(tasks, n)) for n in TOOL_TASK_NAMES}
 
 
 def tool_arguments(

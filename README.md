@@ -240,6 +240,42 @@ assert isinstance(done.data, WriteResult)
 print(done.data.insert_id)  # the new entry's id
 ```
 
+## Files
+
+Five tasks write a file instead of returning records: `download_order_document`, the
+documents of orders as one PDF, and the list exports `export_journal_entries`,
+`export_accounts`, `export_persons` and `export_orders`, each with `format` (`csv`,
+`xlsx` or `pdf`), the filters of the list it mirrors and `columns`. They are Python
+only: no MCP tool and no HTTP route serves them, since no tool hands an agent a file
+path (`BULK_TASKS`, ADR-0019). Each streams the file to `dest`, the path the caller
+gives; nothing is read into the result, kept in memory or cached, and `data` describes
+the file (`path`, `bytes`, `content_type`, `filename`, `retrieved_at`). A refusal
+CashCtrl sends as HTTP 200 raises (`RequestRejected`; `NotFoundError` for an unknown
+order id) and writes nothing, and a file already at `dest` stays as it was.
+
+- **Cut at 100.** Upstream exports at most `limit` records, 100 when `limit` is left
+  out (the account export, like its list, takes no `limit`): read the list task's
+  `meta.total` first and pass a `limit` of at least that.
+- **Personal identifiers.** Without `columns`, the person export names the fields
+  `list_persons` returns as its columns, so `ssn` and `iban` stay out of the file; a
+  caller that names them in `columns` gets them, deliberately (ADR-0017). An order
+  document is what its recipient gets: an invoice's QR-bill may carry the
+  organisation's IBAN or QR-IBAN and the recipient's name and address. Where a file
+  goes is the caller's choice.
+
+```python
+from pathlib import Path
+
+from xippios.cashctrl import tasks
+
+count = tasks.list_journal_entries("demo", fiscal_period_id=2, limit=1).meta.total or 1
+journal = tasks.export_journal_entries(
+    "demo", "csv", Path("journal-2025.csv"), fiscal_period_id=2, limit=count
+)
+print(journal.data.path, journal.data.bytes, journal.data.content_type)
+invoice = tasks.download_order_document("demo", [3], Path("RE-2026-103.pdf"))
+```
+
 ## HTTP
 
 `xippios.cashctrl.http.router` is a FastAPI router the consumer mounts. It has no lock:
@@ -282,6 +318,11 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET report/tree.json` (Get tree of reports) | `get_report_tree` | `cashctrl_get_report_tree` | available |
 | `GET report/element/data.json` (Read JSON data) | `get_report_data` | `cashctrl_get_report_data` | available; rows as upstream sends them; payroll and people reports refused |
 | `GET history/list.json` (List history) | `list_history` | `cashctrl_list_history` | available; paged; HTTP route is `POST` |
+| `GET order/document/read.pdf` (Download PDF) | `download_order_document` | none, Python only | available; one PDF to `dest`; an invoice's QR-bill may carry the organisation's IBAN or QR-IBAN and the recipient's address |
+| `GET journal/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_journal_entries` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100 |
+| `GET account/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_accounts` | none, Python only | available; a file to `dest`; every matching account |
+| `GET person/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_persons` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100; without `ssn` and `iban` unless `columns` names them |
+| `GET order/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_orders` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100 |
 | `POST journal/create.json`, `update.json`, `delete.json` | `create_journal_entry`, `update_journal_entry`, `delete_journal_entry` | `cashctrl_create_journal_entry`, ... | available on the write server only |
 | `POST person/create.json`, `update.json`, `delete.json` | `create_person`, `update_person`, `delete_person` | `cashctrl_create_person`, ... | available on the write server only |
 | `POST order/create.json`, `update.json`, `delete.json` | `create_order`, `update_order`, `delete_order` | `cashctrl_create_order`, ... | available on the write server only |

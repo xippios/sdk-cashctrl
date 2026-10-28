@@ -4,13 +4,20 @@ Distribution ``xippios-cashctrl``. Public API: ``__version__`` and the task
 functions re-exported here. Every task takes ``org``, a declared organisation, first,
 except ``list_organisations``, which takes no argument and lists the declared
 organisations' names. The write tasks (``create_*``, ``update_*``, ``delete_*``, from
-``tasks_write``) preview unless called with ``confirm=True``.
+``tasks_write``) preview unless called with ``confirm=True``. The file tasks
+(``download_order_document``, ``export_*``) write a file to the path their caller gives
+and are Python only.
 Endpoint wrappers under ``api/`` and the organisation registry in ``_client`` are
 internal.
 """
 
 from xippios.cashctrl._version import __version__
 from xippios.cashctrl.tasks import (
+    download_order_document,
+    export_accounts,
+    export_journal_entries,
+    export_orders,
+    export_persons,
     get_account,
     get_journal_entry,
     get_order,
@@ -55,6 +62,11 @@ __all__ = [
     "delete_journal_entry",
     "delete_order",
     "delete_person",
+    "download_order_document",
+    "export_accounts",
+    "export_journal_entries",
+    "export_orders",
+    "export_persons",
     "get_account",
     "get_journal_entry",
     "get_order",
