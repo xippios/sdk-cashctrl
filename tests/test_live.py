@@ -42,6 +42,9 @@ amount moved, the order gone): the test then checks that no journal entry of the
 is left and probes ``order/payment/download`` once with the payment's parameters, a
 binary answer never recorded, asserting only that upstream answered and recording
 which, ``file`` or ``refusal``, as the property ``payment_download`` (``--junitxml``).
+The first run, on 2026-10-29, recorded ``refusal (HTTP 400, text/plain)``: no file is
+served for the payment of a deleted order; whether upstream keeps the payment itself
+cannot be seen, as the API has no payment read or list.
 
 The file tasks tested live write into pytest's temporary directory and assert the
 file's size and content type only: one seeded sales order's document, its id from the
@@ -708,8 +711,14 @@ async def test_order_create_update_delete(
             await api.order_delete(demo_org, [created])
 
 
-PAYMENT_TYPE: PaymentType = "PAIN"
-"""The payment the live test creates: ``PAIN``, upstream's default, a pain.001 file."""
+PAYMENT_TYPE: PaymentType = "CASH_PDF"
+"""The payment the live test creates: ``CASH_PDF``, a PDF, which demo accepts.
+
+``PAIN``, upstream's default, was refused on 2026-10-29 (``order_payment_create/pain``):
+the date in the past, and the sender's bank account and BIC and the recipient's bank
+account not set, which the synthetic books do not hold. ``CASH_PDF`` with the same date
+and order was accepted (``order_payment_create/cash_pdf``).
+"""
 
 
 async def test_order_status_payment_delete(
@@ -723,12 +732,17 @@ async def test_order_status_payment_delete(
     (``PURCHASE``), live; the order is created in the category's first status, which
     books (upstream's default, as the seeded purchase orders show), and set to the next
     status that names no follow-up action (``action_id`` empty), an open one first. Its
-    payment pays every open amount (``PAIN``). The payment's residue is accepted
-    (Johannes, 2026-10-28): upstream documents no payment delete, so once the order is
-    deleted the test checks that no journal entry of the order is left and probes
+    payment pays every open amount (``PAYMENT_TYPE``, ``CASH_PDF``). The payment's
+    residue is accepted (Johannes, 2026-10-28): upstream documents no payment delete, so
+    once the order is deleted the test checks that no journal entry of the order is left and probes
     ``order/payment/download`` once with the payment's parameters through the demo
     client, a binary answer never recorded: whether the payment survived its order's
     deletion is recorded as the property ``payment_download``, ``file`` or ``refusal``.
+
+    Observed on 2026-10-29, the first run: the status set ("Status changed"), the
+    ``CASH_PDF`` payment created ("Payment order created", no ``insertId``), the order
+    deleted with its payment ("1 document deleted"), none of its journal entries left,
+    and the probe answered HTTP 400, ``text/plain``: ``refusal``.
     """
     purchase_categories = await tasks.list_order_categories_async(demo_org, type="PURCHASE")
     (invoice,) = [
