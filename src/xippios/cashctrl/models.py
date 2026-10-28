@@ -114,6 +114,7 @@ __all__ = [
     "OrderItemInput",
     "OrderItemType",
     "OrderType",
+    "PaymentType",
     "Person",
     "PersonAddress",
     "PersonAddressInput",
@@ -1843,6 +1844,10 @@ BankAccountType = Literal["DEFAULT", "ORDER", "SALARY", "HISTORICAL", "OTHER"]
 
 OrderItemType = Literal["ARTICLE", "TEXT", "PAGEBREAK", "SUBTOTAL", "TITLE", "OPTIONTOTAL"]
 """``type`` of an order item: "Defaults to ARTICLE. Possible values: ARTICLE, TEXT, ..."."""
+
+PaymentType = Literal["PAIN", "SEPA_PAIN", "WIRE_PDF", "CASH_PDF"]
+"""``type`` of ``order/payment/create.json``, the payment and the file it makes: "Defaults
+to PAIN (pain.001). Possible values: PAIN, SEPA_PAIN, WIRE_PDF, CASH_PDF"."""
 
 
 class _Input(UpstreamModel):

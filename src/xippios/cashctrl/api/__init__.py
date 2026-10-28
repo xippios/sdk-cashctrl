@@ -7,10 +7,11 @@ mirror the payload. No composition and no defaults beyond upstream's own: a pagi
 list wrapper fetches one page, and the task collects pages. The reference is the
 snapshot in ``docs/upstream/``.
 
-A write wrapper (``*_create``, ``*_update``, ``*_delete``) posts form fields through
-``_form.post_form``; ``journal_fields``, ``person_fields`` and ``order_fields`` encode
-them from the parameters as upstream names them, so a task can preview exactly what it
-would send (``tasks_write``).
+A write wrapper (``*_create``, ``*_update``, ``*_delete``, ``order_update_status``,
+``order_payment_create``) posts form fields through ``_form.post_form``;
+``journal_fields``, ``person_fields``, ``order_fields``, ``order_update_status_fields``
+and ``order_payment_create_fields`` encode them from the parameters as upstream names
+them, so a task can preview exactly what it would send (``tasks_write``).
 
 A file wrapper (``*_list_csv``, ``*_list_xlsx``, ``*_list_pdf``, ``order_document_read_pdf``)
 streams the file to a path through ``_download.download`` and returns core's
@@ -59,8 +60,16 @@ from xippios.cashctrl.api.order_list import order_list, order_list_params
 from xippios.cashctrl.api.order_list_csv import order_list_csv
 from xippios.cashctrl.api.order_list_pdf import order_list_pdf
 from xippios.cashctrl.api.order_list_xlsx import order_list_xlsx
+from xippios.cashctrl.api.order_payment_create import (
+    order_payment_create,
+    order_payment_create_fields,
+)
 from xippios.cashctrl.api.order_read import order_read
 from xippios.cashctrl.api.order_update import order_update
+from xippios.cashctrl.api.order_update_status import (
+    order_update_status,
+    order_update_status_fields,
+)
 from xippios.cashctrl.api.person_category_list import person_category_list
 from xippios.cashctrl.api.person_create import person_create, person_fields
 from xippios.cashctrl.api.person_delete import person_delete
@@ -123,8 +132,12 @@ __all__ = [
     "order_list_params",
     "order_list_pdf",
     "order_list_xlsx",
+    "order_payment_create",
+    "order_payment_create_fields",
     "order_read",
     "order_update",
+    "order_update_status",
+    "order_update_status_fields",
     "person_category_list",
     "person_create",
     "person_delete",
