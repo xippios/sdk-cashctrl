@@ -7,9 +7,9 @@ example `account/read.json unknown_id id=999999999` or, for a write,
 Fixtures are recorded through the real client by `scripts/record_fixture.py`, never typed
 in by hand (conventions §10). **Every fixture comes from the demo organisation and from
 nothing else**: the script has no organisation parameter, drops `CASHCTRL_ORGS` from its
-own environment and always records through `client_for("demo")`. Never record from a
-productive organisation, never adapt the script or a one-off snippet to do so, and never
-set `CASHCTRL_ORGS` with real names to record. The repository is public.
+own environment and always records with `client_for("demo")`'s configuration. Never
+record from a productive organisation, never adapt the script or a one-off snippet to do
+so, and never set `CASHCTRL_ORGS` with real names to record. The repository is public.
 
 A fixture rides in the PR of the task it tests: the definition of done,
 https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, lists its
@@ -109,12 +109,11 @@ writes nothing and exits non-zero:
    It prints only the status and that URL. `--wrong-key` sends an invalid key instead of
    the real one, to record a 401.
    Error cases (an unknown id, a refusal) are worth recording; the recorder keeps them
-   instead of raising. A source whose upstream counts a quota records through a client
-   that never retries, so a 5xx spends no quota on a retry; core's `record` takes no
-   `retry=`, so the recorder's client carries it:
-   `AsyncClient(dataclasses.replace(client.config, retry=RetryPolicy(max_attempts=1)), auth=auth)`,
-   with `AsyncClient` and `RetryPolicy` from `xippios.core`, `client` being
-   `client_for("demo")`.
+   instead of raising. The recorder's client never retries, so a 5xx is recorded as it
+   came and spends no request on a retry (queue row 138 item 3); core's `record` takes no
+   `retry=`, so the client carries it: `recording_client` builds
+   `AsyncClient(dataclasses.replace(client_for("demo").config, retry=RetryPolicy(max_attempts=1)), auth=...)`,
+   for `--wrong-key` as well, and `tests/test_record_fixture.py` checks it offline.
 4. The check runs on the scrubbed fixture before the write, over its text, the
    decoded strings of its response body and, for a write, the request body (the raw
    text, every form field decoded and every string of a JSON value such as `items`): if

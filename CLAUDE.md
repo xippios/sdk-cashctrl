@@ -427,9 +427,11 @@ raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
 
 Run `/record-fixture <endpoint> <case> <parameters>`. It runs
 `direnv exec ~/github/sdk uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]`,
-which performs one live request against the demo organisation, always and only, and
-builds the fixture in memory with core's `fixture_from_response` and
-`Scrub(secrets=[key, its basic-auth token], allow_binary=False)` (conventions §10):
+which performs one live request against the demo organisation, always and only,
+through a client that never retries (`RetryPolicy(max_attempts=1)`, so a 5xx spends no
+request on a retry), and builds the fixture in memory with core's
+`fixture_from_response` and `Scrub(secrets=[key, its basic-auth token],
+allow_binary=False)` (conventions §10):
 credentials scrubbed and the key and its token made `REDACTED` where they appear as
 given. Core's verify searches plain values only: it refuses the exchange when the key
 or its token is still there as given, and when a body is not UTF-8 text (exports are out
