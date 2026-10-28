@@ -309,10 +309,10 @@ replay-tested with a real value.
   send them as given; a preview's `payload` and `changes` and a performed write's
   `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
   as empty.
-- Fixtures never carry their values: the recorder rewrites an `ssn`, `iban` or
-  `qrIban` value (a location's QR-IBAN, also as `qr_iban` or `qr-iban`) to `REDACTED` by
-  name, in any letter case, and its final check refuses only a value that survives the
-  rewrite (How to record a fixture); the recorded location holds `null` for both.
+- Fixtures never carry their values: the recorder rewrites the value of `ssn` and of
+  every name ending in `iban` (`qrIban`, `orgIban`, ...; row 243) to `REDACTED`, in any
+  letter case, and its final check refuses a value that survives the rewrite (How to
+  record a fixture); the recorded location holds `null` for both.
 - `get_report_data` refuses payroll and people reports before their data is requested
   (G5 (1) of 2026-10-28, rows 123 and 225): a type that starts with `SALARY_` or
   contains `PERSON`, or is `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or
@@ -465,9 +465,10 @@ header values and both bodies: e-mail addresses to `user@example.com`, CashCtrl'
 user tags (`API:` and the first four characters of a key, in `createdBy` and
 `lastUpdatedBy`) to `API:REDACTED` and the value of every token-like body field (`hash`,
 `token`, `secret`, `apiKey`, by name; `order/read.json` sends `hash`) and of the
-identifiers `ssn`, `iban` and `qrIban` (`qr_iban`, `qr-iban`; ADR-0017;
-`person/list.json` sends `ssn` and `iban`, `location/list.json` `iban` and `qrIban`, only
-ever `null`) to `REDACTED`. Its verify then refuses, in its own words, a fixture still
+identifiers, `ssn` and every name ending in `iban` (ADR-0017, row 243; `person/list.json`
+sends `ssn` and `iban`, `location/list.json` `iban` and `qrIban`,
+`order/document/read.json` `orgIban`, `orgQrIban` and `recipientIban`, only ever `null`)
+to `REDACTED`. Its verify then refuses, in its own words, a fixture still
 holding the demo host, the subdomain alone or the key or its token, plain or
 percent-encoded, raw or in a decoded string of a JSON body. A response in which the key
 was redacted is written but goes to review (exit status 1). The recorder's final check
@@ -478,8 +479,8 @@ key prefix) or any value but `null` or `REDACTED` under a token-like or identifi
 or what the demo-only rule above refuses. The write stays the recorder's: core's `record`
 would write once its own verify passes, before the recorder's step and check. A compound
 name such as `publicHash` is not scrubbed and goes to review. Grep the file for key
-patterns, e-mail addresses, API user tags, token-like fields and values under `ssn`,
-`iban` and `qrIban` before committing (`/record-fixture`, the grep block below). Fixtures
+patterns, e-mail addresses, API user tags, token-like fields and identifier values
+before committing (`/record-fixture`, the grep block below). Fixtures
 are never typed in by hand.
 
 Writes: `--method POST` is accepted for the eleven write paths the write tools call only
@@ -509,13 +510,13 @@ grep -rniE 'api[_-]?key|token|secret' tests/fixtures
 grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' tests/fixtures | sort -u
 grep -rhoiE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u
 grep -rhoiE '(hash|token|secret|api[_-]?key)\\?": *\\?"[^"\\]*' tests/fixtures | sort -u
-grep -rhoiE --include='*.json' '\\?"(ssn|iban|qr[_-]?iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
-grep -rhoiE --include='*.json' '(ssn=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
+grep -rhoiE --include='*.json' '\\?"(ssn|[a-z0-9_-]*iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
+grep -rhoiE --include='*.json' '(ssn=|iban=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
 ```
 
-The last two count, without printing them, the values of `ssn`, `iban` and `qrIban`
-that are neither `null` nor `REDACTED`, in the JSON bodies and in a write's form body;
-both print `0`.
+The last two count, without printing them, the values of `ssn` and of every name ending
+in `iban` that are neither `null` nor `REDACTED`, in the JSON bodies and in a write's
+form body; both print `0`.
 
 ### Commands
 
@@ -546,7 +547,7 @@ Every live run here takes `--tb=short`, for the reason `.claude/family.md` gives
 Besides `.claude/family.md`'s list:
 
 - Never hand-write a fixture, and never commit one without grepping for key patterns
-  and for values under `ssn`, `iban` and `qrIban`.
+  and for values under `ssn` and every name ending in `iban`.
 - Never record a fixture, run a live test or make a live call against any organisation
   but `demo`; never set `CASHCTRL_ORGS` with real names in a session or a test.
 - Never print, log or commit `CASHCTRL_DEMO_SUBDOMAIN` or any organisation's subdomain.

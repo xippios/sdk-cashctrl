@@ -1143,6 +1143,64 @@ def test_a_locations_qr_iban_becomes_redacted(
     assert "review" not in capsys.readouterr().out
 
 
+def test_every_field_ending_in_iban_becomes_redacted(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An order document's ``orgIban``, ``orgQrIban`` and ``recipientIban`` (queue row 243).
+
+    ``order/document/read.json`` sends them, only seen ``null`` in demo; the answer is
+    set in memory here, not a fixture. Every name that ends in ``iban`` is rewritten.
+    """
+    document = {
+        "id": 3,
+        "orgIban": "CH00ORGTEST",
+        "orgQrIban": "CH00QRTEST",
+        "recipientIban": "CH00RECIPIENT",
+        "recipient": {"bank": {"payeeIban": "CH00NESTED"}},
+        "orgName": "Muster Handel AG Demo",
+    }
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/order/document/read.json")
+    route.mock(return_value=httpx.Response(200, json={"success": True, "data": document}))
+    assert recorder.main(["order/document/read.json", "ibans", "id=3"]) == 0
+    path = tmp_path / "tests" / "fixtures" / "order_document_read" / "ibans.json"
+    text = path.read_text()
+    assert "CH00" not in text
+    written = json.loads(json.loads(text)["response"]["body"])["data"]
+    assert [written[name] for name in ("orgIban", "orgQrIban", "recipientIban")] == ["REDACTED"] * 3
+    assert written["recipient"]["bank"]["payeeIban"] == "REDACTED"
+    assert written["orgName"] == "Muster Handel AG Demo"
+    assert "review" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("content", "name"),
+    [
+        (b'{"success": true, "data": {"org\\u0049ban": "CH00ORGTEST"}}', "orgIban"),
+        (json.dumps({"data": {"recipientIban": ["CH00RECIPIENT"]}}).encode(), "recipientIban"),
+    ],
+    ids=["escaped-name", "array"],
+)
+def test_a_compound_iban_the_scrub_cannot_reach_is_never_written(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    content: bytes,
+    name: str,
+) -> None:
+    """A value that survives the rewrite under a name ending in ``iban`` writes nothing."""
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/order/document/read.json")
+    route.mock(return_value=httpx.Response(200, content=content))
+    assert recorder.main(["order/document/read.json", "unreachable", "id=3"]) == 1
+    assert not (tmp_path / "tests" / "fixtures" / "order_document_read").exists()
+    out = capsys.readouterr().out
+    assert f"a value other than null or REDACTED under {name}" in out
+    assert "CH00" not in out
+
+
 def test_a_write_that_sends_an_identifier_is_not_recorded(
     recorder: ModuleType,
     tmp_path: Path,
@@ -1159,6 +1217,10 @@ def test_a_write_that_sends_an_identifier_is_not_recorded(
     out = capsys.readouterr().out
     assert "a value other than null or REDACTED under iban" in out
     assert "CH00TEST" not in out
+    pairs = ["company=xippios-live AG", "recipientIban=CH00TEST"]
+    assert recorder.main(["person/create.json", "ok", "--method", "POST", *pairs]) == 1
+    assert not (tmp_path / "tests" / "fixtures" / "person_create").exists()
+    assert "under recipientIban" in capsys.readouterr().out
 
 
 ESCAPED_40 = "Xy" * 20  # 40 characters, longer than the observed hash
@@ -1233,10 +1295,14 @@ def test_a_compound_name_goes_to_review(
         ({"data": {"bankAccounts": [{"IBAN": "CH00TEST"}]}}, True),
         ({"data": [{"qrIban": "CH00TEST"}]}, True),
         ({"QR_IBAN": "CH00TEST"}, True),
+        ({"orgIban": "CH00TEST"}, True),
+        ({"data": {"recipientIban": 7731}}, True),
         ({"hash": "REDACTED"}, False),
         ({"hash": None}, False),
         ({"ssn": None, "iban": "REDACTED"}, False),
         ({"qrIban": None, "qr-iban": "REDACTED"}, False),
+        ({"orgQrIban": None, "recipientIban": "REDACTED"}, False),
+        ({"ibanLabel": "CH00TEST"}, False),
         ({"hashtag": TOKEN}, False),
         ({"publicHash": TOKEN}, False),
     ],
@@ -1254,10 +1320,14 @@ def test_a_compound_name_goes_to_review(
         "nested-iban",
         "qr-iban",
         "qr-iban-snake-upper",
+        "org-iban",
+        "recipient-iban-number",
         "scrubbed",
         "null",
         "identifiers-settled",
         "qr-iban-settled",
+        "compound-ibans-settled",
+        "iban-not-last",
         "other-name",
         "compound-name",
     ],

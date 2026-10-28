@@ -109,6 +109,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The fixture recorder rewrites to `REDACTED` the value of every body field whose name
+  ends in `iban`, in any case and at any depth, not only `iban` and `qrIban`, and its
+  final check refuses one that survives, so `order/document/read.json`'s `orgIban`,
+  `orgQrIban` and `recipientIban` (only seen `null` in demo) can never be recorded set;
+  `ssn` stays a whole name. The count-only fixture greps follow (queue row 243).
 - CashCtrl's API user tag (`API:` and the first four characters of the key) no longer
   reaches results: every model's `created_by` and `last_updated_by` masks it to
   `API:REDACTED`, as the fixtures hold it, so a live answer has a fixture's shape;
