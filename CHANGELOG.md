@@ -13,9 +13,9 @@ All notable changes to this project are documented here. The format follows
   layout and language, the sender's and the recipient's address as printed, the payment
   references of the QR-bill and the mailing defaults. `OrderDocument` is typed from the
   answer recorded on 2026-10-29; the task returns `OrderDocumentProjection`, without
-  `orgIban`, `orgQrIban` and `recipientIban` (G5 (5) of 2026-10-28; ADR-0017). The
-  recorder rewrites `iban` and `qrIban` by whole name only, so these compound names are
-  neither rewritten nor refused: the recorded document holds `null` for all three.
+  `orgIban`, `orgQrIban` and `recipientIban` (G5 (5) of 2026-10-28; ADR-0017); the
+  recorded document holds `null` for all three, which the recorder now rewrites and
+  refuses by name (queue row 243, under Fixed).
 - Five file tasks, `download_order_document` and the list exports
   `export_journal_entries`, `export_accounts`, `export_persons` and `export_orders`,
   named in `BULK_TASKS`: Python only, no MCP tool or HTTP route (G5 (5) and (6) of
@@ -128,7 +128,9 @@ All notable changes to this project are documented here. The format follows
   ends in `iban`, in any case and at any depth, not only `iban` and `qrIban`, and its
   final check refuses one that survives, so `order/document/read.json`'s `orgIban`,
   `orgQrIban` and `recipientIban` (only seen `null` in demo) can never be recorded set;
-  `ssn` stays a whole name. The count-only fixture greps follow (queue row 243).
+  `ssn` stays a whole name. The count-only fixture greps follow, and `get_report_data`
+  drops every key ending in `iban` from report rows by the same rule, not only `iban`
+  and `qrIban` (queue row 243).
 - CashCtrl's API user tag (`API:` and the first four characters of the key) no longer
   reaches results: every model's `created_by` and `last_updated_by` masks it to
   `API:REDACTED`, as the fixtures hold it, so a live answer has a fixture's shape;

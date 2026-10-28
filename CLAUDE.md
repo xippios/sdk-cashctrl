@@ -279,8 +279,8 @@ more:
 7. **Statuses and payments** (G5 (8) of 2026-10-28): `update_order_status` and
    `create_order_payment` send the fields given, nothing read: a preview sends no
    request. A payment (pain.001 or PDF) books nothing and has no documented delete: the
-   live test deletes the paid order, checks that none of its journal entries is left
-   and leaves the payment, accepted residue (Johannes, 2026-10-28).
+   live test deletes the paid order and leaves the payment, accepted residue (Johannes,
+   2026-10-28).
 
 ## Personal identifiers (ADR-0017)
 
@@ -321,8 +321,8 @@ replay-tested with a real value.
   `report/tree.json` once per organisation into a `WeakKeyDictionary` keyed on its
   client, which `TENANTS.reset()` or a changed variable drops; `get_report_tree`
   refreshes it; an element the kept tree lacks reads it once more, one still missing is
-  asked of upstream. Other reports come back as sent, every key named `ssn`, `iban` or
-  `qrIban` dropped at any depth, in any case (`_report`; ADR-0003, amendment 2026-10-26).
+  asked of upstream. Other reports come back as sent, every key `ssn` or ending in `iban`
+  dropped at any depth, in any case (`_report`; row 243; ADR-0003, amendment 2026-10-26).
 - A task that fetches them deliberately may return them and says so in its docstring.
   Two files may carry them, at the caller's path, never in a result or a tool
   (`BULK_TASKS`; Johannes, 2026-10-28): `export_persons` names `PERSON_COLUMNS` unless
@@ -500,8 +500,7 @@ delete; confirm afterwards with one list per resource (`query=xippios-live`, cou
 that nothing is left.
 
 The write fixtures record marked records created, read, updated and deleted again
-(2026-10-24, 2026-10-27) and the purchase order 26's status and payments, `PAIN`
-refused, `CASH_PDF` created (2026-10-29).
+(2026-10-24, 2026-10-27) and a purchase order's status and payments (2026-10-29).
 
 Still grep before committing:
 

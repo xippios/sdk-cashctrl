@@ -77,7 +77,7 @@ below. Persons come back without the personal identifiers `ssn` and `iban`
 (`list_persons`, `get_person`, the persons `get_journal_entry` names; ADR-0017),
 locations and an order's document without their bank account numbers (`iban` and
 `qr_iban`, `list_locations`; `orgIban`, `orgQrIban` and `recipientIban`,
-`get_order_document`), and report rows without any key named `ssn`, `iban` or `qrIban`
+`get_order_document`), and report rows without any key named `ssn` or ending in `iban`
 (`get_report_data`, which refuses payroll and people reports outright). An API user that
 wrote or changed a record shows as `API:REDACTED` in `created_by` and `last_updated_by`,
 as in the fixtures; CashCtrl writes `API:` and the first four characters of its key
@@ -394,8 +394,8 @@ data is requested: every report whose type (as `get_report_tree` shows it) start
 `PEOPLE` or `ORG_CHART`; `WITHHOLDING_TAX_RATES`, rates without persons, is read. The
 type comes from the organisation's report tree, read once per
 organisation and process and kept; a report the tree does not list is asked of
-upstream. Every key named `ssn`, `iban` or `qrIban` is dropped from what comes back, in
-any letter case and at any depth.
+upstream. Every key named `ssn` or ending in `iban` (`qrIban`, `orgIban`) is dropped from
+what comes back, in any letter case and at any depth.
 `list_account_categories` is the flat `account/category/list.json`, each category with
 its `parent_id`; `account/category/tree.json` nests the same categories with display
 fields only. `list_custom_fields` takes the module (`type`: `JOURNAL`, `PERSON`,

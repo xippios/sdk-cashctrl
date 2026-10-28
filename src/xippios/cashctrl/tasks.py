@@ -20,8 +20,8 @@ The persons a task returns are projections without the personal identifiers ``ss
 ``iban`` (ADR-0017, ``_person`` and its neighbours), the locations and an order's
 document projections without their bank account numbers (``_location``,
 ``_order_document``), and the rows of a
-report, kept as upstream sends them, lose every key named ``ssn``, ``iban`` or
-``qrIban`` in any letter case and at any depth (``_report``); the endpoint wrappers' read
+report, kept as upstream sends them, lose every key named ``ssn`` or ending in ``iban``
+in any letter case and at any depth (``_report``); the endpoint wrappers' read
 models keep them. ``get_report_data`` refuses payroll and people reports by their type,
 read from ``report/tree.json`` once per organisation and kept (``_report_type``).
 
@@ -1328,17 +1328,23 @@ async def _report_type(org: str, element_id: int) -> str | None:
     return _keep_report_types(client, tree.data).get(element_id)
 
 
-_IDENTIFIER_KEYS = frozenset({"ssn", "iban", "qriban"})
-"""Keys dropped from a report's raw rows, compared in lower case (ADR-0017, row 123)."""
+def _is_identifier(key: str) -> bool:
+    """A key dropped from a report's raw rows: ``ssn``, or a name ending in ``iban``.
+
+    In any letter case: ``iban``, ``qrIban``, ``orgIban``, ``recipientIban`` (ADR-0017,
+    queue rows 123 and 243), the name rule the fixture recorder applies.
+    """
+    name = key.lower()
+    return name == "ssn" or name.endswith("iban")
 
 
 def _without_identifiers(value: JsonValue) -> JsonValue:
-    """``value`` without a key named ``ssn``, ``iban`` or ``qrIban``, in any case, at any depth."""
+    """``value`` without a key ``_is_identifier`` names, at any depth."""
     if isinstance(value, dict):
         return {
             key: _without_identifiers(item)
             for key, item in value.items()
-            if key.lower() not in _IDENTIFIER_KEYS
+            if not _is_identifier(key)
         }
     if isinstance(value, list):
         return [_without_identifiers(item) for item in value]
@@ -1441,8 +1447,9 @@ async def get_report_data_async(
     the one ``get_report_tree`` shows: the first call for an organisation reads its
     report tree and keeps it, and an element the kept tree does not list reads it once
     more; one the tree does not list at all is asked of upstream as given. From every
-    other report, each key named ``ssn``, ``iban`` or ``qrIban``, in any letter case and
-    at any depth, is dropped before the data comes back; nothing else is.
+    other report, each key named ``ssn`` or ending in ``iban`` (``qrIban``, ``orgIban``),
+    in any letter case and at any depth, is dropped before the data comes back; nothing
+    else is.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.

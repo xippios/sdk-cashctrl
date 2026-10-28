@@ -1317,9 +1317,8 @@ async def test_a_live_iban_on_an_order_document_never_reaches_a_result(
 ) -> None:
     """On the recorded answer changed in memory: the three numbers set to a made-up IBAN.
 
-    The recorder rewrites ``iban`` and ``qrIban`` by whole name only, so a document whose
-    numbers are set would be recorded with them; the projection keeps them out of every
-    result regardless.
+    The recorder rewrites every name ending in ``iban`` (queue row 243), so no fixture
+    holds a set number; the projection keeps them out of every result regardless.
     """
     fixture = recorded(fixtures_dir, "order_document_read", "by_id")
     body = json.loads(fixture.response.body)
@@ -2068,6 +2067,37 @@ def test_get_report_data_drops_identifier_keys_at_any_depth(
     assert IBAN not in result.model_dump_json()
     faithful = sync(api.report_element_data)(DEMO, 1, fiscal_period=FP2025)
     assert typing.cast(dict[str, typing.Any], faithful.data[0])["ssn"] == SSN
+
+
+def test_get_report_data_drops_every_key_ending_in_iban(
+    replay_fixture: Callable[[str, str], respx.Route],
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+) -> None:
+    """On the recorded balance sheet changed in memory: compound IBAN names (row 243).
+
+    ``orgIban`` two levels down, ``recipient_iban`` in a top-level row and ``ORG-QR-IBAN``
+    in ``properties`` are dropped, as the recorder rewrites every name ending in
+    ``iban``; ``ibanCount``, which only starts with it, and ``ssnLabel`` stay.
+    """
+    original = recorded_body(fixtures_dir, "report_element_data", "balance_fp2025")
+    changed = json.loads(json.dumps(original))
+    top = changed["data"][0]
+    nested = top["data"][0]["data"][0]
+    nested["orgIban"] = IBAN
+    top["recipient_iban"] = IBAN
+    changed["properties"]["columns"][0]["ORG-QR-IBAN"] = IBAN
+    nested["ibanCount"] = 2
+    top["ssnLabel"] = "kept"
+    replay_fixture("report_tree", "default")
+    respx_mock.get(f"{BASE}/report/element/data.json").respond(200, json=changed)
+    result = tasks.get_report_data(DEMO, 1, fiscal_period=FP2025)
+    expected = json.loads(json.dumps(original))
+    expected["data"][0]["data"][0]["data"][0]["ibanCount"] = 2
+    expected["data"][0]["ssnLabel"] = "kept"
+    assert result.data.data == expected["data"], "the IBAN keys are gone, nothing else"
+    assert result.data.properties == original["properties"]
+    assert IBAN not in result.model_dump_json()
 
 
 def test_get_report_data_sends_the_dates_as_upstream_reads_them(

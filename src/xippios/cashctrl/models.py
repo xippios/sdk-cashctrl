@@ -1280,8 +1280,8 @@ class OrderDocument(_OrderDocumentFields):
 
     This read model stays faithful; ``get_order_document`` returns
     ``OrderDocumentProjection``, which leaves out the three bank account numbers
-    (ADR-0017). The recorder rewrites ``iban`` and ``qrIban`` by whole name only, not
-    these compound names; the recorded answer holds ``null`` for all three.
+    (ADR-0017). The recorder rewrites every name ending in ``iban``, these three included
+    (queue row 243); the recorded answer holds ``null`` for all three.
     """
 
     org_iban: JsonValue = Field(default=None, validation_alias="orgIban")
