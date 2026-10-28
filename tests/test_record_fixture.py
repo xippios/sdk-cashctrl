@@ -1,7 +1,8 @@
 """The fixture recorder records the demo organisation only and never writes its host or key.
 
-It also holds to its policies: GET, and POST for the write tools' create, update and
-delete operations only; .json only; no e-mail address, in the request body neither. The demo
+It also holds to its policies: GET, and POST for the write tools' operations only, an
+order write only for orders marked xippios-live, read first; .json only; no e-mail
+address, in the request body neither. The demo
 organisation is synthetic, so every module and every amount may be recorded. The key as
 given and binary bodies are core's ``Scrub``; the host, the encoded forms, the JSON-decoded
 verify and the rest are the recorder's own (``TenantScrub``, ADR-0024), whose tests below
@@ -13,6 +14,7 @@ import base64
 import dataclasses
 import importlib.util
 import json
+import re
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -403,8 +405,9 @@ def test_only_get_and_post_are_recorded(
         "journal/read.json",
         "journal/update_attachments.json",
         "journal/update_recurrence.json",
-        "order/update_status.json",
+        "order/continue.json",
         "order/continue_as.json",
+        "order/payment/download",
         "fiscalperiod/switch.json",
         "person/categorize.json",
         "journal/create",
@@ -416,7 +419,7 @@ def test_only_get_and_post_are_recorded(
         "order/category/delete.json",
     ],
 )
-def test_a_post_is_recorded_for_the_nine_write_paths_only(
+def test_a_post_is_recorded_for_the_eleven_write_paths_only(
     recorder: ModuleType,
     tmp_path: Path,
     respx_mock: respx.MockRouter,
@@ -427,11 +430,11 @@ def test_a_post_is_recorded_for_the_nine_write_paths_only(
     assert not respx_mock.calls, "refused before any request"
     assert not (tmp_path / "tests" / "fixtures").exists()
     out = capsys.readouterr().out
-    assert out.startswith("not recorded: a POST is recorded only for one of the nine write paths")
+    assert out.startswith("not recorded: a POST is recorded only for one of the eleven write paths")
     assert out.rstrip().endswith(f"not {endpoint}")
 
 
-NINE = [
+ELEVEN = [
     "journal/create.json",
     "journal/update.json",
     "journal/delete.json",
@@ -441,12 +444,14 @@ NINE = [
     "order/create.json",
     "order/update.json",
     "order/delete.json",
+    "order/update_status.json",
+    "order/payment/create.json",
 ]
 
 
-@pytest.mark.parametrize("endpoint", NINE)
-def test_the_nine_write_paths_may_be_posted(recorder: ModuleType, endpoint: str) -> None:
-    assert frozenset(NINE) == recorder.WRITE_PATHS
+@pytest.mark.parametrize("endpoint", ELEVEN)
+def test_the_eleven_write_paths_may_be_posted(recorder: ModuleType, endpoint: str) -> None:
+    assert frozenset(ELEVEN) == recorder.WRITE_PATHS
     assert recorder.refusal("POST", endpoint) is None
     assert recorder.refusal("post", endpoint) is None
 
@@ -468,6 +473,181 @@ def test_a_create_without_the_marker_is_refused(
     assert recorder.unmarked("POST", endpoint, {"company": "xippios-live AG"}) is None
     assert recorder.unmarked("POST", "journal/update.json", {"id": "51"}) is None
     assert recorder.unmarked("POST", "order/update.json", {"id": "8"}) is None
+    # A payment has no text to mark: its orders are read and checked instead.
+    assert recorder.unmarked("POST", "order/payment/create.json", {"orderIds": "21"}) is None
+    assert recorder.ORDER_WRITES == {
+        "order/update_status.json": "ids",
+        "order/payment/create.json": "orderIds",
+    }
+
+
+# The order writes: every order named is read first and must be marked (Johannes,
+# 2026-10-28). The reads are answered by respx with recorded order reads changed in memory.
+
+ORDER_READ = f"https://{REAL}.cashctrl.com/api/v1/order/read.json"
+ORDER_WRITE_CASES = [
+    ("order/update_status.json", "ids", ["statusId=16"]),
+    ("order/payment/create.json", "orderIds", ["date=2026-10-30", "type=PAIN"]),
+]
+"""Each order write, the field naming its orders, and the rest of its pairs."""
+
+
+def order_answer(order_id: int, *, nr: str, description: str | None) -> dict[str, Any]:
+    """The recorded read of the marked order 20 (``order_read/for_update``), given another
+    id, ``nr`` and ``description``: a read changed in memory, not a fixture."""
+    path = Path(__file__).parent / "fixtures" / "order_read" / "for_update.json"
+    body: dict[str, Any] = json.loads(json.loads(path.read_text())["response"]["body"])
+    body["data"].update(id=order_id, nr=nr, description=description)
+    return body
+
+
+def serve_orders(respx_mock: respx.MockRouter, *answers: tuple[int, Any]) -> list[respx.Route]:
+    """One ``order/read.json`` route per order id, answering ``httpx.Response`` or JSON."""
+    routes = []
+    for order_id, answer in answers:
+        route = respx_mock.get(ORDER_READ, params={"id": str(order_id)})
+        response = (
+            answer if isinstance(answer, httpx.Response) else httpx.Response(200, json=answer)
+        )
+        routes.append(route.mock(return_value=response))
+    return routes
+
+
+@pytest.mark.parametrize(("endpoint", "field", "pairs"), ORDER_WRITE_CASES)
+@pytest.mark.parametrize(
+    "marked",
+    [
+        {"nr": "xippios-live", "description": "xippios-live test"},
+        {"nr": "xippios-live", "description": None},
+        {"nr": "EK-2026-901", "description": "xippios-live test"},
+    ],
+    ids=["nr and description", "nr", "description"],
+)
+def test_an_order_write_on_marked_orders_reads_them_then_sends_it(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+    field: str,
+    pairs: list[str],
+    marked: dict[str, Any],
+) -> None:
+    reads = serve_orders(
+        respx_mock, (21, order_answer(21, **marked)), (22, order_answer(22, **marked))
+    )
+    write = respx_mock.post(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}").mock(
+        return_value=httpx.Response(200, json={"success": True, "message": "ok"})
+    )
+    argv = [endpoint, "ok", "--method", "POST", f"{field}=21,22", *pairs]
+    assert recorder.main(argv) == 0
+    assert [route.call_count for route in reads] == [1, 1], "one read per order, no more"
+    assert write.call_count == 1
+    assert [call.request.method for call in respx_mock.calls] == ["GET", "GET", "POST"]
+    assert write.calls.last.request.content.decode().startswith(f"{field}=21%2C22&")
+    written = tmp_path / "tests" / "fixtures" / recorder.fixture_endpoint(endpoint) / "ok.json"
+    fixture = json.loads(written.read_text())
+    assert fixture["request"]["url"] == f"https://demo.cashctrl.com/api/v1/{endpoint}"
+    assert "order/read.json" not in written.read_text(), "the reads are never recorded"
+    out = capsys.readouterr().out
+    assert "record or run order/delete.json for the marked orders it named" in out
+    assert ("no delete of a payment" in out) is (endpoint == "order/payment/create.json")
+
+
+@pytest.mark.parametrize(("endpoint", "field", "pairs"), ORDER_WRITE_CASES)
+@pytest.mark.parametrize(
+    ("answer", "reason"),
+    [
+        (
+            order_answer(22, nr="EK-2026-001", description="Wareneinkauf Büromöbel"),
+            "order 22 carries no marker",
+        ),
+        (
+            order_answer(22, nr="xippios-live-2", description="xippios live"),
+            "order 22 carries no marker",
+        ),
+        (
+            httpx.Response(
+                200, json={"success": False, "errorMessage": "This order does not exist."}
+            ),
+            r"order 22 could not be read \(HTTP 200\)",
+        ),
+        (
+            httpx.Response(500, text="Internal Server Error"),
+            r"order 22 could not be read \(HTTP 500\)",
+        ),
+        (httpx.Response(200, text="<html>not json</html>"), r"order 22 could not be read"),
+        (order_answer(23, nr="xippios-live", description=None), r"order 22 could not be read"),
+    ],
+    ids=["unmarked", "near miss", "unknown order", "server error", "not json", "another id"],
+)
+def test_an_order_write_naming_an_unmarked_or_unreadable_order_is_refused(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+    field: str,
+    pairs: list[str],
+    answer: Any,
+    reason: str,
+) -> None:
+    """Fail closed: the first order is marked, the second is not or cannot be read."""
+    marked = order_answer(21, nr="xippios-live", description="xippios-live test")
+    reads = serve_orders(respx_mock, (21, marked), (22, answer))
+    write = respx_mock.post(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}")
+    argv = [endpoint, "refused", "--method", "POST", f"{field}=21,22", *pairs]
+    assert recorder.main(argv) == 1
+    assert [route.call_count for route in reads] == [1, 1]
+    assert not write.called, "nothing is sent to the write path"
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    out = capsys.readouterr().out
+    assert re.match(
+        rf"not recorded: {re.escape(endpoint)} is recorded only for orders marked "
+        rf"xippios-live: {reason}",
+        out,
+    ), out
+    assert "demo organisation changed" not in out
+    assert "Büromöbel" not in out, "no answer is printed"
+    assert "does not exist" not in out, "no answer is printed"
+
+
+@pytest.mark.parametrize(("endpoint", "field", "pairs"), ORDER_WRITE_CASES)
+@pytest.mark.parametrize("ids", [None, "", "0", "21,", "21;22", "abc", "-1", "2.5"])
+def test_an_order_write_without_order_ids_is_refused_before_any_request(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+    field: str,
+    pairs: list[str],
+    ids: str | None,
+) -> None:
+    named = [] if ids is None else [f"{field}={ids}"]
+    assert recorder.main([endpoint, "refused", "--method", "POST", *named, *pairs]) == 1
+    assert not respx_mock.calls, "no read and no write"
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    assert capsys.readouterr().out.startswith(
+        f"not recorded: {endpoint} is recorded only for orders marked xippios-live: {field} "
+        "must name the orders"
+    )
+
+
+def test_the_order_ids_and_the_marker_are_read_as_the_live_tests_read_them(
+    recorder: ModuleType,
+) -> None:
+    assert recorder.order_ids("20") == [20]
+    assert recorder.order_ids("20,21") == [20, 21]
+    assert recorder.order_ids("20, 21") == [20, 21]
+    for wrong in ("", "0", "20,", ",20", "x", "-3", "1e3", "\uff12\uff10"):
+        assert recorder.order_ids(wrong) is None, wrong
+    assert recorder.marked_order({"nr": "xippios-live", "description": None})
+    assert recorder.marked_order({"nr": None, "description": "a xippios-live order"})
+    assert not recorder.marked_order({"nr": "xippios-live-1", "description": "xippios live"})
+    assert not recorder.marked_order({"nr": None, "description": None})
+    assert not recorder.marked_order(None)
+    assert not recorder.marked_order(["xippios-live"])
 
 
 def test_a_write_is_recorded_with_its_form_body(
