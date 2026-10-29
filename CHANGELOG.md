@@ -8,6 +8,47 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.3.0] - 2026-10-29
 
+The third release. It ships on xippios-core 0.3.0 (`xippios-core~=0.3.0` from PyPI,
+its `mcp`, `http` and `testing` extras likewise) and sdk-template v0.2.2, aligned with
+template v0.3.0 by hand: the family rules are imported from `.claude/family.md`, a frozen
+copy of the template's file, and the package follows conventions 1.22. The three points
+0.2.0 carried forward are settled: `get_report_data` refuses payroll and people reports
+by their type before any data is requested, the API user tag CashCtrl writes into
+`created_by` and `last_updated_by` reaches every result masked as `API:REDACTED`, and a
+discovery mode of the demo seeder (`scripts/seed_demo.py --discovery`) creates a custom
+field and a cost centre, from whose recorded answers `CustomField` and `CostCenter` are
+typed again. New are `get_order_document`, an order's document as it is printed and
+sent; five Python-facing file tasks, `download_order_document` and the list exports
+`export_journal_entries`, `export_accounts`, `export_persons` and `export_orders`, which
+stream a file to the path the caller gives and serve no MCP tool or HTTP route; and two
+write tools, `update_order_status` and `create_order_payment`. The fixture recorder
+sends an order write only after it has read every order the write names and found it
+marked `xippios-live`, and it treats every field whose name ends in `iban` as a personal
+identifier, as `get_report_data` now does for report rows. That makes 24 read tasks,
+`list_organisations` among them, 5 file tasks and 11 write tools.
+
+Not covered: the fiscal period writes (`fiscalperiod/create`, `complete`, `reopen`,
+`delete`, `complete_months`, `reopen_months`, `switch`; fiscal periods stay read-only,
+as Johannes decided on 2026-10-28), salary (`salary/*`, which holds personal data
+beyond `ssn` and `iban`, for which no policy exists yet), journal imports
+(`journal/import/*`), the book-entry writes (`order/bookentry/create`, `update`,
+`delete`), dossiers, `order/continue`, `order/document/mail` and
+`order/document/update`, `order/document/read.zip`, `order/payment/download`,
+`person/list.vcf`, `fiscalperiod/update` and `fiscalperiod/task/*`, the file module
+(`file/*`, its writes and its own lists), inventory, settings, sequence numbers,
+depreciation and exchange-difference bookings. cashctrl stays on template v0.2.2 and is
+never updated to template v0.3.0 by `copier update`, which would delete the write
+server; it adopts later core minors by hand.
+
+Known points, carried into the next release: a payment cannot be deleted, since
+CashCtrl documents no payment delete, so the `CASH_PDF` payment the live test creates
+stays behind after its order is deleted (it books nothing and moves no amount);
+`list_cost_centers` sends no `fiscalPeriodId`, which upstream documents for the
+balances, so `opening_amount` and `end_amount` are assumed to be the current fiscal
+period's, and a fiscal period parameter is left to a later release; and the fixture
+recorder refuses a GET to the eleven write paths but not yet to any other path the
+snapshot documents as a POST, a general check a later release adds.
+
 ### Added
 
 - `get_order_document` (`order/document/read.json`, the tool
