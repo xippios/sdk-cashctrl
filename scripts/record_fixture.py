@@ -14,10 +14,11 @@ as underscores and without its extension: ``tests/fixtures/account_read/unknown_
 as upstream names them, sent in the order given.
 
 The organisation is not a parameter. The recorder removes ``CASHCTRL_ORGS`` from its own
-environment and always records through ``client_for("demo")``, so it cannot reach a
-productive organisation. ``--wrong-key`` sends ``not-a-valid-key`` instead of the real key,
-through a throwaway client with the demo organisation's configuration, to record a 401
-without touching the real key.
+environment and always records through ``client_for("demo")``'s configuration, so it
+cannot reach a productive organisation, in a client of its own that never retries
+(``recording_client``, ``RetryPolicy(max_attempts=1)``): a 5xx is recorded as it came and
+spends no request on a retry. ``--wrong-key`` sends ``not-a-valid-key`` instead of the
+real key, through the same kind of client, to record a 401 without touching the real key.
 
 The demo organisation holds synthetic books only, seeded by ``scripts/seed_demo.py`` and
 described in ``docs/demo-org.md``: invented companies on placeholder streets,
@@ -111,6 +112,7 @@ core's verify passes, before the recorder's step and final check could run.
 
 import argparse
 import base64
+import dataclasses
 import json
 import os
 import re
@@ -121,7 +123,7 @@ from typing import Any
 from urllib.parse import parse_qsl
 
 import httpx
-from xippios.core import AsyncClient, BasicKeyAuth, sync
+from xippios.core import AsyncClient, BasicKeyAuth, RetryPolicy, sync
 from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response, fixture_path
 
 from xippios.cashctrl._client import DEMO, SOURCE, TENANTS, client_for
@@ -840,6 +842,22 @@ def changed_reminder(endpoint: str, response: httpx.Response) -> str:
     )
 
 
+def recording_client(*, wrong_key: bool = False) -> AsyncClient:
+    """The client the recorder sends through: the demo organisation's, never retrying.
+
+    ``client_for("demo")``'s configuration (base URL, pace, ``classify``) with
+    ``RetryPolicy(max_attempts=1)``, so a 5xx or a timeout is recorded as it came and
+    spends no further request on a retry (queue row 138 item 3); core's ``record`` takes
+    no ``retry=``, so the client carries it. The key is read from
+    ``CASHCTRL_DEMO_API_KEY`` on the request, as the package's own client reads it, or is
+    ``WRONG_KEY`` with ``wrong_key``.
+    """
+    config = dataclasses.replace(client_for(DEMO).config, retry=RetryPolicy(max_attempts=1))
+    key_var = TENANTS.var(DEMO, "API_KEY")
+    auth = BasicKeyAuth(key_var, key=WRONG_KEY if wrong_key else None, source=SOURCE)
+    return AsyncClient(config, auth=auth)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Refuse or record, scrub in memory, check, write; return the exit status."""
     args = parse_args(argv)
@@ -850,11 +868,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"not recorded: {refused}")  # noqa: T201
         return 1
     os.environ.pop(TENANTS.list_var, None)  # the recorder sees the demo organisation only
-    client = client_for(DEMO)
+    client = recording_client(wrong_key=args.wrong_key)
     key_var = TENANTS.var(DEMO, "API_KEY")
-    if args.wrong_key:
-        auth = BasicKeyAuth(key_var, key=WRONG_KEY, source=SOURCE)
-        client = AsyncClient(client.config, auth=auth)
     path = fixture_path(FIXTURES, fixture_endpoint(args.endpoint), args.case)
     key = os.environ.get(key_var, "")
     subdomain = TENANTS.field(DEMO, "SUBDOMAIN")

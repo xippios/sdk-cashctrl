@@ -160,6 +160,62 @@ A run that stops halfway leaves a partly seeded organisation, which the script t
 refuses as not empty. Either finish the rest by hand or delete the organisation and start
 over with a fresh one; the script never deletes or repairs anything.
 
+## The discovery records (`--discovery`)
+
+The books above hold no custom field and no cost centre, so `list_custom_fields` and
+`list_cost_centers` would answer empty lists, and their models could only be typed from
+the documentation's create tables. `--discovery` is the script's second mode, for an
+organisation the first mode seeded (whose `--apply --yes` now refuses it as not empty):
+it creates exactly one record of each, decided by Johannes on 2026-10-28 (G5 (3)). The
+first mode still creates neither. Its plan, offline, then the run:
+
+```bash
+uv run scripts/seed_demo.py --discovery            # same as --discovery --plan
+direnv exec ~/github/sdk env -u CASHCTRL_ORGS uv run scripts/seed_demo.py --discovery --apply --yes
+```
+
+| Record | Endpoint | Parameters sent |
+| --- | --- | --- |
+| custom field | `customfield/create.json` (`docs/upstream/common.md`) | `type` `PERSON`, `dataType` `TEXT`, `rowLabel` `Kundenreferenz`: the customer reference Muster Handel AG keeps per partner |
+| cost centre | `account/costcenter/create.json` (`docs/upstream/account.md`) | `number` `100`, `name` `Verkauf Büromöbel`: the sales of office furniture |
+
+Only the mandatory parameters are sent: no group, no values, no category, no targets, no
+notes. The API user's role must also read and create custom fields and cost centres.
+
+Before the first write, `--discovery --apply --yes` refuses with exit status 1, a message
+that shows no value, and nothing written, unless
+
+1. both variables are set and the subdomain is one DNS label (guard 1 of the first mode);
+2. the company name of the main location contains `demo` in any case (its guard 2);
+3. `customfield/list.json` for `type=PERSON` and `account/costcenter/list.json` both
+   answer no record; then it creates the custom field, then the cost centre. When both
+   answer exactly this mode's own record, the custom field matched by `rowLabel` and
+   `dataType` and the cost centre by `name` and `number` (compared as a number, `100`
+   and `"100"` alike), it says that there is nothing to do and exits with status 0, so a
+   second run changes nothing. Anything else refuses, naming each list's count and
+   whether it holds this mode's record: one list holding its record while the other is
+   empty (a run stopped between the two creates: create the other by hand with the
+   parameters above), another record in either list, or a list without a numeric `total`
+   or with a `total` other than the records it lists (neither list documents paging).
+
+The first mode's guards 3 and 4 do not apply. The pace, the scrub of upstream text, the
+refusal shapes and the stop at the first answer that is not HTTP 200 with
+`success: true` are the first mode's. It never deletes anything. At the end it prints
+the records created, the `total` both lists report, and "Observed write semantics", whose
+UTF-8 round trip is the cost centre's name read back from `account/costcenter/list.json`
+byte for byte (it carries an umlaut); a name not found as sent fails the run with exit
+status 1.
+
+The one run, on 2026-10-28 against the seeded demo organisation, found both lists empty
+and created both records, seven requests in all, every one answered HTTP 200: the
+location, the two lists, the two creates (`customfield/create.json` and
+`account/costcenter/create.json` answer `insertId`, `message` and `success`, `insertId`
+a JSON integer, `1` for each) and the two lists again, each reporting `total` 1;
+`account/costcenter/list.json` answered the name `Verkauf Büromöbel` byte for byte, and
+`number` as the text `"100"`. Refusals: none. The lists recorded right after
+(`tests/fixtures/customfield_list/person.json`,
+`tests/fixtures/account_costcenter_list/default.json`) hold these two records.
+
 ## The books
 
 | | |
@@ -170,6 +226,7 @@ over with a fresh one; the script never deletes or repairs anything.
 | Chart of accounts, VAT codes | CashCtrl's defaults, unchanged |
 | Records | 10 persons (4 vendors, 6 customers), 48 manual journal entries (12 in 2025, 36 in 2026, 3 of them collective), 6 orders |
 | Writes | at most 67 (10 persons, 2 currencies, 1 fiscal period, 48 journal entries, 6 orders) |
+| Discovery records | 1 custom field on persons (`Kundenreferenz`) and 1 cost centre (`100 Verkauf Büromöbel`), created by `--discovery` (above), 2 writes |
 
 The script does not name the organisation: its name is set by hand when it is created
 (Creating the organisation, step 1).
@@ -403,8 +460,10 @@ the first write:
 - `fiscalperiod/create.json` with `type=EARLIEST` creates the calendar year before the
   earliest existing one; the seeder uses it only when the earliest period starts on
   2026-01-01, and checks afterwards that a period covers 2025.
-- Nothing else is created or changed: no accounts, tax codes, locations, settings,
-  salary, files, inventory or custom fields.
+- Nothing else is created or changed by the first mode: no accounts, tax codes,
+  locations, settings, salary, files, inventory or custom fields. The one custom field
+  and the one cost centre the demo organisation holds come from the second mode, The
+  discovery records (`--discovery`) above.
 
 The write tools' live tests and write fixtures create records marked `xippios-live`
 (title, company or description, and `nr`), dated 2026-10-24, and delete them again in

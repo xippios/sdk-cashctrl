@@ -21,7 +21,8 @@ The persons a task returns are projections without the personal identifiers ``ss
 their bank account numbers ``iban`` and ``qr_iban`` (``_location``), and the rows of a
 report, kept as upstream sends them, lose every key named ``ssn``, ``iban`` or
 ``qrIban`` in any letter case and at any depth (``_report``); the endpoint wrappers' read
-models keep them.
+models keep them. ``get_report_data`` refuses payroll and people reports by their type,
+read from ``report/tree.json`` once per organisation and kept (``_report_type``).
 
 The journal, person and order lists page by offset (``start``, ``limit``), resolved once
 in ``_offset_pages`` (conventions §4). With ``limit`` the task sends one request,
@@ -37,6 +38,8 @@ every page is collected it leaves out ``limit``, the page size, so the same argu
 collect the same records again.
 """
 
+import threading
+import weakref
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import date, datetime
 from typing import Any, TypeGuard, get_args
@@ -44,6 +47,7 @@ from typing import Any, TypeGuard, get_args
 from pydantic import JsonValue, ValidationError
 from pydantic_core import ErrorDetails
 from xippios.core import (
+    AsyncClient,
     InvalidRequestError,
     Result,
     ResultCap,
@@ -54,7 +58,7 @@ from xippios.core import (
 )
 
 from xippios.cashctrl import api
-from xippios.cashctrl._client import SOURCE, TENANTS
+from xippios.cashctrl._client import SOURCE, TENANTS, client_for
 from xippios.cashctrl._tenants import list_task
 from xippios.cashctrl.models import (
     Account,
@@ -874,11 +878,13 @@ async def list_history_async(
     """List an organisation's history, the audit log of its changes, newest first.
 
     Every entry comes back with ``created`` (when the change was made), ``created_by``
-    (who made it; an API user shows as ``API:`` and the first four characters of its
-    key), ``type`` (the module, e.g. ``ORDER``), ``change_type`` (``CREATE`` and
-    ``STATUS`` were seen, ``UPDATE`` too on 2026-10-27, though in no fixture), the
-    record it concerns (``order_id``, ``person_id``, ``statement_id``) and ``message``,
-    upstream's text of the change (``Rechnung 'EK-2026-001' created.``). ``order_id``,
+    (who made it: a user's name or ``SYSTEM``; an API user shows as ``API:REDACTED``),
+    ``type`` (the module, e.g. ``ORDER``), ``change_type`` (``CREATE`` and ``STATUS``
+    were seen, ``UPDATE`` too on 2026-10-27, though in no fixture), the record it
+    concerns (``order_id``, ``person_id``, ``statement_id``) and ``message``, upstream's
+    text of the change as upstream writes it (``Rechnung 'EK-2026-001' created.``): it
+    names records and may name persons, a customer, a vendor or an employee. Identifiers
+    stay out as everywhere: no ``ssn`` or ``iban`` field comes back. ``order_id``,
     ``person_id`` or ``statement_id`` narrow it to one record's history; the history of
     an order that was deleted is not listed (observed: none, a minute after the delete).
 
@@ -964,12 +970,13 @@ async def list_order_categories_async(
 async def list_custom_fields_async(org: str, type: CustomFieldType) -> Result[list[CustomField]]:
     """List an organisation's custom fields of one module, the fields it added to its records.
 
-    Every custom field of ``type`` comes back with its ``id``, its ``data_type``
-    (``TEXT``, ``TEXTAREA``, ``CHECKBOX``, ``DATE``, ``COMBOBOX``, ``NUMBER``, ``ACCOUNT``
-    or ``PERSON``), the labels it is shown with (``row_label``, ``field_label``,
-    localised as ``<values><de>...</de></values>``), ``is_inactive``, ``is_multi`` and,
-    for a ``COMBOBOX``, the ``values`` to choose from. A write tool sets a custom field
-    as ``customField<id>`` in its ``custom`` mapping, e.g. ``{"customField3": "Projekt
+    Every custom field of ``type`` comes back with its ``id``, ``field_id`` (the key a
+    write tool's ``custom`` takes, ``customField<id>``), its ``data_type`` (``TEXT``,
+    ``TEXTAREA``, ``CHECKBOX``, ``DATE``, ``COMBOBOX``, ``NUMBER``, ``ACCOUNT`` or
+    ``PERSON``), the labels it is shown with (``row_label``, ``field_label``, localised
+    as ``<values><de>...</de></values>``), ``is_inactive``, ``is_multi`` and, for a
+    ``COMBOBOX``, the ``values`` to choose from. A write tool sets a custom field as
+    ``customField<id>`` in its ``custom`` mapping, e.g. ``{"customField3": "Projekt
     A"}``: ``JOURNAL`` for ``create_journal_entry``, ``PERSON`` for ``create_person``,
     ``ORDER`` for ``create_order``. ``meta.total`` is upstream's count. ``type`` is
     checked first, and a value outside the documented set is refused.
@@ -1057,10 +1064,12 @@ async def list_cost_centers_async(
 
     Every matching cost center comes back with its ``id`` (the ``to_cost_center_id`` of
     an allocation in ``create_journal_entry``, ``update_journal_entry`` and the items of
-    ``create_order``), ``number``, ``name`` (localised), ``category_id``,
-    ``is_inactive``, ``notes`` and its targets ``target_min`` and ``target_max``. No
-    cost center has been observed yet (the demo organisation has none), so balances the
-    list may carry are not returned. ``meta.total`` is upstream's count. Upstream ignores
+    ``create_order``), ``number`` (as text, ``"100"``), ``name`` (localised),
+    ``category_id``, ``is_inactive``, ``notes``, its targets ``target_min`` and
+    ``target_max``, and its balances ``opening_amount`` and ``end_amount``, assumed to be
+    the API user's current fiscal period's (this task sends no ``fiscalPeriodId``,
+    upstream documents no default, and only ``0`` was observed). ``meta.total`` is
+    upstream's count. Upstream ignores
     values it does not understand, so ``dir`` and the filters' ``comparison`` are checked
     first and a wrong one is refused.
 
@@ -1127,14 +1136,89 @@ async def get_report_tree_async(org: str) -> Result[list[ReportTreeNode]]:
     sheet, ``PLS`` for profit and loss, ``OPEN_DEBTORS``, ``VAT_SETTLEMENT``, ...) and
     its ``text`` its name. ``id`` is the tree's own key (``element-1``), not an id other
     tools take. ``meta.total`` is upstream's count of the top-level nodes, not of every
-    report.
+    report. ``get_report_data`` refuses the payroll and people reports among the elements
+    (``SALARY_LIST``, ``SETTLEMENT``, ``REVENUE_BY_PERSON``, ...).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
     """
+    client = client_for(org)
     response = await api.report_tree(org)
+    _keep_report_types(client, response.data)
     meta = _meta(org, "report/tree.json", {}, total=response.total)
     return Result(data=response.data, meta=meta)
+
+
+_REPORT_TYPES: weakref.WeakKeyDictionary[AsyncClient, dict[int, str | None]] = (
+    weakref.WeakKeyDictionary()
+)
+"""Each organisation's report types by element id, as ``report/tree.json`` last listed them.
+
+Keyed on the organisation's client (``client_for(org)``), not on its name: the entry lives
+as long as the client does. ``TENANTS.reset()`` drops every client, and a changed
+subdomain or key builds a new one, so the next ``get_report_data`` reads the tree again;
+an organisation never sees another's types. Read once per organisation and process
+(G5 (1) of 2026-10-28); ``get_report_tree`` refreshes it with every tree it returns.
+"""
+_REPORT_TYPES_LOCK = threading.Lock()
+_SALARY_PREFIX = "SALARY_"
+_REFUSED_TYPES = frozenset({"SETTLEMENT", "WITHHOLDING_TAX_SETTLEMENT", "PEOPLE", "ORG_CHART"})
+_PERSON_PART = "PERSON"
+_REFUSED_REPORT_RULE = (
+    "payroll and people reports, every type that starts with SALARY_ or contains PERSON, "
+    "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART"
+)
+"""What ``get_report_data`` refuses, as its refusal states it (ADR-0017)."""
+
+
+def _is_refused_report_type(report_type: str) -> bool:
+    """Whether ``get_report_data`` refuses a report of ``report_type``, in any letter case.
+
+    The rule of G5 (1) of 2026-10-28 (queue row 123), by pattern, extended to the
+    documented types the demo tree does not show (queue row 225): a type that starts
+    with ``SALARY_`` or contains ``PERSON``, or is ``SETTLEMENT``,
+    ``WITHHOLDING_TAX_SETTLEMENT``, ``PEOPLE`` or ``ORG_CHART``. Of the 41 types
+    ``report/element/create.json`` documents that is 15; ``WITHHOLDING_TAX_RATES``, rates
+    and no persons, passes.
+    """
+    name = report_type.upper()
+    return name.startswith(_SALARY_PREFIX) or name in _REFUSED_TYPES or _PERSON_PART in name
+
+
+def _element_types(nodes: Sequence[ReportTreeNode]) -> dict[int, str | None]:
+    """Every element of a report tree, at any depth: its ``element_id`` to its ``type``."""
+    types: dict[int, str | None] = {}
+    for node in nodes:
+        if node.element_id is not None:
+            types[node.element_id] = node.type
+        types.update(_element_types(node.data))
+    return types
+
+
+def _keep_report_types(
+    client: AsyncClient, nodes: Sequence[ReportTreeNode]
+) -> dict[int, str | None]:
+    """Keep the types of the tree ``nodes`` for the organisation whose client is ``client``."""
+    types = _element_types(nodes)
+    with _REPORT_TYPES_LOCK:
+        _REPORT_TYPES[client] = types
+    return types
+
+
+async def _report_type(org: str, element_id: int) -> str | None:
+    """The type of report element ``element_id``, from the organisation's report tree.
+
+    The tree is read once per organisation and kept (``_REPORT_TYPES``). An element the
+    kept tree does not list reads the tree again, once, since a report may have been
+    added since; ``None`` when it still does not list it, or lists it without a type.
+    """
+    client = client_for(org)
+    with _REPORT_TYPES_LOCK:
+        kept = _REPORT_TYPES.get(client)
+    if kept is not None and element_id in kept:
+        return kept[element_id]
+    tree = await api.report_tree(org)
+    return _keep_report_types(client, tree.data).get(element_id)
 
 
 _IDENTIFIER_KEYS = frozenset({"ssn", "iban", "qriban"})
@@ -1238,13 +1322,20 @@ async def get_report_data_async(
     count of the top-level rows, which ``meta.total`` repeats. Rows keep upstream's
     camelCase names, and amounts are JSON numbers.
 
-    Payroll and people reports (``SALARY_LIST``, ``SETTLEMENT``,
-    ``WITHHOLDING_TAX_SETTLEMENT``, ``REVENUE_BY_PERSON``, ``OPEN_DEBTORS``, ...) carry
-    personal data under names the documentation does not give. Every key named ``ssn``,
-    ``iban`` or ``qrIban``, in any letter case and at any depth, is dropped before the
-    data comes back; nothing else is. The salary module is outside what this package
-    covers, but its reports are not refused: the answer does not say which type of
-    report it is.
+    Payroll and people reports are refused before their data is requested: a report
+    whose ``type`` starts with ``SALARY_`` or contains ``PERSON``, or is ``SETTLEMENT``,
+    ``WITHHOLDING_TAX_SETTLEMENT``, ``PEOPLE`` or ``ORG_CHART``; among CashCtrl's default
+    reports ``SALARY_LIST``, ``SALARY_TYPE_RECAP``, ``SALARY_TYPES``,
+    ``SALARY_BOOK_ENTRIES``, ``SETTLEMENT``, ``WITHHOLDING_TAX_SETTLEMENT``,
+    ``REVENUE_BY_PERSON``, ``EXPENSE_BY_PERSON``, ``REVENUE_BY_PERSON_CHART`` and
+    ``EXPENSE_BY_PERSON_CHART``. ``WITHHOLDING_TAX_RATES`` is read, and so are the debtor
+    and creditor reports (``OPEN_DEBTORS``, ``OPEN_CREDITORS``), which name business
+    partners as ``list_persons`` does, the identifier drop below their guard. The type is
+    the one ``get_report_tree`` shows: the first call for an organisation reads its
+    report tree and keeps it, and an element the kept tree does not list reads it once
+    more; one the tree does not list at all is asked of upstream as given. From every
+    other report, each key named ``ssn``, ``iban`` or ``qrIban``, in any letter case and
+    at any depth, is dropped before the data comes back; nothing else is.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1275,6 +1366,13 @@ async def get_report_data_async(
         "sort": sort,
         "start_date": start_date,
     }
+    report_type = await _report_type(org, element_id)
+    if report_type is not None and _is_refused_report_type(report_type):
+        raise InvalidRequestError(
+            f"report element {element_id} is of type {report_type}: get_report_data "
+            f"refuses {_REFUSED_REPORT_RULE} (personal data, ADR-0017)",
+            source=SOURCE,
+        )
     sent = api.report_element_data_params(element_id, **arguments)
     report = _report(await api.report_element_data(org, element_id, **arguments))
     meta = _meta(org, "report/element/data.json", sent, total=report.total)

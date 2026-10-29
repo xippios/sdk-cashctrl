@@ -150,7 +150,8 @@ scripts/
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
   record_fixture.py      records one exchange with the demo organisation; core's Scrub, then its own
                          TenantScrub (host, encoded and JSON checks) and scrub_text
-  seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md)
+  seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md);
+                         --discovery adds one custom field and one cost centre
 tests/
   conftest.py      core's plugin; demo-only environment, placeholder subdomain, clients reset per test, demo_org
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
@@ -310,12 +311,15 @@ replay-tested with a real value.
   `qrIban` value (a location's QR-IBAN, also as `qr_iban` or `qr-iban`) to `REDACTED` by
   name, in any letter case, and its final check refuses only a value that survives the
   rewrite (How to record a fixture); the recorded location holds `null` for both.
-- `get_report_data` returns a report's rows as upstream sends them and drops every key
-  named `ssn`, `iban` or `qrIban` from them and from `properties`, in any letter case
-  and at any depth (`_report`; ADR-0003, amendment 2026-10-26). Payroll and people
-  reports carry other personal data under names the documentation does not give, which
-  passes; their type cannot be told from the answer without a second request, so they
-  are not refused, though the salary module is outside this package.
+- `get_report_data` refuses payroll and people reports before their data is requested
+  (G5 (1) of 2026-10-28, rows 123 and 225): a type that starts with `SALARY_` or
+  contains `PERSON`, or is `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or
+  `ORG_CHART`. The answer never names its type, so `_report_type` reads
+  `report/tree.json` once per organisation into a `WeakKeyDictionary` keyed on its
+  client, which `TENANTS.reset()` or a changed variable drops; `get_report_tree`
+  refreshes it; an element the kept tree lacks reads it once more, one still missing is
+  asked of upstream. Other reports come back as sent, every key named `ssn`, `iban` or
+  `qrIban` dropped at any depth, in any case (`_report`; ADR-0003, amendment 2026-10-26).
 - A task that fetches them deliberately may return them and says so in its docstring;
   none does.
 
@@ -365,6 +369,8 @@ above its status table); steps 2 to 4 and 6 read here:
 2. `models.py`: an `UpstreamModel` per payload object; dates, numbers and enums typed.
    Upstream's camelCase spellings are accepted with `Field(validation_alias=...)`, never
    `Field(alias=...)`: the adapters serialise by alias, and results stay snake_case.
+   `created_by` and `last_updated_by` are `AuditUser`, which masks CashCtrl's API user
+   tag to `API:REDACTED`, the fixtures' value (G5 (2) of 2026-10-28, row 129).
 3. `api/<operation>.py`: one async wrapper that takes `org` first, calls
    `_client.client_for(org)` and returns models through `xippios.core.parse`.
 4. `tasks.py`: an async task, `org` its first parameter, that composes wrappers and
@@ -384,8 +390,8 @@ Step 5, the docstring for agents, is the family's; then:
    `sent_urls(route)` or `sent_query(route)` with `recorded_query(fixture)`, never a
    request from `route.calls`), a case in `TOOL_CASES` (which
    checks `meta.tenant` and snake_case keys for every tool; a tool whose recorded
-   answer is empty goes into `UNOBSERVED`, whose models' field names are checked
-   instead, and a field kept as upstream sends it into `AS_SENT`), a live smoke test in
+   answer is empty goes into `UNOBSERVED`, whose models' field names are checked as
+   well, and a field kept as upstream sends it into `AS_SENT`), a live smoke test in
    `test_live.py` that takes the `demo_org` fixture.
 
 A list that documents `start` and `limit` (journal, persons, orders, history) pages through
@@ -429,9 +435,11 @@ raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
 
 Run `/record-fixture <endpoint> <case> <parameters>`. It runs
 `direnv exec ~/github/sdk uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]`,
-which performs one live request against the demo organisation, always and only, and
-builds the fixture in memory with core's `fixture_from_response` and
-`Scrub(secrets=[key, its basic-auth token], allow_binary=False)` (conventions §10):
+which performs one live request against the demo organisation, always and only,
+through a client that never retries (`RetryPolicy(max_attempts=1)`, so a 5xx spends no
+request on a retry), and builds the fixture in memory with core's
+`fixture_from_response` and `Scrub(secrets=[key, its basic-auth token],
+allow_binary=False)` (conventions §10):
 credentials scrubbed and the key and its token made `REDACTED` where they appear as
 given. Core's verify searches plain values only: it refuses the exchange when the key
 or its token is still there as given, and when a body is not UTF-8 text (exports are out

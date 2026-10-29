@@ -51,6 +51,24 @@ values (``addresses``, ``contacts``, ``items``) are JSON strings; dates are
 lists what was created, the ``total`` each list now reports, the balance of 1100 at
 2025-12-31 and 2026-09-30 and the observed write semantics, which the first run copies
 into ``docs/demo-org.md``.
+
+``--discovery`` is a second mode of its own, for an organisation the first mode seeded:
+it creates the two records the discovery lists need and the books lack, one custom field
+of the module ``PERSON`` (``customfield/create.json``, ``CUSTOM_FIELD``) and one cost
+centre (``account/costcenter/create.json``, ``COST_CENTRE``), so that
+``customfield/list.json`` and ``account/costcenter/list.json`` answer a record each::
+
+    uv run scripts/seed_demo.py --discovery     # its plan, no network at all
+    direnv exec ~/github/sdk env -u CASHCTRL_ORGS \
+        uv run scripts/seed_demo.py --discovery --apply --yes
+
+It keeps guards 1 and 2 and replaces 3 and 4 with its own: ``customfield/list.json``
+for ``type=PERSON`` and ``account/costcenter/list.json`` both answer no record, and then
+it creates the two; or both answer exactly this mode's own record (the custom field by
+``rowLabel`` and ``dataType``, the cost centre by ``name`` and ``number``), and then it
+says there is nothing to do and exits 0; anything else refuses with exit status 1
+before the first write. The same scrub, pace and refusal shapes as the first mode; it
+never deletes anything either.
 """
 
 import argparse
@@ -539,6 +557,31 @@ ORDER_CATEGORY_NAMES: dict[OrderType, tuple[frozenset[str], ...]] = {
     ),
 }
 """Names of the order category per type, in order of preference; none fits, the run refuses."""
+
+
+@dataclass(frozen=True)
+class CustomField:
+    """The custom field ``--discovery`` creates: its module, data type and row label."""
+
+    module: str
+    data_type: str
+    row_label: str
+
+
+@dataclass(frozen=True)
+class CostCentre:
+    """The cost centre ``--discovery`` creates: its number and name."""
+
+    number: str
+    name: str
+
+
+CUSTOM_FIELD = CustomField(module="PERSON", data_type="TEXT", row_label="Kundenreferenz")
+"""A text field on persons for the customer reference Muster Handel AG keeps per partner."""
+COST_CENTRE = CostCentre(number="100", name="Verkauf Büromöbel")
+"""The office furniture sales of Muster Handel AG; the umlaut checks UTF-8 on the way back."""
+CUSTOM_FIELD_LIST = ("customfield/list.json", {"type": CUSTOM_FIELD.module})
+COST_CENTRE_LIST = ("account/costcenter/list.json", None)
 
 
 def all_entries() -> tuple[Entry, ...]:
@@ -1214,6 +1257,89 @@ def run_guards(session: Session) -> Context:
     return context
 
 
+def _named(value: Any, name: str) -> bool:
+    """Whether a name upstream sends, plain or localized, is ``name`` in every language."""
+    return set(texts(value)) == {name}
+
+
+def _numbered(value: Any, number: str) -> bool:
+    """Whether a number upstream sends, as text or as a JSON number, is ``number``."""
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        return False
+    try:
+        return Decimal(str(value).strip()) == Decimal(number)
+    except ArithmeticError:
+        return False
+
+
+def is_own_custom_field(record: Mapping[str, Any]) -> bool:
+    """Whether a ``customfield/list.json`` record is ``CUSTOM_FIELD``: row label and data type."""
+    return (
+        _named(record.get("rowLabel"), CUSTOM_FIELD.row_label)
+        and record.get("dataType") == CUSTOM_FIELD.data_type
+        and record.get("type", CUSTOM_FIELD.module) == CUSTOM_FIELD.module
+    )
+
+
+def is_own_cost_centre(record: Mapping[str, Any]) -> bool:
+    """Whether an ``account/costcenter/list.json`` record is ``COST_CENTRE``: name and number."""
+    return _named(record.get("name"), COST_CENTRE.name) and _numbered(
+        record.get("number"), COST_CENTRE.number
+    )
+
+
+DiscoveryState = Literal["empty", "seeded"]
+
+
+def _whole_list(
+    session: Session, path: str, params: Mapping[str, str] | None
+) -> list[dict[str, Any]]:
+    """Every record of a list that documents no paging; refuses one it cannot confirm whole."""
+    body = session.read(path, "guard 3, discovery lists", params)
+    found = records(body, path)
+    total = total_of(body)
+    if total is None:
+        raise Refused(f"cannot confirm what {path} holds: no numeric total")
+    if total != len(found):
+        raise Refused(
+            f"cannot confirm what {path} holds: it lists {len(found)} records but reports "
+            f"total {total}"
+        )
+    return found
+
+
+def check_discovery_lists(session: Session) -> DiscoveryState:
+    """Guard 3 of ``--discovery``: both lists empty, or both holding this mode's record alone.
+
+    ``customfield/list.json`` for ``type=PERSON`` and ``account/costcenter/list.json``
+    document no paging, so each answer is the whole list; a ``total`` that is missing or
+    differs from the records listed refuses as unconfirmable. ``"empty"`` when neither
+    lists a record, ``"seeded"`` when each lists exactly this mode's own (the custom
+    field by row label and data type, the cost centre by name and number); anything else
+    refuses, naming counts only, never a value.
+    """
+    path, params = CUSTOM_FIELD_LIST
+    fields = _whole_list(session, path, params)
+    centres = _whole_list(session, *COST_CENTRE_LIST)
+    if not fields and not centres:
+        return "empty"
+    own_field = len(fields) == 1 and is_own_custom_field(fields[0])
+    own_centre = len(centres) == 1 and is_own_cost_centre(centres[0])
+    if own_field and own_centre:
+        return "seeded"
+    shown = [
+        f"{path} type {CUSTOM_FIELD.module} lists {len(fields)} record(s)"
+        + (", this mode's custom field" if own_field else ""),
+        f"{COST_CENTRE_LIST[0]} lists {len(centres)} record(s)"
+        + (", this mode's cost centre" if own_centre else ""),
+    ]
+    raise Refused(
+        f"the discovery lists are neither both empty nor both this mode's records alone "
+        f"({'; '.join(shown)}): --discovery creates its two records into two empty lists "
+        "and never deletes anything (docs/demo-org.md)"
+    )
+
+
 # --- Forms --------------------------------------------------------------------------
 
 
@@ -1315,6 +1441,32 @@ def order_form(order: Order, context: Context, persons: Mapping[str, int]) -> di
         "language": "DE",
         "items": _json(items),
     }
+
+
+def custom_field_form(field: CustomField) -> dict[str, str]:
+    """``customfield/create.json``: the three mandatory parameters, nothing else."""
+    return {"dataType": field.data_type, "rowLabel": field.row_label, "type": field.module}
+
+
+def cost_centre_form(centre: CostCentre) -> dict[str, str]:
+    """``account/costcenter/create.json``: the two mandatory parameters, nothing else."""
+    return {"name": centre.name, "number": centre.number}
+
+
+def discovery_writes() -> list[tuple[str, str, dict[str, str]]]:
+    """The writes of ``--discovery``, in order: what, path, form."""
+    return [
+        (
+            f"custom field {CUSTOM_FIELD.row_label}",
+            "customfield/create.json",
+            custom_field_form(CUSTOM_FIELD),
+        ),
+        (
+            f"cost centre {COST_CENTRE.number} {COST_CENTRE.name}",
+            "account/costcenter/create.json",
+            cost_centre_form(COST_CENTRE),
+        ),
+    ]
 
 
 # --- Seeding ----------------------------------------------------------------------------
@@ -1515,11 +1667,32 @@ def plan_lines() -> list[str]:
     return out
 
 
+def discovery_plan_lines() -> list[str]:
+    """The plan of ``--discovery``: the two records, then what it refuses."""
+    writes = discovery_writes()
+    return [
+        f"Plan (--discovery): the records the discovery lists need, for the synthetic books "
+        f"of {COMPANY} (fictional), in a demo organisation seeded by the first mode",
+        "",
+        f"  custom field   1  customfield/create.json: type {CUSTOM_FIELD.module}, "
+        f"dataType {CUSTOM_FIELD.data_type}, rowLabel {CUSTOM_FIELD.row_label}",
+        f"  cost centre    1  account/costcenter/create.json: number {COST_CENTRE.number}, "
+        f"name {COST_CENTRE.name}",
+        f"  writes, at most {len(writes)}  in this order, as {FORM_CONTENT_TYPE} "
+        f"(--multipart: {MULTIPART})",
+        "",
+        f"Guard 3: {CUSTOM_FIELD_LIST[0]} (type {CUSTOM_FIELD.module}) and "
+        f"{COST_CENTRE_LIST[0]} both empty: both records are created; both holding exactly "
+        "these two records: nothing to do, exit status 0; anything else: refused, exit "
+        "status 1, before the first write. Nothing is ever deleted.",
+    ]
+
+
 # --- Command line ------------------------------------------------------------------------
 
 
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
-    """``--plan`` (the default) or ``--apply --yes``, optionally ``--multipart``."""
+    """``--plan`` (the default) or ``--apply --yes``; ``--discovery``, ``--multipart``."""
     parser = argparse.ArgumentParser(
         prog="seed_demo.py",
         description="Seed a fresh, empty CashCtrl demo organisation with synthetic books.",
@@ -1527,6 +1700,13 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--plan", action="store_true", help="print the plan, no network (default)")
     mode.add_argument("--apply", action="store_true", help="seed the demo organisation")
+    parser.add_argument(
+        "--discovery",
+        action="store_true",
+        help="the second mode: one custom field and one cost centre, into a demo organisation "
+        "seeded before; its own plan with --plan, its own guard 3 with --apply "
+        "(docs/demo-org.md)",
+    )
     parser.add_argument("--yes", action="store_true", help="confirm --apply")
     parser.add_argument(
         "--multipart",
@@ -1589,17 +1769,106 @@ def apply(environ: Mapping[str, str], *, multipart: bool = False) -> int:
     return status
 
 
+def report_discovery(session: Session) -> None:
+    """The ``total`` both lists now report, and the cost centre's name read back.
+
+    The name carries an umlaut: unless ``account/costcenter/list.json`` answers it byte
+    for byte, the run fails, saying that the backend garbled UTF-8.
+    """
+    path, params = CUSTOM_FIELD_LIST
+    fields = session.read(path, "summary", params)
+    centres = session.read(COST_CENTRE_LIST[0], "summary")
+    say("Totals now reported")
+    say(f"  {path} type {CUSTOM_FIELD.module}: total {total_of(fields)}")
+    say(f"  {COST_CENTRE_LIST[0]}: total {total_of(centres)}")
+    names = [record.get("name") for record in records(centres, COST_CENTRE_LIST[0])]
+    if COST_CENTRE.name in names:
+        session.observed.utf8 = (
+            f"{COST_CENTRE_LIST[0]} answers name {COST_CENTRE.name!r} byte for byte"
+        )
+        return
+    shown = session.scrub(", ".join(str(name) for name in names))
+    session.observed.utf8 = f"not found: sent {COST_CENTRE.name!a}, listed {shown!a}"
+    raise Failed(
+        f"{COST_CENTRE_LIST[0]} does not list the name sent, {COST_CENTRE.name!r}, byte for "
+        f"byte (listed: {shown!a}): the backend may have garbled UTF-8"
+    )
+
+
+def apply_discovery(environ: Mapping[str, str], *, multipart: bool = False) -> int:
+    """``--discovery``: guards 1 and 2, its own guard 3, the two creates; the exit status."""
+    try:
+        credentials = read_credentials(environ)
+    except Refused as refusal:
+        say(f"refused (guard 1): {refusal}", err=True)
+        return 1
+    say("guard 1: the demo pair is set and the subdomain is one DNS label")
+    observed = Observed(utf8="not checked: the cost centre was not read back")
+    created: Counter[str] = Counter()
+    client = httpx.Client(
+        base_url=f"https://{credentials.subdomain}.cashctrl.com/api/v1/",
+        auth=httpx.BasicAuth(credentials.key, ""),
+        headers={"User-Agent": USER_AGENT},
+        timeout=TIMEOUT_SECONDS,
+    )
+    with client:
+        session = Session(
+            client, Scrubber(credentials), Pacer(PACE_SECONDS), observed, multipart=multipart
+        )
+        try:
+            check_organisation_name(session)
+            say("guard 2: the organisation's name contains 'demo'")
+            state = check_discovery_lists(session)
+        except (Refused, Failed) as refusal:
+            say(f"refused: {refusal}; nothing was written", err=True)
+            return 1
+        if state == "seeded":
+            say(
+                "guard 3: both discovery lists hold exactly this mode's two records: "
+                "nothing to do, nothing was written"
+            )
+            return 0
+        writes = discovery_writes()
+        say(
+            "guard 3: both discovery lists are empty; writing "
+            f"{len(writes)} records as {observed.encoding}, one request every "
+            f"{PACE_SECONDS} seconds"
+        )
+        status = 0
+        try:
+            for what, path, form in writes:
+                body = session.create(path, form, what)
+                created[path] += 1
+                say(f"{what}: insertId {session.shown_id(body)}")
+        except (Refused, Failed) as failure:
+            say(f"stopped at {failure}; no further request was sent", err=True)
+            status = 1
+        say("Created: " + ", ".join(f"{path} {created[path]}" for _, path, _ in discovery_writes()))
+        if status == 0:
+            try:
+                report_discovery(session)
+            except (Refused, Failed) as failure:
+                say(f"summary incomplete: {failure}", err=True)
+                status = 1
+    for line in observed.lines():
+        say(line)
+    return status
+
+
 def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
-    """Print the plan, or apply it after the guards; return the exit status."""
+    """Print a plan, or apply it after the guards; return the exit status."""
     args = parse_args(argv)
     if not args.apply:
-        for line in plan_lines():
+        for line in discovery_plan_lines() if args.discovery else plan_lines():
             say(line)
         return 0
     if not args.yes:
         say("refused: --apply writes to the demo organisation; confirm with --yes", err=True)
         return 1
-    return apply(os.environ if environ is None else environ, multipart=args.multipart)
+    given = os.environ if environ is None else environ
+    if args.discovery:
+        return apply_discovery(given, multipart=args.multipart)
+    return apply(given, multipart=args.multipart)
 
 
 if __name__ == "__main__":

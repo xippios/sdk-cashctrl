@@ -6,7 +6,8 @@ books are synthetic (``scripts/seed_demo.py``). Each read test makes one call, b
 reads, which first look an id up in a list (account 1020 by number, the first journal
 entry, person and sales order), ``list_order_book_entries``, which first lists the
 purchase orders for one that books, and ``get_report_data``, which first reads the report
-tree for the balance sheet's element id. ``fiscal_periods`` looks the fiscal periods up
+tree for the balance sheet's element id (the tree it keeps, so a payroll report of it is
+refused with no request). ``fiscal_periods`` looks the fiscal periods up
 once for the module: the API user's current period is 2025, and the orders are in 2026.
 
 The write tools are tested live per resource, one test that calls each of its write
@@ -269,7 +270,8 @@ async def test_list_custom_fields(demo_org: str) -> None:
     result = await tasks.list_custom_fields_async(demo_org, "PERSON")
     assert result.meta.request == {"org": demo_org, "type": "PERSON"}
     assert result.meta.tenant == demo_org
-    assert result.meta.total == len(result.data), "the demo organisation has none (2026-10-27)"
+    assert result.meta.total == len(result.data) > 0, "seed_demo.py --discovery made one"
+    assert all(field.type == "PERSON" and field.field_id for field in result.data)
 
 
 async def test_list_person_categories(demo_org: str) -> None:
@@ -298,7 +300,8 @@ async def test_list_account_categories(demo_org: str) -> None:
 async def test_list_cost_centers(demo_org: str) -> None:
     result = await tasks.list_cost_centers_async(demo_org, only_active=True)
     assert result.meta.request == {"org": demo_org, "onlyActive": "true"}
-    assert result.meta.total == len(result.data), "the demo organisation has none (2026-10-27)"
+    assert result.meta.total == len(result.data) > 0, "seed_demo.py --discovery made one"
+    assert all(isinstance(centre.number, str) and centre.name for centre in result.data)
 
 
 async def test_list_locations(demo_org: str) -> None:
@@ -333,6 +336,13 @@ async def test_get_report_data(demo_org: str, fiscal_periods: dict[str, int]) ->
     }
     assert result.meta.total == result.data.total == len(result.data.data) > 0
     assert all(isinstance(row, dict) and "text" in row for row in result.data.data)
+    # A payroll report of the same tree is refused before any request: the tree is kept.
+    (payroll, *_) = [
+        node for top in tree.data for node in [top, *top.data] if node.type == "SALARY_LIST"
+    ]
+    assert payroll.element_id is not None
+    with pytest.raises(InvalidRequestError, match="is of type SALARY_LIST"):
+        await tasks.get_report_data_async(demo_org, payroll.element_id, fiscal_period=period)
 
 
 def marked(text: str | None, nr: str | None = None) -> bool:

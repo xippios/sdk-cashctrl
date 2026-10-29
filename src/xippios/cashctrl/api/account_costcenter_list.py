@@ -6,7 +6,8 @@ to 'ASC'."), ``filter``, ``fiscalPeriodId`` ("The ID of the fiscal period, from 
 retrieve the balances."), ``onlyActive`` and ``onlyNotes`` ("Defaults to false."),
 ``query`` and ``sort`` ("Defaults to 'number'."). It documents no ``start`` or
 ``limit``: one answer holds every match. Observed on 2026-10-27: ``{"total": 0, "data":
-[]}``, the demo organisation having no cost center.
+[]}``; on 2026-10-28, after ``scripts/seed_demo.py --discovery`` created one, ``{"total":
+1, "data": [...]}``, the record ``CostCenter`` mirrors, its balances included.
 """
 
 from collections.abc import Sequence

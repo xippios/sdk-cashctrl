@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/seed_demo.py --discovery`, the seeder's second mode: one custom field on
+  persons (`Kundenreferenz`, `TEXT`) and one cost centre (`100 Verkauf Büromöbel`) in a
+  demo organisation seeded before. It keeps guards 1 and 2 and has its own guard 3: both
+  lists empty, and it creates the two; both holding exactly its two records, and it
+  exits 0 with nothing to do; anything else is refused before the first write. It never
+  deletes (G5 (3) of 2026-10-28; `docs/demo-org.md`). The demo organisation now holds
+  one custom field and one cost centre.
+
 ### Changed
 
 - Aligned with sdk-template v0.3.0 by hand, on template v0.2.2 and conventions 1.22
@@ -21,6 +31,39 @@ All notable changes to this project are documented here. The format follows
   `junit_family = "xunit1"` and drops the `accounting` keyword; `BULK_TASKS`, empty,
   beside `MCP_CAPS` (ADR-0019 decision 4), and the adapters' docstrings say core skips
   it. Core stays at 0.3.0.
+- `get_report_data` refuses payroll and people reports with `InvalidRequestError` before
+  any data request: a report whose type starts with `SALARY_` or contains `PERSON`, or is
+  `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or `ORG_CHART` (15 of the 41
+  documented report types, ten of them in CashCtrl's default reports;
+  `WITHHOLDING_TAX_RATES` is read), the message naming the element, its type and the
+  rule. The type comes from `report/tree.json`, read once per organisation and process
+  and kept with the organisation's client, so `TENANTS.reset()` drops it;
+  `get_report_tree` refreshes it, and an element the kept tree lacks reads it once more.
+  The drop of `ssn`, `iban` and `qrIban` keys stays the second guard (G5 (1) of
+  2026-10-28, the rule extended to the documented types the demo tree lacks by queue row
+  225; closes queue row 123's cashctrl part).
+- `CustomField` and `CostCenter` re-typed from `customfield/list.json` (`type=PERSON`)
+  and `account/costcenter/list.json`, both recorded again with the records the new seed
+  mode created (G5 (3) of 2026-10-28): `CustomField` requires `type`, `data_type` and
+  `row_label` and adds `field_id` (the `customField<id>` key a write's `custom` takes),
+  `default_variable_name`, `name`, `column_name`, `pos` and the `multi` and `inactive`
+  twins; `CostCenter` requires `number` (text, `"100"`) and `name` and adds the balances
+  `opening_amount` and `end_amount`, which `list_cost_centers` now returns,
+  `attachment_count` and the `inactive` twin.
+- The fixture recorder records through a client that never retries
+  (`RetryPolicy(max_attempts=1)`, `recording_client`), so a 5xx spends no request on a
+  retry (queue row 138 item 3).
+- `list_history`'s docstring says that `message`, kept as upstream writes it, names
+  records and may name persons, and that no identifier comes back (G5 (12) of
+  2026-10-28).
+
+### Fixed
+
+- CashCtrl's API user tag (`API:` and the first four characters of the key) no longer
+  reaches results: every model's `created_by` and `last_updated_by` masks it to
+  `API:REDACTED`, as the fixtures hold it, so a live answer has a fixture's shape;
+  `SYSTEM` and user names pass (G5 (2) of 2026-10-28; closes queue row 129's cashctrl
+  part).
 
 ## [0.2.0] - 2026-10-28
 

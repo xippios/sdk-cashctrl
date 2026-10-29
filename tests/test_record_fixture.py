@@ -10,6 +10,7 @@ follow core's at sdk-core ``cb8ecdf`` (``tests/testing/test_scrub.py``,
 """
 
 import base64
+import dataclasses
 import importlib.util
 import json
 from pathlib import Path
@@ -24,7 +25,7 @@ from xippios.core import AsyncClient, ClientConfig
 from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response
 from xippios.core.testing.replay import replay
 
-from xippios.cashctrl._client import DEMO, TENANTS
+from xippios.cashctrl._client import DEMO, TENANTS, client_for
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "record_fixture.py"
 REAL = "realsub"
@@ -104,6 +105,29 @@ def test_wrong_key_never_sends_the_real_key(
     assert recorder.main(["account/list.json", "wrong_key", "--wrong-key"]) == 0
     token = base64.b64encode(f"{recorder.WRONG_KEY}:".encode()).decode()
     assert route.calls.last.request.headers["Authorization"] == f"Basic {token}"
+
+
+@pytest.mark.parametrize("wrong_key", [False, True])
+def test_the_recording_client_never_retries(recorder: ModuleType, wrong_key: bool) -> None:
+    """The demo organisation's configuration with ``RetryPolicy(max_attempts=1)`` (row 138)."""
+    client = recorder.recording_client(wrong_key=wrong_key)
+    assert client.config.retry.max_attempts == 1
+    demo = client_for(DEMO).config
+    assert demo.retry.max_attempts > 1, "the package's own client retries"
+    assert dataclasses.replace(client.config, retry=demo.retry) == demo, "nothing else differs"
+    assert client is not client_for(DEMO)
+
+
+def test_a_5xx_is_recorded_after_one_request(
+    recorder: ModuleType, respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    """A GET that the package's client would retry is sent once and recorded as it came."""
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
+    route.mock(return_value=httpx.Response(503, text="Service Unavailable"))
+    assert recorder.main(["account/list.json", "unavailable"]) == 0
+    assert route.call_count == 1
+    written = tmp_path / "tests" / "fixtures" / "account_list" / "unavailable.json"
+    assert json.loads(written.read_text())["response"]["status"] == 503
 
 
 @pytest.mark.parametrize("leak", [REAL, REAL.upper()])

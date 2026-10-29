@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-10-27T21:29:39.146578Z",
+  "recorded_at": "2026-10-28T20:47:10.934386Z",
   "request": {
     "body": null,
     "body_base64": false,
@@ -8,7 +8,7 @@
     "url": "https://demo.cashctrl.com/api/v1/customfield/list.json?type=PERSON"
   },
   "response": {
-    "body": "{\"total\":0,\"data\":[]}",
+    "body": "{\"total\":1,\"data\":[{\"id\":1,\"created\":\"2026-10-28 21:46:59.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-28 21:46:59.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"categoryId\":null,\"groupId\":null,\"variableId\":null,\"rowLabel\":\"Kundenreferenz\",\"fieldLabel\":null,\"fieldTextRight\":null,\"fieldInfo\":null,\"maxWidth\":null,\"type\":\"PERSON\",\"dataType\":\"TEXT\",\"values\":null,\"pos\":1,\"name\":\"Kundenreferenz\",\"defaultVariableName\":\"$customField1\",\"multi\":false,\"inactive\":false,\"variableName\":\"$customField1\",\"groupName\":null,\"fieldId\":\"customField1\",\"columnName\":\"Kundenreferenz\",\"isMulti\":false,\"isInactive\":false}]}",
     "body_base64": false,
     "headers": [
       [
@@ -21,11 +21,15 @@
       ],
       [
         "date",
-        "Tue, 27 Oct 2026 21:29:37 GMT"
+        "Wed, 28 Oct 2026 20:47:10 GMT"
       ],
       [
         "etag",
-        "\"1792835062457\""
+        "\"1792835062457-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
       ],
       [
         "via",
