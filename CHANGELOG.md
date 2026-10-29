@@ -6,6 +6,53 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
+The third release. It ships on xippios-core 0.3.0 (`xippios-core~=0.3.0` from PyPI, its
+`mcp`, `http` and `testing` extras likewise) and sdk-template v0.2.2, aligned with
+template v0.3.0 by hand: the family rules are imported from `.claude/family.md`, a frozen
+copy of the template's file, and the package follows conventions 1.22. The three points
+0.2.0 carried forward are settled: `get_report_data` refuses payroll and people reports
+by their type before any data is requested, the API user tag CashCtrl writes into
+`created_by` and `last_updated_by` reaches every result masked as `API:REDACTED`, and a
+discovery mode of the demo seeder (`scripts/seed_demo.py --discovery`) creates a custom
+field and a cost centre, from whose recorded answers `CustomField` and `CostCenter` are
+typed again. New are `get_order_document`, an order's document as it is printed and sent;
+five Python-facing file tasks, `download_order_document` and the list exports
+`export_journal_entries`, `export_accounts`, `export_persons` and `export_orders`, which
+stream a file to the path the caller gives and serve no MCP tool or HTTP route; and two
+write tools, `update_order_status` and `create_order_payment`. The fixture recorder sends
+an order write only after it has read every order the write names and found it marked
+`xippios-live`, and it treats every field whose name ends in `iban` as a personal
+identifier, as `get_report_data` now does for report rows. That makes 24 read tasks,
+`list_organisations` among them, 5 file tasks and 11 write tools. Three changes break
+0.2.0's surface, hence the minor: `get_report_data` refuses the payroll and people
+reports it answered, `created_by` and `last_updated_by` come back masked, and
+`CustomField` and `CostCenter` require fields they did not (`type`, `data_type` and
+`row_label`; `number` and `name`).
+
+Not covered: the fiscal period writes (`fiscalperiod/create`, `complete`, `reopen`,
+`delete`, `complete_months`, `reopen_months`, `switch`; fiscal periods stay read-only,
+as Johannes decided on 2026-10-28), salary (`salary/*`, which holds personal data
+beyond `ssn` and `iban`, for which no policy exists yet), journal imports
+(`journal/import/*`), the book-entry writes (`order/bookentry/create`, `update`,
+`delete`), dossiers, `order/continue`, `order/document/mail` and
+`order/document/update`, `order/document/read.zip`, `order/payment/download`,
+`person/list.vcf`, `fiscalperiod/update` and `fiscalperiod/task/*`, the file module
+(`file/*`, its writes and its own lists), inventory, settings, sequence numbers,
+depreciation and exchange-difference bookings. cashctrl stays on template v0.2.2 and is
+never updated to template v0.3.0 by `copier update`, which would delete the write
+server; it adopts later core minors by hand.
+
+Known points, carried into the next release: a payment cannot be deleted, since
+CashCtrl documents no payment delete, so the `CASH_PDF` payment the live test creates
+stays behind after its order is deleted (it books nothing and moves no amount);
+`list_cost_centers` sends no `fiscalPeriodId`, which upstream documents for the
+balances, so `opening_amount` and `end_amount` are assumed to be the current fiscal
+period's, and a fiscal period parameter is left to a later release; and the fixture
+recorder refuses a GET to the eleven write paths but not yet to any other path the
+snapshot documents as a POST, a general check a later release adds.
+
 ### Added
 
 - `get_order_document` (`order/document/read.json`, the tool
@@ -13,12 +60,12 @@ All notable changes to this project are documented here. The format follows
   layout and language, the sender's and the recipient's address as printed, the payment
   references of the QR-bill and the mailing defaults. `OrderDocument` is typed from the
   answer recorded on 2026-10-29; the task returns `OrderDocumentProjection`, without
-  `orgIban`, `orgQrIban` and `recipientIban` (G5 (5) of 2026-10-28; ADR-0017); the
-  recorded document holds `null` for all three, which the recorder now rewrites and
-  refuses by name (queue row 243, under Fixed).
+  `orgIban`, `orgQrIban` and `recipientIban` (decided by Johannes on 2026-10-28;
+  ADR-0017); the recorded document holds `null` for all three, which the recorder now
+  rewrites and refuses by name (under Fixed).
 - Five file tasks, `download_order_document` and the list exports
   `export_journal_entries`, `export_accounts`, `export_persons` and `export_orders`,
-  named in `BULK_TASKS`: Python only, no MCP tool or HTTP route (G5 (5) and (6) of
+  named in `BULK_TASKS`: Python only, no MCP tool or HTTP route (decided by Johannes on
   2026-10-28; ADR-0019 decision 4). Each streams one file to `dest`, the path its caller
   gives, through core's `AsyncClient.download` and returns `Result[Downloaded]` as core
   gives it; nothing is read into a result, held in memory or cached.
@@ -26,39 +73,42 @@ All notable changes to this project are documented here. The format follows
   order, one PDF a call, sent comma-separated; its docstring and the README disclose that
   an invoice's QR-bill may carry the organisation's IBAN or QR-IBAN and the recipient's
   address (Johannes, 2026-10-28: disclosed, not stripped). An export takes `format`
-  (`csv`, `xlsx` or `pdf`, `models.ExportFormat`, queue row 214's practice), every
-  parameter of the list it mirrors and `columns`; `limit` is passed through, its upstream
-  default of 100 stated with the advice to read the list's `meta.total` first (the
-  account export documents no `limit`). Without `columns` the person export names
-  `PersonProjection`'s fields (`PERSON_COLUMNS`), so `ssn` and `iban` stay out unless the
-  caller names them; the other exports send `columns` as given (Johannes, 2026-10-28).
-  One wrapper per endpoint, `<module>_list_csv|xlsx|pdf` and `order_document_read_pdf`
-  (D95, conventions 1.22 §2), none with a fixture directory, since the recorder records
-  no binary body: the tests mount synthetic bytes with respx, and the live tests download
-  one order document, the journal and the persons as CSV, and expect the refusal of an
-  unknown order's document (G5 (7); queue row 235).
+  (`csv`, `xlsx` or `pdf`, `models.ExportFormat`, an exported `Literal` of the documented
+  values, as `Direction` and `OrderType` are), every parameter of the list it mirrors and
+  `columns`; `limit` is passed through, its upstream default of 100 stated with the
+  advice to read the list's `meta.total` first (the account export documents no `limit`).
+  Without `columns` the person export names `PersonProjection`'s fields
+  (`PERSON_COLUMNS`), so `ssn` and `iban` stay out unless the caller names them; the
+  other exports send `columns` as given (Johannes, 2026-10-28). One wrapper per endpoint,
+  `<module>_list_csv|xlsx|pdf` and `order_document_read_pdf` (named by conventions 1.22
+  §2: a file suffix stays as the last word), none with a fixture directory, since the
+  recorder records no binary body: the tests mount synthetic bytes with respx, and the
+  live tests download one order document, the journal and the persons as CSV, and expect
+  the refusal of an unknown order's document (the test approach as Johannes decided on
+  2026-10-28).
 - `update_order_status` (`order/update_status.json`) and `create_order_payment`
   (`order/payment/create.json`), the tenth and eleventh write tools, on the write server
-  only and confirm-gated as the others (G5 (8) of 2026-10-28): a preview sends no request
-  and holds the exact payload, `confirm=True` sends it, nothing read first. `ids` and
-  `order_ids` are lists of order ids, sent comma-separated; `status_id` is an id from a
-  category's `status` in `list_order_categories`; `type` is `models.PaymentType`
-  (`PAIN`, `SEPA_PAIN`, `WIRE_PDF`, `CASH_PDF`; queue row 214's practice), left to
-  upstream's default `PAIN` when not given. A payment is the pain.001 or PDF payment
-  order upstream's `order/payment/download` delivers (not wrapped), creates no book
-  entry and has no documented delete, as the docstring says. One wrapper per endpoint,
-  `order_update_status` and `order_payment_create` (D95, conventions 1.22 §2), their
-  fixtures recorded on 2026-10-29 on a marked purchase order with the purchase
-  categories (`order_category_list/purchase`): the status set, the payment as `PAIN`
-  refused (a date in the past, no bank accounts or BIC in the synthetic books) and as
-  `CASH_PDF` created, neither answer with an `insertId`. `order/continue.json` and the
-  book-entry writes stay out.
+  only and confirm-gated as the others (decided by Johannes on 2026-10-28): a preview
+  sends no request and holds the exact payload, `confirm=True` sends it, nothing read
+  first. `ids` and `order_ids` are lists of order ids, sent comma-separated; `status_id`
+  is an id from a category's `status` in `list_order_categories`; `type` is
+  `models.PaymentType` (`PAIN`, `SEPA_PAIN`, `WIRE_PDF`, `CASH_PDF`; an exported
+  `Literal` of the documented values), left to upstream's default `PAIN` when not given.
+  A payment is the pain.001 or PDF payment order upstream's `order/payment/download`
+  delivers (not wrapped), creates no book entry and has no documented delete, as the
+  docstring says. One wrapper per endpoint, `order_update_status` and
+  `order_payment_create` (named by conventions 1.22 §2), their fixtures recorded on
+  2026-10-29 on a marked purchase order with the purchase categories
+  (`order_category_list/purchase`): the status set, the payment as `PAIN` refused (a date
+  in the past, no bank accounts or BIC in the synthetic books) and as `CASH_PDF` created,
+  neither answer with an `insertId`. `order/continue.json` and the book-entry writes stay
+  out.
 - The fixture recorder accepts the two order writes, eleven write paths, for orders
   marked `xippios-live` only: it reads every order their `ids` or `orderIds` name
   (`order/read.json`, one GET each) and refuses the write before it is sent unless each
   is marked (the marker in its description, or as its `nr`), an order it cannot read
-  refusing it too (Johannes, 2026-10-28). A GET to one of the write paths is refused
-  (queue row 245 holds the general case).
+  refusing it too (Johannes, 2026-10-28). A GET to one of the write paths is refused;
+  a GET to any other path the snapshot documents as a POST is left to a later release.
 - A live round trip on a marked purchase order of a seeded vendor: created, its status
   set, its payment created (`CASH_PDF`, which demo accepts), the order deleted and no
   journal entry of it left; then `order/payment/download` is probed once with the
@@ -67,36 +117,37 @@ All notable changes to this project are documented here. The format follows
   accepted residue: no book entry, no amount moved, the order gone (Johannes,
   2026-10-28).
 - A download refused with HTTP 200 and `success: false` is raised, never kept as the
-  file: core writes a 2xx body unread (queue row 142), so `api/_download.py` streams to a
-  temporary file beside `dest` and reads `Content-Type` first. JSON goes through
-  `classify` (`RequestRejected`, or `NotFoundError` for a read by ids); the file is
-  removed and a file already at `dest` stays as it was. An id no order has is answered
-  with HTTP 404 (observed on 2026-10-29): `classify` raises `NotFoundError` for a 404 on
-  a `read.pdf` asked by `ids` and keeps every other 404 an unknown endpoint's
-  `UpstreamError` (queue row 235).
+  file: core writes a 2xx body unread, so `api/_download.py` streams to a temporary file
+  beside `dest` and reads `Content-Type` first. JSON goes through `classify`
+  (`RequestRejected`, or `NotFoundError` for a read by ids); the file is removed and a
+  file already at `dest` stays as it was. An id no order has is answered with HTTP 404
+  (observed on 2026-10-29): `classify` raises `NotFoundError` for a 404 on a `read.pdf`
+  asked by `ids` and keeps every other 404 an unknown endpoint's `UpstreamError`.
 - `scripts/seed_demo.py --discovery`, the seeder's second mode: one custom field on
   persons (`Kundenreferenz`, `TEXT`) and one cost centre (`100 Verkauf Büromöbel`) in a
   demo organisation seeded before. It keeps guards 1 and 2 and has its own guard 3: both
-  lists empty, and it creates the two; both holding exactly its two records, and it
-  exits 0 with nothing to do; anything else is refused before the first write. It never
-  deletes (G5 (3) of 2026-10-28; `docs/demo-org.md`). The demo organisation now holds
-  one custom field and one cost centre.
+  lists empty, and it creates the two; both holding exactly its two records, and it exits
+  0 with nothing to do; anything else is refused before the first write. It never deletes
+  (decided by Johannes on 2026-10-28; `docs/demo-org.md`). The demo organisation now
+  holds one custom field and one cost centre.
 
 ### Changed
 
 - Aligned with sdk-template v0.3.0 by hand, on template v0.2.2 and conventions 1.22
-  (§15 as queue row 118 reads it; no `copier update`, D35, D85): `CLAUDE.md` holds the
-  package's facts and imports the family rules from `.claude/family.md`, a frozen copy
-  of the template's file, its own lines from the former family sections moved into a
-  "CashCtrl specifics" section, into which `tests/fixtures/README.md` is folded and then
-  deleted (G5 (4) of 2026-10-28); the six `.claude/commands` re-based on v0.3.0's text,
-  the core-only `/adopt-release` and the write paths kept; `.claude/settings.json` allows
-  `gh pr merge --auto` and no longer denies `gh pr merge`; `ci.yml`'s CHANGELOG step no
-  longer exempts an adoption PR; `live.yml`'s comments and the PR template's enum item in
-  v0.3.0's wording; `pyproject.toml` pins ruff 0.17.1, the pre-commit hook's rev, sets
-  `junit_family = "xunit1"` and drops the `accounting` keyword; `BULK_TASKS`, empty,
-  beside `MCP_CAPS` (ADR-0019 decision 4), and the adapters' docstrings say core skips
-  it. Core stays at 0.3.0.
+  (conventions §15 applied to a package that stays on its template tag and adopts core
+  minors alone; no `copier update`, which would delete the write server): `CLAUDE.md`
+  holds the package's facts and imports the family rules from `.claude/family.md`, a
+  frozen copy of the template's file, its own lines from the former family sections moved
+  into a "CashCtrl specifics" section, into which `tests/fixtures/README.md` is folded
+  and then deleted (decided by Johannes on 2026-10-28); the six `.claude/commands`
+  re-based on v0.3.0's text, the core-only `/adopt-release` and the write paths kept;
+  `.claude/settings.json` allows `gh pr merge --auto` and no longer denies `gh pr merge`;
+  `ci.yml`'s CHANGELOG step no longer exempts an adoption PR; `live.yml`'s comments and
+  the PR template's enum item in v0.3.0's wording; `pyproject.toml` pins ruff 0.17.1, the
+  pre-commit hook's rev, sets `junit_family = "xunit1"` and drops the `accounting`
+  keyword; `BULK_TASKS` beside `MCP_CAPS` (ADR-0019 decision 4), which names the five
+  file tasks under Added, and the adapters' docstrings say core skips it. Core stays at
+  0.3.0.
 - `get_report_data` refuses payroll and people reports with `InvalidRequestError` before
   any data request: a report whose type starts with `SALARY_` or contains `PERSON`, or is
   `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or `ORG_CHART` (15 of the 41
@@ -105,23 +156,23 @@ All notable changes to this project are documented here. The format follows
   rule. The type comes from `report/tree.json`, read once per organisation and process
   and kept with the organisation's client, so `TENANTS.reset()` drops it;
   `get_report_tree` refreshes it, and an element the kept tree lacks reads it once more.
-  The drop of `ssn`, `iban` and `qrIban` keys stays the second guard (G5 (1) of
-  2026-10-28, the rule extended to the documented types the demo tree lacks by queue row
-  225; closes queue row 123's cashctrl part).
+  The drop of `ssn`, `iban` and `qrIban` keys stays the second guard (the refusal decided
+  by Johannes on 2026-10-28; its rule extended in this release to the documented types
+  the demo organisation's tree lacks; settles the point 0.2.0 carried forward).
 - `CustomField` and `CostCenter` re-typed from `customfield/list.json` (`type=PERSON`)
   and `account/costcenter/list.json`, both recorded again with the records the new seed
-  mode created (G5 (3) of 2026-10-28): `CustomField` requires `type`, `data_type` and
-  `row_label` and adds `field_id` (the `customField<id>` key a write's `custom` takes),
-  `default_variable_name`, `name`, `column_name`, `pos` and the `multi` and `inactive`
-  twins; `CostCenter` requires `number` (text, `"100"`) and `name` and adds the balances
-  `opening_amount` and `end_amount`, which `list_cost_centers` now returns,
-  `attachment_count` and the `inactive` twin.
+  mode created (decided by Johannes on 2026-10-28): `CustomField` requires `type`,
+  `data_type` and `row_label` and adds `field_id` (the `customField<id>` key a write's
+  `custom` takes), `default_variable_name`, `name`, `column_name`, `pos` and the `multi`
+  and `inactive` twins; `CostCenter` requires `number` (text, `"100"`) and `name` and
+  adds the balances `opening_amount` and `end_amount`, which `list_cost_centers` now
+  returns, `attachment_count` and the `inactive` twin.
 - The fixture recorder records through a client that never retries
   (`RetryPolicy(max_attempts=1)`, `recording_client`), so a 5xx spends no request on a
-  retry (queue row 138 item 3).
+  retry.
 - `list_history`'s docstring says that `message`, kept as upstream writes it, names
-  records and may name persons, and that no identifier comes back (G5 (12) of
-  2026-10-28).
+  records and may name persons, and that no identifier comes back (decided by Johannes
+  on 2026-10-28).
 
 ### Fixed
 
@@ -132,13 +183,12 @@ All notable changes to this project are documented here. The format follows
   `ssn` stays a whole name. The count-only fixture greps follow, and `get_report_data`
   drops every key ending in `iban` from report rows by the same rule, not only `iban`
   and `qrIban`. One predicate, `models.is_identifier_key`, decides for both, and the
-  raw-text scrub reaches a name with a dot or a space too (`bank.iban`; queue rows 242
-  and 243).
+  raw-text scrub reaches a name with a dot or a space too (`bank.iban`).
 - CashCtrl's API user tag (`API:` and the first four characters of the key) no longer
   reaches results: every model's `created_by` and `last_updated_by` masks it to
   `API:REDACTED`, as the fixtures hold it, so a live answer has a fixture's shape;
-  `SYSTEM` and user names pass (G5 (2) of 2026-10-28; closes queue row 129's cashctrl
-  part).
+  `SYSTEM` and user names pass (decided by Johannes on 2026-10-28; settles the point
+  0.2.0 carried forward).
 
 ## [0.2.0] - 2026-10-28
 
