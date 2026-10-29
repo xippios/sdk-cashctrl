@@ -51,7 +51,8 @@ register. `tests/test_seed_demo.py` checks the rule against the data and this do
    currencies, tax codes, person and order categories, persons, the journal and orders,
    and may create currencies, fiscal periods, persons, journal entries and orders. After
    seeding, the role may be reduced to read-only; the write tools' live tests and write
-   fixtures need it to create, update and delete persons, journal entries and orders.
+   fixtures need it to create, update and delete persons, journal entries and orders,
+   and to set an order's status and create an order's payment.
 5. Put the two variables into `~/github/sdk/.envrc` and run `direnv allow`:
    `CASHCTRL_DEMO_SUBDOMAIN` (the one label before `.cashctrl.com`) and
    `CASHCTRL_DEMO_API_KEY`. The subdomain is treated like the key: never in a file of
@@ -467,8 +468,38 @@ the first write:
 
 The write tools' live tests and write fixtures create records marked `xippios-live`
 (title, company or description, and `nr`), dated 2026-10-24, and delete them again in
-the same run; each live test first deletes marked leftovers of an earlier run. No seeded
-record is changed.
+the same run, a payment of a deleted order excepted (below); each live test first
+deletes marked leftovers of an earlier run. No seeded record is changed.
+
+One live test, `test_order_status_payment_delete`, creates a marked purchase order of a
+seeded vendor in the purchase invoice category (in its first status, Open, which books,
+as the seeded purchase orders do), sets it to another status of the category (Reminded
+1, the next without a follow-up action), creates its payment
+(`order/payment/create.json`, `CASH_PDF`, every open amount) and deletes the order; it
+then checks that no journal entry of the order is left. Upstream documents no payment
+delete, so every run may leave the payment of a deleted order behind: no book entry, no
+amount moved, the order gone, accepted as residue (Johannes, 2026-10-28). After the
+delete the test probes `order/payment/download` once with the payment's parameters and
+records whether upstream still serves the payment's file or refuses it (the junit
+property `payment_download`). A status with an `actionId` is avoided: it triggers an
+action upstream does not document for this call, such as `CREATE_PAYMENT_ORDER` on the
+purchase invoices' status 80 "Payment ordered" (`order_category_list/purchase`); the
+documentation names only `CATEGORY_<id>` and `BOOK_TEMPLATE_<id>`, and says that the app
+asks the user first.
+
+Observed on 2026-10-29 CET (2026-10-28 UTC by the fixtures' `recorded_at`), while
+recording (`order_update_status/ok`, `order_payment_create/pain` and `/cash_pdf`, the
+order 26) and in the first live run: `order/update_status.json` answers `{"success":
+true, "message": "Status changed"}` and `order/payment/create.json` `"Payment order
+created"`, neither with an `insertId`. `PAIN` is refused here: "The date cannot be in
+the past." (`date`), and for the order "Sender: Bank account must be set.", "Recipient:
+Bank account must be set." and "Sender: BIC must be set.", since neither the
+organisation nor the vendors hold bank details; `CASH_PDF` for the same order and the
+same past date is created. An order with a payment is deleted like any other ("1
+document deleted"), and none of its journal entries is left. The probe after the delete
+answered HTTP 400 with `text/plain`, recorded as `refusal`: no file is served for the
+payment of a deleted order; whether upstream keeps the payment itself cannot be seen, as
+the API has no payment read or list.
 
 ## Observed write semantics (filled by the first run)
 

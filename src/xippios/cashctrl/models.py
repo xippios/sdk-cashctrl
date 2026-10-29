@@ -117,6 +117,7 @@ __all__ = [
     "OrderItemInput",
     "OrderItemType",
     "OrderType",
+    "PaymentType",
     "Person",
     "PersonAddress",
     "PersonAddressInput",
@@ -138,6 +139,7 @@ __all__ = [
     "WriteAnswer",
     "WritePreview",
     "WriteResult",
+    "is_identifier_key",
 ]
 
 
@@ -146,6 +148,18 @@ def _date_part(value: object) -> object:
     if isinstance(value, str) and len(value) > 10 and value[10] in " T":
         return value[:10]
     return value
+
+
+def is_identifier_key(name: str) -> bool:
+    """Whether a payload key names a personal identifier this package keeps out (ADR-0017).
+
+    ``ssn`` by its whole name and every name that ends in ``iban`` (``iban``, ``qrIban``,
+    ``orgIban``, ``recipientIban``, ``bank.iban``), in any letter case (queue rows 123,
+    242 and 243): ``get_report_data`` drops such keys from report rows, and the fixture
+    recorder rewrites and refuses their values by the same rule.
+    """
+    lowered = name.lower()
+    return lowered == "ssn" or lowered.endswith("iban")
 
 
 UpstreamDate = Annotated[date, BeforeValidator(_date_part)]
@@ -1279,8 +1293,8 @@ class OrderDocument(_OrderDocumentFields):
 
     This read model stays faithful; ``get_order_document`` returns
     ``OrderDocumentProjection``, which leaves out the three bank account numbers
-    (ADR-0017). The recorder rewrites ``iban`` and ``qrIban`` by whole name only, not
-    these compound names; the recorded answer holds ``null`` for all three.
+    (ADR-0017). The recorder rewrites every name ending in ``iban``, these three included
+    (queue row 243); the recorded answer holds ``null`` for all three.
     """
 
     org_iban: JsonValue = Field(default=None, validation_alias="orgIban")
@@ -1933,6 +1947,10 @@ BankAccountType = Literal["DEFAULT", "ORDER", "SALARY", "HISTORICAL", "OTHER"]
 
 OrderItemType = Literal["ARTICLE", "TEXT", "PAGEBREAK", "SUBTOTAL", "TITLE", "OPTIONTOTAL"]
 """``type`` of an order item: "Defaults to ARTICLE. Possible values: ARTICLE, TEXT, ..."."""
+
+PaymentType = Literal["PAIN", "SEPA_PAIN", "WIRE_PDF", "CASH_PDF"]
+"""``type`` of ``order/payment/create.json``, the payment and the file it makes: "Defaults
+to PAIN (pain.001). Possible values: PAIN, SEPA_PAIN, WIRE_PDF, CASH_PDF"."""
 
 
 class _Input(UpstreamModel):

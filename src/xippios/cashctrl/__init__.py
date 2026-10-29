@@ -3,8 +3,9 @@
 Distribution ``xippios-cashctrl``. Public API: ``__version__`` and the task
 functions re-exported here. Every task takes ``org``, a declared organisation, first,
 except ``list_organisations``, which takes no argument and lists the declared
-organisations' names. The write tasks (``create_*``, ``update_*``, ``delete_*``, from
-``tasks_write``) preview unless called with ``confirm=True``. The file tasks
+organisations' names. The write tasks (``create_*``, ``update_*``, ``delete_*``,
+``update_order_status`` and ``create_order_payment``, from ``tasks_write``) preview
+unless called with ``confirm=True``. The file tasks
 (``download_order_document``, ``export_*``) write a file to the path their caller gives
 and are Python only.
 Endpoint wrappers under ``api/`` and the organisation registry in ``_client`` are
@@ -46,12 +47,14 @@ from xippios.cashctrl.tasks import (
 from xippios.cashctrl.tasks_write import (
     create_journal_entry,
     create_order,
+    create_order_payment,
     create_person,
     delete_journal_entry,
     delete_order,
     delete_person,
     update_journal_entry,
     update_order,
+    update_order_status,
     update_person,
 )
 
@@ -59,6 +62,7 @@ __all__ = [
     "__version__",
     "create_journal_entry",
     "create_order",
+    "create_order_payment",
     "create_person",
     "delete_journal_entry",
     "delete_order",
@@ -94,5 +98,6 @@ __all__ = [
     "list_tax_codes",
     "update_journal_entry",
     "update_order",
+    "update_order_status",
     "update_person",
 ]

@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-10-28T23:14:28.061664Z",
+  "request": {
+    "body": "date=2026-10-24&orderIds=26&type=PAIN",
+    "body_base64": false,
+    "content_type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "method": "POST",
+    "url": "https://demo.cashctrl.com/api/v1/order/payment/create.json"
+  },
+  "response": {
+    "body": "{\"success\":false,\"message\":null,\"errors\":[{\"field\":\"date\",\"message\":\"The date cannot be in the past.\"},{\"field\":null,\"message\":\"Rechnung xippios-live: Sender: Bank account must be set.\"},{\"field\":null,\"message\":\"Rechnung xippios-live: Recipient: Bank account must be set.\"},{\"field\":null,\"message\":\"Rechnung xippios-live: Sender: BIC must be set.\"}]}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Wed, 28 Oct 2026 23:14:26 GMT"
+      ],
+      [
+        "etag",
+        "\"1792835062457\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

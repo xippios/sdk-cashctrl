@@ -84,18 +84,17 @@ imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every test, s
 placeholder subdomain in every offline test and calls `TENANTS.reset()` around each.
 Core's plugin does the rest (ADR-0013): no network outside a test marked `live` or
 `network`, no rate-limit waits, and the placeholder key on every auth object, with
-`CASHCTRL_DEMO_API_KEY` named in `xippios_placeholder_key_envs`. The demo
-organisation is synthetic: invented books seeded by `scripts/seed_demo.py` and described
-in `docs/demo-org.md`, never a copy of real books. So the recorder records any module and
-any amount; it still scrubs e-mail addresses to `user@example.com`, API user tags to
-`API:REDACTED` and token-like body fields (`hash`, `token`, `secret`, `apiKey`) and the
-identifiers `ssn`, `iban` and `qrIban` to `REDACTED`, in the request body as well, and
-refuses any method but GET and POST, a POST
-to anything but the nine write paths, a create without the marker `xippios-live`, and
-any endpoint but `.json`. Writes against demo create a record marked `xippios-live`,
-update it and delete it again, nothing else (see Write tools). The demo subdomain is
-treated like a key: never in a file, a commit, a log line or a report. The repository is
-public.
+`CASHCTRL_DEMO_API_KEY` named in `xippios_placeholder_key_envs`. The demo organisation is
+synthetic: invented books seeded by `scripts/seed_demo.py` and described in
+`docs/demo-org.md`, never a copy of real books. So the recorder records any module and
+any amount; it still scrubs e-mail addresses, API user tags, token-like body fields,
+`ssn` and every name ending in `iban`, in the request body as well (How to record a
+fixture), and refuses any method but GET and POST, a POST to anything but the eleven
+write paths, a create without the marker `xippios-live` or an order write naming an
+unmarked order, and any endpoint but `.json`. Writes against demo create a record marked
+`xippios-live`, update it and delete it again, nothing else but a payment of a deleted
+order (see Write tools). The demo subdomain is treated like a key: never in a file, a
+commit, a log line or a report. The repository is public.
 
 ## Rate limit (ADR-0010)
 
@@ -187,14 +186,12 @@ docs/demo-org.md   the synthetic demo organisation: why, how to create and seed 
 
 ## Write tools
 
-`tasks_write.py` holds the nine write tasks (`create_*`, `update_*`, `delete_*` for
-journal entries, persons and orders: `create_journal_entry`, `update_journal_entry`,
-`delete_journal_entry`, `create_person`, `update_person`, `delete_person`,
-`create_order`, `update_order`, `delete_order`), served by
-`xippios-cashctrl-mcp-write` only: never by the
-read server, never on the HTTP router (`tests/test_tasks_write.py` checks it with
-`assert_write_tools`). The decisions behind them were taken by Johannes in the wave 2
-interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more:
+`tasks_write.py` holds eleven write tasks, `create_*`, `update_*` and `delete_*` for
+journal entries, persons and orders, `update_order_status` and `create_order_payment`,
+served by `xippios-cashctrl-mcp-write` only: never by the read server, never on the HTTP
+router (`assert_write_tools` in `tests/test_tasks_write.py`). Johannes decided the first
+nine in the interviews of 2026-10-23/24 and 2026-10-27, the last two in G5 (8) of
+2026-10-28; the recipe for one more:
 
 1. **Layer 1.** `api/<module>_create.py` (and `_update`, `_delete`): a `<module>_fields`
    builder takes every parameter the create table documents, snake_cased, and returns
@@ -223,7 +220,7 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
    result twice. A create's preview sends nothing; an update's or a delete's sends one
    read, never a write.
 3. **Updates read, merge, send.** Upstream empties every parameter an update omits.
-   `update_*` reads the record, maps every parameter `update.json` documents from it
+   An `update.json` task reads the record, maps every parameter it documents from it
    (`_journal_values`, `_person_values`, `_order_values`), applies the arguments given
    (not `None`), and sends all of them. An order's items go back under the keys the
    items table documents (`_order_items`, in their `pos`), the computed ones left out;
@@ -279,6 +276,11 @@ interview on 2026-10-23 and its follow-up on 2026-10-24; the recipe for one more
    `finally` deletes it through the wrapper if an assertion failed first. An update is
    previewed, confirmed and read back: the changed field holds the new value and every
    other derived field is unchanged.
+7. **Statuses and payments**: `update_order_status` and
+   `create_order_payment` send the fields given, nothing read: a preview sends no
+   request. A payment (pain.001 or PDF) books nothing and has no documented delete: the
+   live test deletes the paid order and leaves the payment, accepted residue (Johannes,
+   2026-10-28).
 
 ## Personal identifiers (ADR-0017)
 
@@ -308,12 +310,10 @@ replay-tested with a real value.
   send them as given; a preview's `payload` and `changes` and a performed write's
   `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
   as empty.
-- Fixtures never carry their values: the recorder rewrites an `ssn`, `iban` or
-  `qrIban` value (a location's QR-IBAN, also as `qr_iban` or `qr-iban`) to `REDACTED` by
-  name, in any letter case, and its final check refuses only a value that survives the
-  rewrite (How to record a fixture); the recorded location holds `null` for both. Whole
-  names only: an order document's `orgIban`, `orgQrIban` and `recipientIban` are neither
-  rewritten nor refused, so never record a document whose bank accounts are set.
+- Fixtures never carry their values: the recorder rewrites the value of `ssn` and of
+  every name ending in `iban` (`qrIban`, `orgIban`, ...; row 243) to `REDACTED`, in any
+  letter case, and its final check refuses a value that survives the rewrite (How to
+  record a fixture); the recorded location holds `null` for `iban` and `qrIban`.
 - `get_report_data` refuses payroll and people reports before their data is requested
   (G5 (1) of 2026-10-28, rows 123 and 225): a type that starts with `SALARY_` or
   contains `PERSON`, or is `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or
@@ -321,8 +321,8 @@ replay-tested with a real value.
   `report/tree.json` once per organisation into a `WeakKeyDictionary` keyed on its
   client, which `TENANTS.reset()` or a changed variable drops; `get_report_tree`
   refreshes it; an element the kept tree lacks reads it once more, one still missing is
-  asked of upstream. Other reports come back as sent, every key named `ssn`, `iban` or
-  `qrIban` dropped at any depth, in any case (`_report`; ADR-0003, amendment 2026-10-26).
+  asked of upstream. Other reports come back as sent, every key `ssn` or ending in `iban`
+  dropped at any depth, in any case (`_report`; row 243; ADR-0003, amendment 2026-10-26).
 - A task that fetches them deliberately may return them and says so in its docstring.
   Two files may carry them, at the caller's path, never in a result or a tool
   (`BULK_TASKS`; Johannes, 2026-10-28): `export_persons` names `PERSON_COLUMNS` unless
@@ -450,61 +450,56 @@ and expects an unknown order's refusal.
 
 Run `/record-fixture <endpoint> <case> <parameters>`. It runs
 `direnv exec ~/github/sdk uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]`,
-which performs one live request against the demo organisation, always and only,
-through a client that never retries (`RetryPolicy(max_attempts=1)`, so a 5xx spends no
-request on a retry), and builds the fixture in memory with core's
-`fixture_from_response` and `Scrub(secrets=[key, its basic-auth token],
-allow_binary=False)` (conventions §10):
-credentials scrubbed and the key and its token made `REDACTED` where they appear as
-given. Core's verify searches plain values only: it refuses the exchange when the key
-or its token is still there as given, and when a body is not UTF-8 text (the recorder
-records no file). Everything else is the recorder's own step, `TenantScrub`, on the `Fixture`
-core returns, before the one write (ADR-0024, decision 4; copied from core's former
-`Scrub(host=..., rewrite=...)`): the demo host, in any case, IDNA or percent-encoded,
-becomes `demo.cashctrl.com` in the URL, the headers and both bodies; the key and its
-token become `REDACTED` in every percent-encoded form too; and `scrub_text` runs over the
-URL, the header values and both bodies: e-mail addresses to `user@example.com`,
-CashCtrl's API user tags (`API:` and the first four characters of a key, in `createdBy`
-and `lastUpdatedBy`) to `API:REDACTED` and the value of every token-like body field
-(`hash`, `token`, `secret`, `apiKey`, by name; `order/read.json` sends `hash`) and of the
-identifiers `ssn`, `iban` and `qrIban` (`qr_iban`, `qr-iban`; ADR-0017;
-`person/list.json` sends `ssn` and `iban`, `location/list.json` `iban` and `qrIban`, only
-ever `null`) to `REDACTED`. Its verify then refuses, in its own words, a fixture that
-still holds the demo host, the subdomain on its own or the key or its token, plain or
-percent-encoded, in the raw texts or in a decoded string of a JSON body (a value behind
-a JSON escape). A response in which the key was redacted is written but goes to review
-(exit status 1). The recorder's own final check then refuses,
-before the one write to `tests/fixtures/<endpoint>/<case>.json`, a fixture that in its
-text or in a decoded string of its body still holds the subdomain on its own, an e-mail
-address, an API user tag in any case and position, the key's first four characters on
-their own (a possible key prefix) or any value but `null` or `REDACTED` under a
-token-like or identifier name, and the recorder refuses what a policy of the demo-only
-rule above
-refuses. The write stays the recorder's: core's `record` writes as soon as its own
-verify passes, before the recorder's step and final check could run. A compound name such as
-`publicHash` is not scrubbed and goes to review. Grep the file for key patterns, e-mail
-addresses, API user tags, token-like fields and values under `ssn`, `iban` and `qrIban`
-before committing (`/record-fixture`, the grep block below). Fixtures are never typed in
-by hand.
+which sends one request to the demo organisation only, through a client that never
+retries (`RetryPolicy(max_attempts=1)`: a 5xx spends no retry), and builds the fixture in
+memory with core's `fixture_from_response` and `Scrub(secrets=[key, its basic-auth
+token], allow_binary=False)` (conventions §10): credentials scrubbed, the key and its
+token `REDACTED` as given. Core's verify, plain values only, refuses the exchange when
+the key or its token is still there as given or a body is not UTF-8 text (the recorder
+records no file). The rest is the recorder's own step, `TenantScrub`, on core's `Fixture`
+before the one write (ADR-0024, decision 4; from core's former `Scrub(host=...,
+rewrite=...)`): the demo host, in any case, IDNA or percent-encoded, becomes
+`demo.cashctrl.com` in the URL, the headers and both bodies; the key and its token become
+`REDACTED` in every percent-encoded form too; and `scrub_text` runs over the URL, the
+header values and both bodies: e-mail addresses to `user@example.com`, CashCtrl's API
+user tags (`API:` and the first four characters of a key, in `createdBy` and
+`lastUpdatedBy`) to `API:REDACTED` and the value of every token-like body field (`hash`,
+`token`, `secret`, `apiKey`, by name; `order/read.json` sends `hash`) and of the
+identifiers, `ssn` and every name ending in `iban` (ADR-0017, row 243; seen only `null`,
+in `person/list.json`, `location/list.json` and `order/document/read.json`) to
+`REDACTED`. Its verify then refuses, in its own words, a fixture still
+holding the demo host, the subdomain alone or the key or its token, plain or
+percent-encoded, raw or in a decoded string of a JSON body. A response in which the key
+was redacted is written but goes to review (exit status 1). The recorder's final check
+then refuses, before the one write to `tests/fixtures/<endpoint>/<case>.json`, a fixture
+whose text or decoded body strings still hold the subdomain alone, an e-mail address, an
+API user tag in any case and position, the key's first four characters alone (a possible
+key prefix) or any value but `null` or `REDACTED` under a token-like or identifier name,
+or what the demo-only rule above refuses. The write stays the recorder's: core's `record`
+would write once its own verify passes, before the recorder's step and check. A compound
+name such as `publicHash` is not scrubbed and goes to review. Grep the file for key
+patterns, e-mail addresses, API user tags, token-like fields and identifier values
+before committing (`/record-fixture`, the grep block below). Fixtures
+are never typed in by hand.
 
-Writes: `--method POST` is accepted for the nine write paths the write tools call only
-(`journal/create|update|delete.json`, `person/create|update|delete.json`,
-`order/create|update|delete.json`, `WRITE_PATHS`), every other POST and every other method
-refused before a request, and a `create.json` only when one of its values carries
-`xippios-live`; the `key=value` pairs go as the form body, in their order, with the
-write tools' `Content-Type` (`application/x-www-form-urlencoded; charset=UTF-8`). Core
-records the request body, and the recorder's rewrite and final check cover it (the raw
-text, each form field decoded, each JSON value's strings): host, key, e-mail addresses,
-API user tags, token-like fields and identifiers, a form field `ssn` or the `iban` inside
-`bankAccounts` included, so a write that sends one is not recorded. After the request
-the recorder says that the demo
-organisation changed, names the `insertId` it answered, and asks for the matching
-delete, recorded or run. Record only a record marked `xippios-live`, its update and its
-delete; confirm afterwards with one list per resource (`query=xippios-live`, counts
-only) that nothing is left.
+Writes: `--method POST` is accepted for the eleven write paths the write tools call only
+(`journal/`, `person/` and `order/create|update|delete.json`, `order/update_status.json`,
+`order/payment/create.json`, `WRITE_PATHS`), any other POST or method refused before a
+request; a `create.json` only when one of its values carries `xippios-live` (the
+payment's excepted: its orders are the marker), and the two order writes only after `order/read.json` found every order their `ids` or `orderIds`
+name marked (`xippios-live` in `description`, or as `nr`), fail closed
+(`unmarked_orders`); the `key=value` pairs go as the form body, in their order, with the
+write tools' `Content-Type` (`application/x-www-form-urlencoded; charset=UTF-8`). The
+recorder's rewrite and final check cover the request body core records too (raw, each
+form field decoded, each JSON value's strings), a form field `ssn` or an `iban` inside
+`bankAccounts` included, so a write that sends one is not recorded. After the request it
+says that the demo organisation changed, names the `insertId` and asks for the matching
+delete, recorded or run; after a payment, that it stays behind (no delete documented). Record only a record marked `xippios-live`, its writes and its
+delete; confirm afterwards with one list per resource (`query=xippios-live`, counts only)
+that nothing is left.
 
-The write fixtures (2026-10-24 and 2026-10-27) record marked records created, read,
-updated and deleted again.
+The write fixtures record marked records created, read, updated and deleted again
+(2026-10-24, 2026-10-27) and a purchase order's status and payments (2026-10-29).
 
 Still grep before committing:
 
@@ -513,13 +508,13 @@ grep -rniE 'api[_-]?key|token|secret' tests/fixtures
 grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' tests/fixtures | sort -u
 grep -rhoiE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u
 grep -rhoiE '(hash|token|secret|api[_-]?key)\\?": *\\?"[^"\\]*' tests/fixtures | sort -u
-grep -rhoiE --include='*.json' '\\?"(ssn|iban|qr[_-]?iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
-grep -rhoiE --include='*.json' '(ssn=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
+grep -rhoiE --include='*.json' '\\?"(ssn|[a-z0-9_-]*iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
+grep -rhoiE --include='*.json' '(ssn=|iban=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
 ```
 
-The last two count, without printing them, the values of `ssn`, `iban` and `qrIban`
-that are neither `null` nor `REDACTED`, in the JSON bodies and in a write's form body;
-both print `0`.
+The last two count, without printing them, the values of `ssn` and of every name ending
+in `iban` that are neither `null` nor `REDACTED`, in the JSON bodies and in a write's
+form body; both print `0`.
 
 ### Commands
 
@@ -550,7 +545,7 @@ Every live run here takes `--tb=short`, for the reason `.claude/family.md` gives
 Besides `.claude/family.md`'s list:
 
 - Never hand-write a fixture, and never commit one without grepping for key patterns
-  and for values under `ssn`, `iban` and `qrIban`.
+  and for values under `ssn` and every name ending in `iban`.
 - Never record a fixture, run a live test or make a live call against any organisation
   but `demo`; never set `CASHCTRL_ORGS` with real names in a session or a test.
 - Never print, log or commit `CASHCTRL_DEMO_SUBDOMAIN` or any organisation's subdomain.

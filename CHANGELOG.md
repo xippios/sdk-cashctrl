@@ -13,9 +13,9 @@ All notable changes to this project are documented here. The format follows
   layout and language, the sender's and the recipient's address as printed, the payment
   references of the QR-bill and the mailing defaults. `OrderDocument` is typed from the
   answer recorded on 2026-10-29; the task returns `OrderDocumentProjection`, without
-  `orgIban`, `orgQrIban` and `recipientIban` (G5 (5) of 2026-10-28; ADR-0017). The
-  recorder rewrites `iban` and `qrIban` by whole name only, so these compound names are
-  neither rewritten nor refused: the recorded document holds `null` for all three.
+  `orgIban`, `orgQrIban` and `recipientIban` (G5 (5) of 2026-10-28; ADR-0017); the
+  recorded document holds `null` for all three, which the recorder now rewrites and
+  refuses by name (queue row 243, under Fixed).
 - Five file tasks, `download_order_document` and the list exports
   `export_journal_entries`, `export_accounts`, `export_persons` and `export_orders`,
   named in `BULK_TASKS`: Python only, no MCP tool or HTTP route (G5 (5) and (6) of
@@ -37,6 +37,35 @@ All notable changes to this project are documented here. The format follows
   no binary body: the tests mount synthetic bytes with respx, and the live tests download
   one order document, the journal and the persons as CSV, and expect the refusal of an
   unknown order's document (G5 (7); queue row 235).
+- `update_order_status` (`order/update_status.json`) and `create_order_payment`
+  (`order/payment/create.json`), the tenth and eleventh write tools, on the write server
+  only and confirm-gated as the others (G5 (8) of 2026-10-28): a preview sends no request
+  and holds the exact payload, `confirm=True` sends it, nothing read first. `ids` and
+  `order_ids` are lists of order ids, sent comma-separated; `status_id` is an id from a
+  category's `status` in `list_order_categories`; `type` is `models.PaymentType`
+  (`PAIN`, `SEPA_PAIN`, `WIRE_PDF`, `CASH_PDF`; queue row 214's practice), left to
+  upstream's default `PAIN` when not given. A payment is the pain.001 or PDF payment
+  order upstream's `order/payment/download` delivers (not wrapped), creates no book
+  entry and has no documented delete, as the docstring says. One wrapper per endpoint,
+  `order_update_status` and `order_payment_create` (D95, conventions 1.22 §2), their
+  fixtures recorded on 2026-10-29 on a marked purchase order with the purchase
+  categories (`order_category_list/purchase`): the status set, the payment as `PAIN`
+  refused (a date in the past, no bank accounts or BIC in the synthetic books) and as
+  `CASH_PDF` created, neither answer with an `insertId`. `order/continue.json` and the
+  book-entry writes stay out.
+- The fixture recorder accepts the two order writes, eleven write paths, for orders
+  marked `xippios-live` only: it reads every order their `ids` or `orderIds` name
+  (`order/read.json`, one GET each) and refuses the write before it is sent unless each
+  is marked (the marker in its description, or as its `nr`), an order it cannot read
+  refusing it too (Johannes, 2026-10-28). A GET to one of the write paths is refused
+  (queue row 245 holds the general case).
+- A live round trip on a marked purchase order of a seeded vendor: created, its status
+  set, its payment created (`CASH_PDF`, which demo accepts), the order deleted and no
+  journal entry of it left; then `order/payment/download` is probed once with the
+  payment's parameters, never recorded, to see whether the payment outlived its order:
+  on 2026-10-29 it answered HTTP 400, no file. The payment of a deleted order is the
+  accepted residue: no book entry, no amount moved, the order gone (Johannes,
+  2026-10-28).
 - A download refused with HTTP 200 and `success: false` is raised, never kept as the
   file: core writes a 2xx body unread (queue row 142), so `api/_download.py` streams to a
   temporary file beside `dest` and reads `Content-Type` first. JSON goes through
@@ -96,6 +125,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The fixture recorder rewrites to `REDACTED` the value of every body field whose name
+  ends in `iban`, in any case and at any depth, not only `iban` and `qrIban`, and its
+  final check refuses one that survives, so `order/document/read.json`'s `orgIban`,
+  `orgQrIban` and `recipientIban` (only seen `null` in demo) can never be recorded set;
+  `ssn` stays a whole name. The count-only fixture greps follow, and `get_report_data`
+  drops every key ending in `iban` from report rows by the same rule, not only `iban`
+  and `qrIban`. One predicate, `models.is_identifier_key`, decides for both, and the
+  raw-text scrub reaches a name with a dot or a space too (`bank.iban`; queue rows 242
+  and 243).
 - CashCtrl's API user tag (`API:` and the first four characters of the key) no longer
   reaches results: every model's `created_by` and `last_updated_by` masks it to
   `API:REDACTED`, as the fixtures hold it, so a live answer has a fixture's shape;
