@@ -8,8 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.3.0] - 2026-10-29
 
-The third release. It ships on xippios-core 0.3.0 (`xippios-core~=0.3.0` from PyPI,
-its `mcp`, `http` and `testing` extras likewise) and sdk-template v0.2.2, aligned with
+The third release. It ships on xippios-core 0.3.0 (`xippios-core~=0.3.0` from PyPI, its
+`mcp`, `http` and `testing` extras likewise) and sdk-template v0.2.2, aligned with
 template v0.3.0 by hand: the family rules are imported from `.claude/family.md`, a frozen
 copy of the template's file, and the package follows conventions 1.22. The three points
 0.2.0 carried forward are settled: `get_report_data` refuses payroll and people reports
@@ -17,15 +17,19 @@ by their type before any data is requested, the API user tag CashCtrl writes int
 `created_by` and `last_updated_by` reaches every result masked as `API:REDACTED`, and a
 discovery mode of the demo seeder (`scripts/seed_demo.py --discovery`) creates a custom
 field and a cost centre, from whose recorded answers `CustomField` and `CostCenter` are
-typed again. New are `get_order_document`, an order's document as it is printed and
-sent; five Python-facing file tasks, `download_order_document` and the list exports
+typed again. New are `get_order_document`, an order's document as it is printed and sent;
+five Python-facing file tasks, `download_order_document` and the list exports
 `export_journal_entries`, `export_accounts`, `export_persons` and `export_orders`, which
 stream a file to the path the caller gives and serve no MCP tool or HTTP route; and two
-write tools, `update_order_status` and `create_order_payment`. The fixture recorder
-sends an order write only after it has read every order the write names and found it
-marked `xippios-live`, and it treats every field whose name ends in `iban` as a personal
+write tools, `update_order_status` and `create_order_payment`. The fixture recorder sends
+an order write only after it has read every order the write names and found it marked
+`xippios-live`, and it treats every field whose name ends in `iban` as a personal
 identifier, as `get_report_data` now does for report rows. That makes 24 read tasks,
-`list_organisations` among them, 5 file tasks and 11 write tools.
+`list_organisations` among them, 5 file tasks and 11 write tools. Three changes break
+0.2.0's surface, hence the minor: `get_report_data` refuses the payroll and people
+reports it answered, `created_by` and `last_updated_by` come back masked, and
+`CustomField` and `CostCenter` require fields they did not (`type`, `data_type` and
+`row_label`; `number` and `name`).
 
 Not covered: the fiscal period writes (`fiscalperiod/create`, `complete`, `reopen`,
 `delete`, `complete_months`, `reopen_months`, `switch`; fiscal periods stay read-only,
@@ -80,7 +84,7 @@ snapshot documents as a POST, a general check a later release adds.
   §2: a file suffix stays as the last word), none with a fixture directory, since the
   recorder records no binary body: the tests mount synthetic bytes with respx, and the
   live tests download one order document, the journal and the persons as CSV, and expect
-  the refusal of an unknown order's document (the tests as Johannes decided on
+  the refusal of an unknown order's document (the test approach as Johannes decided on
   2026-10-28).
 - `update_order_status` (`order/update_status.json`) and `create_order_payment`
   (`order/payment/create.json`), the tenth and eleventh write tools, on the write server
@@ -141,8 +145,9 @@ snapshot documents as a POST, a general check a later release adds.
   `ci.yml`'s CHANGELOG step no longer exempts an adoption PR; `live.yml`'s comments and
   the PR template's enum item in v0.3.0's wording; `pyproject.toml` pins ruff 0.17.1, the
   pre-commit hook's rev, sets `junit_family = "xunit1"` and drops the `accounting`
-  keyword; `BULK_TASKS`, empty, beside `MCP_CAPS` (ADR-0019 decision 4), and the
-  adapters' docstrings say core skips it. Core stays at 0.3.0.
+  keyword; `BULK_TASKS` beside `MCP_CAPS` (ADR-0019 decision 4), which names the five
+  file tasks under Added, and the adapters' docstrings say core skips it. Core stays at
+  0.3.0.
 - `get_report_data` refuses payroll and people reports with `InvalidRequestError` before
   any data request: a report whose type starts with `SALARY_` or contains `PERSON`, or is
   `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or `ORG_CHART` (15 of the 41
@@ -151,9 +156,9 @@ snapshot documents as a POST, a general check a later release adds.
   rule. The type comes from `report/tree.json`, read once per organisation and process
   and kept with the organisation's client, so `TENANTS.reset()` drops it;
   `get_report_tree` refreshes it, and an element the kept tree lacks reads it once more.
-  The drop of `ssn`, `iban` and `qrIban` keys stays the second guard (decided by
-  Johannes on 2026-10-28, the rule extended to the documented types the demo
-  organisation's tree lacks; settles the point 0.2.0 carried forward).
+  The drop of `ssn`, `iban` and `qrIban` keys stays the second guard (the refusal decided
+  by Johannes on 2026-10-28; its rule extended in this release to the documented types
+  the demo organisation's tree lacks; settles the point 0.2.0 carried forward).
 - `CustomField` and `CostCenter` re-typed from `customfield/list.json` (`type=PERSON`)
   and `account/costcenter/list.json`, both recorded again with the records the new seed
   mode created (decided by Johannes on 2026-10-28): `CustomField` requires `type`,
