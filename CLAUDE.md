@@ -1,8 +1,10 @@
 # sdk-cashctrl — instructions for Claude Code
 
 `xippios-cashctrl` wraps CashCtrl as a typed Python client, an MCP server
-and FastAPI routes, built on `xippios-core`. This file is the contract for every session
-that works here; the family rules it points to apply as well.
+and FastAPI routes, built on `xippios-core`. This file holds the facts of this package;
+the family rules every source shares are in `.claude/family.md`, which the next line imports.
+
+@.claude/family.md
 
 ## What this package wraps
 
@@ -17,8 +19,6 @@ that works here; the family rules it points to apply as well.
 | Core | `xippios-core~=0.3.0` from PyPI, its `mcp`, `http` and `testing` extras likewise: one core minor, adopted through conventions §15 (ADR-0018); sdk-template v0.2.2, the last release it updates to (Workflow rules) |
 
 The snapshot in `docs/upstream/` is the reference for names, parameters and semantics.
-If it is empty or stale, run `/refresh-upstream` first and review the diff. Never write a
-wrapper from memory of the API.
 
 ## Organisations
 
@@ -124,28 +124,6 @@ Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 is deliberately not 
 5. **Pauses are stated** by core's adapters: `error: RateLimitError: ... (retry after N s)`
    over MCP, a 429 problem with `retry_after` and `Retry-After` over HTTP.
 
-## Read first, in this order
-
-1. `docs/upstream/FETCHED.md` and the files it lists: what the upstream actually offers
-2. The family conventions: `../sdk-core/docs/conventions.md` and `../sdk-core/docs/adr/`
-   (also at https://github.com/xippios/sdk-core/tree/main/docs)
-3. `../sdk-core/docs/definition-of-done.md`: what a PR must satisfy, and
-   `../sdk-core/docs/review-checklist.md`: what the reviewer checks it against
-4. The family file `../CLAUDE.md`
-5. When a new core minor comes: conventions §15, the adoption checklist, which
-   `/adopt-release` walks
-
-## The one rule: three layers (ADR-0001)
-
-```
-api/<operation>.py   one async function per upstream operation, upstream names, returns models
-tasks.py             the public API: composes wrappers, returns Result[T], sync facade via sync()
-mcp.py  http.py      adapters: register tasks.__all__, nothing else. Never edited to add an endpoint.
-```
-
-Adapters call only task functions. Tasks call only endpoint wrappers and reference
-data. If logic appears in `mcp.py` or `http.py`, it belongs in `tasks.py`.
-
 ## Layout
 
 ```
@@ -195,6 +173,7 @@ docs/demo-org.md   the synthetic demo organisation: why, how to create and seed 
 .github/workflows/ ci.yml (the required ci check, with the CHANGELOG and fixture-size steps),
                    publish.yml (the release train: tag, build, PyPI), live.yml (nightly live
                    tests), gates.yml (the merge gates as jobs, off until GATES_CALLER is 1)
+.claude/family.md  the family rules, the template's, imported above
 .claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep,
                    adopt-release; refresh-reference-data does not apply here: cashctrl packages
                    no reference data and has no scripts/refresh_reference.py, until a documented
@@ -202,78 +181,8 @@ docs/demo-org.md   the synthetic demo organisation: why, how to create and seed 
 ```
 
 `src/xippios/` has **no** `__init__.py`: it is a PEP 420 namespace package shared with
-`xippios-core` and every other source package.
-Never add one; `tests/test_family.py` fails if it appears. The import path is
-`xippios.cashctrl` (ADR-0006).
-
-## How to add an endpoint
-
-Run `/add-endpoint <upstream operation>`. In short:
-
-1. Read the operation in `docs/upstream/`. Names, parameters and semantics come from
-   there, snake_cased, nothing renamed, nothing normalised across sources.
-2. `models.py`: an `UpstreamModel` per payload object; dates, numbers and enums typed.
-   Upstream's camelCase spellings are accepted with `Field(validation_alias=...)`, never
-   `Field(alias=...)`: the adapters serialise by alias, and results stay snake_case.
-3. `api/<operation>.py`: one async wrapper that takes `org` first, calls
-   `_client.client_for(org)` and returns models through `xippios.core.parse`.
-4. `tasks.py`: an async task, `org` its first parameter, that composes wrappers and
-   returns `Result[T]` with full `ResultMeta` through `_meta(org, ...)` (source,
-   endpoint, `tenant=org`, request parameters, `published_at`/`vintage` when the upstream
-   gives them). Derive the sync one with
-   `sync()`, add its name to `__all__`, re-export it from `__init__.py`. What it returns
-   leaves out documented personal identifiers (`ssn`, `iban` and their like) unless it
-   fetches them deliberately and says so, and a write task does not echo one in
-   `meta.request` (ADR-0017).
-5. Docstring for agents: one sentence, then `Args:` with examples of valid values for
-   every parameter. The MCP tool description and the OpenAPI summary come from it.
-6. `/record-fixture` for at least one case (demo only), a replay test in `test_tasks.py`
-   with `org="demo"` that also calls the tool end to end with
-   `xippios.core.testing.mcp_call` (and compares what was sent through
-   `sent_urls(route)` or `sent_query(route)` with `recorded_query(fixture)`, never a
-   request from `route.calls`), a case in `TOOL_CASES` (which
-   checks `meta.tenant` and snake_case keys for every tool; a tool whose recorded
-   answer is empty goes into `UNOBSERVED`, whose models' field names are checked
-   instead, and a field kept as upstream sends it into `AS_SENT`), a live smoke test in
-   `test_live.py` that takes the `demo_org` fixture.
-7. `CHANGELOG.md` under Unreleased, README status table (the task's name first in its
-   cell, in backticks, as the family check reads it), then the full check suite.
-
-A list that documents `start` and `limit` (journal, persons, orders, history) pages through
-`_offset_pages` in `tasks.py` (conventions §4, ADR-0012): `limit` given is one request
-for the page at `start` (default 0); `limit` omitted collects every page from `start`
-through core's `paginate_offset`, `PAGE_SIZE` (100, upstream's documented default) a
-request. `meta.total` is upstream's `total` on every list task, never `len(data)`.
-
-Lookups (accounts, currencies, tax codes, fiscal periods, account and person categories,
-titles, cost centers, locations, custom fields) are tasks too, named `list_<thing>`, so
-agents can form valid calls; they serve the organisation's own data
-live and are never packaged: a multi-tenant source packages no tenant data. Nor does the
-package ship a value set `docs/upstream/` fixes, since no task needs one yet, so the
-reference-data scaffolding (`params.py`, `enums.py`, `reference/`,
-`scripts/refresh_reference.py`) is gone until a documented value set is needed; then it
-comes back from the `render_enums` port deleted here, not from template v0.2.2's
-scaffold, whose script needs renderers core 0.3.0 removed (`/refresh-reference-data` says
-where). A lookup whose whole list an agent needs and the default result cap (200 rows or
-64 KB) would cut gets a cap of its own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes
-through (ADR-0016): `list_custom_fields` (500 rows or 128 KB; no filter but `type`, and
-a write needs a type's custom fields whole) and `get_report_data` (128 KB; a report is
-read whole, and its result, no list, is cut to a note and a preview);
-`list_cost_centers` and `list_history` keep the default bound with a note naming their
-filters (the history's note also names `limit`, and core's cut ends with where to
-resume). Every other list takes filters or pages, or is short. Where the documentation gives no schema and
-the shape differs by kind, as the rows of `report/element/data.json` differ by report
-type, the task returns upstream's JSON as sent (`JsonValue`, camelCase keys included)
-and says so in its docstring (decided by Johannes on 2026-10-27); `AS_SENT` in
-`tests/test_tasks.py` names those fields for the snake_case check. A task-shaped
-function that returns a subset of an upstream record builds its model with
-`UpstreamModel.project`; nothing is renamed or computed, parsing a value
-(`parse_decimal`) is the only override.
-Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
-use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
-HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
-for an unknown id on a `read.json` read by id; a 404 means an unknown endpoint and
-raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
+`xippios-core` and every other source package. The import path is `xippios.cashctrl`
+(ADR-0006).
 
 ## Write tools
 
@@ -410,7 +319,113 @@ replay-tested with a real value.
 - A task that fetches them deliberately may return them and says so in its docstring;
   none does.
 
-## How to record a fixture
+## CashCtrl specifics
+
+What `.claude/family.md` says holds here as well. The subsections below, named after its
+sections, hold the lines of cashctrl's own that this file's family sections carried
+before the split: where the family text and this section differ (`org` first and
+`client_for(org)` where it names `_client.client`, the demo-only recorder where it names
+`record_sync`, the live command, the updates), this section is cashctrl's form.
+
+### Workflow rules
+
+- `.claude/family.md` is a frozen copy of sdk-template v0.3.0's file, byte for byte,
+  imported by the line under this file's intro. Like every template-rendered file here
+  it is cashctrl's own and changes by hand only: at each template release it is copied
+  again from the template's file at that tag, never edited in place, and a line of
+  cashctrl's own goes into this file instead (row 118).
+- `.claude/family.md`'s "Template and core updates" bullet does not apply here:
+  cashctrl runs no `copier update` (D35), and a core minor arrives through the
+  core-only `/adopt-release`, as the next bullet says.
+- Core updates: a new core minor arrives in one adoption PR, a `chore/template-update*`
+  branch, before the next release (conventions §15); when its merge class is `auto` the
+  session enables auto-merge after the reviewer's `ready` (ADR-0018, amendment (e)). An
+  adoption of a later core minor runs no `copier update` (D35, D85): it raises the floor
+  to `~=X.Y.0` by hand in `pyproject.toml`, runs `uv lock` and ports that core release's
+  Hand-apply list (`/adopt-release`). The reference-data scaffolding (`params.py`,
+  `enums.py`, `reference/`, `scripts/refresh_reference.py`) does not come back, since
+  cashctrl runs no further `copier update` (D35); a future value set brings the script
+  back by hand from the `render_enums` port deleted here (`/refresh-reference-data`).
+  From template v0.2.2 on every template-rendered file is cashctrl's own (`ci.yml`,
+  `publish.yml`, `gates.yml`, `live.yml`, the PR template, the `.claude/commands` files,
+  `.claude/settings.json`, `.claude/family.md`, `tests/conftest.py`,
+  `tests/test_family.py`, the template's parts of this file), and a core adoption
+  hand-applies the template changes the conventions version it adopts needs (row 118).
+- cashctrl stays on template v0.2.2 after template v0.3.0 and keeps adopting core minors
+  through conventions §15; `copier update` must never be run past v0.2.2: the v0.3.0
+  template deletes `mcp_write.py`, `tasks_write.py` and `tests/test_tasks_write.py` and
+  rewrites `api_key_location: basic` to `query` without a conflict marker.
+
+### How to add an endpoint
+
+`/add-endpoint` walks it. Steps 1, 5 and 7 are `.claude/family.md`'s, step 7's task name
+first in its README cell as the family check reads it (cashctrl's README has no comment
+above its status table); steps 2 to 4 and 6 read here:
+
+2. `models.py`: an `UpstreamModel` per payload object; dates, numbers and enums typed.
+   Upstream's camelCase spellings are accepted with `Field(validation_alias=...)`, never
+   `Field(alias=...)`: the adapters serialise by alias, and results stay snake_case.
+3. `api/<operation>.py`: one async wrapper that takes `org` first, calls
+   `_client.client_for(org)` and returns models through `xippios.core.parse`.
+4. `tasks.py`: an async task, `org` its first parameter, that composes wrappers and
+   returns `Result[T]` with full `ResultMeta` through `_meta(org, ...)` (source,
+   endpoint, `tenant=org`, request parameters, `published_at`/`vintage` when the upstream
+   gives them). Derive the sync one with
+   `sync()`, add its name to `__all__`, re-export it from `__init__.py`. What it returns
+   leaves out documented personal identifiers (`ssn`, `iban` and their like) unless it
+   fetches them deliberately and says so, and a write task does not echo one in
+   `meta.request` (ADR-0017).
+
+Step 5, the docstring for agents, is the family's; then:
+
+6. `/record-fixture` for at least one case (demo only), a replay test in `test_tasks.py`
+   with `org="demo"` that also calls the tool end to end with
+   `xippios.core.testing.mcp_call` (and compares what was sent through
+   `sent_urls(route)` or `sent_query(route)` with `recorded_query(fixture)`, never a
+   request from `route.calls`), a case in `TOOL_CASES` (which
+   checks `meta.tenant` and snake_case keys for every tool; a tool whose recorded
+   answer is empty goes into `UNOBSERVED`, whose models' field names are checked
+   instead, and a field kept as upstream sends it into `AS_SENT`), a live smoke test in
+   `test_live.py` that takes the `demo_org` fixture.
+
+A list that documents `start` and `limit` (journal, persons, orders, history) pages through
+`_offset_pages` in `tasks.py` (conventions §4, ADR-0012): `limit` given is one request
+for the page at `start` (default 0); `limit` omitted collects every page from `start`
+through core's `paginate_offset`, `PAGE_SIZE` (100, upstream's documented default) a
+request. `meta.total` is upstream's `total` on every list task, never `len(data)`.
+
+Lookups (accounts, currencies, tax codes, fiscal periods, account and person categories,
+titles, cost centers, locations, custom fields) are tasks too, named `list_<thing>`, so
+agents can form valid calls; they serve the organisation's own data
+live and are never packaged: a multi-tenant source packages no tenant data. Nor does the
+package ship a value set `docs/upstream/` fixes, since no task needs one yet, so the
+reference-data scaffolding (`params.py`, `enums.py`, `reference/`,
+`scripts/refresh_reference.py`) is gone until a documented value set is needed; then it
+comes back from the `render_enums` port deleted here, not from template v0.2.2's
+scaffold, whose script needs renderers core 0.3.0 removed (`/refresh-reference-data` says
+where). A lookup whose whole list an agent needs and the default result cap (200 rows or
+64 KB) would cut gets a cap of its own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes
+through (ADR-0016): `list_custom_fields` (500 rows or 128 KB; no filter but `type`, and
+a write needs a type's custom fields whole) and `get_report_data` (128 KB; a report is
+read whole, and its result, no list, is cut to a note and a preview);
+`list_cost_centers` and `list_history` keep the default bound with a note naming their
+filters (the history's note also names `limit`, and core's cut ends with where to
+resume). Every other list takes filters or pages, or is short. Where the documentation gives no schema and
+the shape differs by kind, as the rows of `report/element/data.json` differ by report
+type, the task returns upstream's JSON as sent (`JsonValue`, camelCase keys included)
+and says so in its docstring (decided by Johannes on 2026-10-27); `AS_SENT` in
+`tests/test_tasks.py` names those fields for the snake_case check. A task-shaped
+function that returns a subset of an upstream record builds its model with
+`UpstreamModel.project`; nothing is renamed or computed, parsing a value
+(`parse_decimal`) is the only override.
+
+Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
+use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
+HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
+for an unknown id on a `read.json` read by id; a 404 means an unknown endpoint and
+raises `UpstreamError`. Observed shapes say so, with the date, in its docstring.
+
+### How to record a fixture
 
 Run `/record-fixture <endpoint> <case> <parameters>`. It runs
 `direnv exec ~/github/sdk uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]`,
@@ -446,8 +461,8 @@ refuses. The write stays the recorder's: core's `record` writes as soon as its o
 verify passes, before the recorder's step and final check could run. A compound name such as
 `publicHash` is not scrubbed and goes to review. Grep the file for key patterns, e-mail
 addresses, API user tags, token-like fields and values under `ssn`, `iban` and `qrIban`
-before committing (`/record-fixture`, `tests/fixtures/README.md`). Fixtures are never
-typed in by hand.
+before committing (`/record-fixture`, the grep block below). Fixtures are never typed in
+by hand.
 
 Writes: `--method POST` is accepted for the nine write paths the write tools call only
 (`journal/create|update|delete.json`, `person/create|update|delete.json`,
@@ -465,83 +480,54 @@ delete, recorded or run. Record only a record marked `xippios-live`, its update 
 delete; confirm afterwards with one list per resource (`query=xippios-live`, counts
 only) that nothing is left.
 
-## Commands
+The write fixtures of 2026-10-24 record a journal entry and a person marked
+`xippios-live`, created, read, updated and deleted again in that order, and those of
+2026-10-27 the order 20, created, read, updated, read again and deleted.
+
+Still grep before committing:
 
 ```bash
-uv sync --all-extras
-uv run pytest                      # offline, replays fixtures
+grep -rniE 'api[_-]?key|token|secret' tests/fixtures
+grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' tests/fixtures | sort -u
+grep -rhoiE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u
+grep -rhoiE '(hash|token|secret|api[_-]?key)\\?": *\\?"[^"\\]*' tests/fixtures | sort -u
+grep -rhoiE --include='*.json' '\\?"(ssn|iban|qr[_-]?iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
+grep -rhoiE --include='*.json' '(ssn=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
+```
+
+The last two count, without printing them, the values of `ssn`, `iban` and `qrIban`
+that are neither `null` nor `REDACTED`, in the JSON bodies and in a write's form body;
+both print `0`.
+
+### Commands
+
+```bash
 direnv exec ~/github/sdk env -u CASHCTRL_ORGS XIPPIOS_LIVE_TESTS=1 uv run pytest -m live --tb=short   # demo only
-uv run ruff check . && uv run ruff format --check .
-uv run mypy
-uv run pre-commit run --all-files
 uv run xippios-cashctrl-mcp --org demo   # stdio, bound to demo; --http for streamable HTTP
 uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loopback only
 ```
 
-The offline run is core's plugin's (ADR-0013): in every test not marked `live` it refuses
-the network and skips the rate limiter's waits, and the key sent is its placeholder,
-with `CASHCTRL_DEMO_API_KEY` set to it because `pyproject.toml` names that variable under
-`xippios_placeholder_key_envs`; the package keeps no placeholder fixture of its own
-(`tests/conftest.py` keeps the demo-only environment, Organisations above).
-A test that asserts a limiter wait or a quota pause is marked `rate_limited`, one that
-must reach the network `network`.
+The offline run sends the key's placeholder, with `CASHCTRL_DEMO_API_KEY` set to it
+because `pyproject.toml` names that variable under `xippios_placeholder_key_envs`; the
+package keeps no placeholder fixture of its own (`tests/conftest.py` keeps the demo-only
+environment, Organisations above).
 
-`.github/workflows/live.yml` runs `uv run pytest -m live --tb=short` with
-`XIPPIOS_LIVE_TESTS=1` nightly at 02:36 UTC, a time derived from the slug so that sources
-sharing a key never start together, and on demand from the Actions tab; pull requests
-never run live tests.
+`.github/workflows/live.yml` runs the live tests nightly at 02:36 UTC, a time derived from
+the slug so that sources sharing a key never start together.
 Every `live` test runs, write tests included, so a live write test acts only on data kept
 for testing (the demo organisation, ADR-0024) and cleans up after itself. Only its
 `uv run pytest -m live --tb=short` step sees the demo organisation's pair, from the org
 secrets `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`: the template renders the
 scaffold's `CASHCTRL_API_KEY`, which nothing reads, so the workflow names the pair by
 hand, and both org secrets must give sdk-cashctrl access for the nightly run to pass.
-`--tb=short` is added by hand too, and every live run here uses it: pytest's long
-traceback prints each frame's arguments, so a failed parse would print the upstream
-payload it was given, API user tags included, into the public Actions log.
+`--tb=short` is the template's own from v0.3.0, no longer an addition by hand, and every
+live run here uses it: pytest's long traceback prints each frame's arguments, so a failed
+parse would print the upstream payload it was given, API user tags included, into the
+public Actions log.
 
-## Workflow rules
+### Never
 
-- Branch from `main` as `feature/<topic>`, `fix/<topic>`, `chore/<topic>` or `docs/<topic>`.
-  Never commit to `main`.
-- Commit small, with Conventional Commits messages (`feat(tasks): add get_balance_sheet`).
-- Open the PR with `gh pr create`; the body is the definition-of-done checklist from
-  `.github/PULL_REQUEST_TEMPLATE.md`, ticked honestly, with assumptions and open
-  questions listed, the live calls the PR spent counted (keyed calls by number; `none`
-  is a count), and, after the checklist, a `## Decisions taken` block: one line per
-  decision the session made, each backed by a convention, an ADR, a coordination rule, a
-  dated decision of Johannes's or `gap, row N`. The reviewer judges the PR against
-  sdk-core's `docs/review-checklist.md`.
-- Every PR but a release, an adoption or Dependabot's adds an entry under Unreleased in
-  `CHANGELOG.md`; `ci.yml` fails without one (conventions §12).
-- Releases follow the release train (conventions §12): `/release-prep` opens a release
-  PR that changes only `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, `README.md`,
-  `CLAUDE.md` and `docs/handover.md` (and `scripts/check-siblings.sh` where the source
-  has one); its merge runs `publish.yml`, which tags the version on the merge commit,
-  and Johannes approves the `pypi` run. A reference-data refresh or a core pin's removal
-  is a PR of its own before it.
-- `ruff` leaves `docs/` alone; never reformat the upstream snapshot.
-- Core updates: a new core minor arrives in one adoption PR, a `chore/template-update*`
-  branch, before the next release (conventions §15); when its merge class is `auto` the
-  session enables auto-merge after the reviewer's `ready` (ADR-0018, amendment (e)). An
-  adoption of a later core minor runs no `copier update` (D35, D85): it raises the floor
-  to `~=X.Y.0` by hand in `pyproject.toml`, runs `uv lock` and ports that core release's
-  Hand-apply list (`/adopt-release`). The reference-data scaffolding (`params.py`,
-  `enums.py`, `reference/`, `scripts/refresh_reference.py`) does not come back, since
-  cashctrl runs no further `copier update` (D35); a future value set brings the script
-  back by hand from the `render_enums` port deleted here (`/refresh-reference-data`).
-  From template v0.2.2 on every template-rendered file is cashctrl's own (`ci.yml`,
-  `publish.yml`, `gates.yml`, `live.yml`, the PR template, the `.claude/commands` files,
-  the template's parts of this file), and a core adoption hand-applies the template
-  changes the conventions version it adopts needs (row 118).
-- cashctrl stays on template v0.2.2 after template v0.3.0 and keeps adopting core minors
-  through conventions §15; `copier update` must never be run past v0.2.2: the v0.3.0
-  template deletes `mcp_write.py`, `tasks_write.py` and `tests/test_tasks_write.py` and
-  rewrites `api_key_location: basic` to `query` without a conflict marker.
-- If a convention seems wrong, say so in the PR and follow it anyway; changing it is a
-  PR against `sdk-core/docs/conventions.md` plus an ADR.
-
-## Never
+Besides `.claude/family.md`'s list:
 
 - Never hand-write a fixture, and never commit one without grepping for key patterns
   and for values under `ssn`, `iban` and `qrIban`.
@@ -549,26 +535,9 @@ payload it was given, API user tags included, into the public Actions log.
   but `demo`; never set `CASHCTRL_ORGS` with real names in a session or a test.
 - Never print, log or commit `CASHCTRL_DEMO_SUBDOMAIN` or any organisation's subdomain.
 - Never add a task, tool or helper that spans organisations.
-- Never read or print `.envrc`, `.env`, or any variable ending in `_API_KEY`.
-- Never write a key into a file or a commit.
-- Never put logic in `mcp.py` or `http.py`; never add a route or tool by hand.
-- Never rename or re-map an upstream concept to another source's (ADR-0003).
-- Never return a documented personal identifier in a task's projection, echo one in
-  `meta.request`, or commit one in a fixture (ADR-0017).
-- Never edit `docs/upstream/` by hand; `/refresh-upstream` fetches, a PR reviews.
-- Never add `src/xippios/__init__.py`.
 - Never run `copier update` past template v0.2.2: the v0.3.0 template deletes
   `mcp_write.py`, `tasks_write.py` and `tests/test_tasks_write.py` and rewrites
   `api_key_location: basic` to `query` without a conflict marker.
-- Never tag, merge, release, force-push, or touch `gh secret`: a release PR's merge tags
-  through `publish.yml`, and Johannes approves the `pypi` run. The one exception is
-  enabling auto-merge on a `chore/template-update*` or `chore/release-*` PR whose merge
-  class is `auto`, after the reviewer's `ready` (ADR-0018, amendment (e)).
 - Never point fixtures, live tests or the seeder at an organisation with real data: the
   demo organisation holds synthetic books only, created and seeded as `docs/demo-org.md`
   describes.
-
-## When something is unclear
-
-Prefer the smallest change that satisfies the documents above, state the assumption in
-the PR description, and stop rather than guess at upstream semantics or public API shape.

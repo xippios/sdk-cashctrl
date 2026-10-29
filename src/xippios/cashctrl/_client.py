@@ -61,7 +61,7 @@ __all__ = [
 SOURCE = "cashctrl"
 BASE_URL_TEMPLATE = "https://{subdomain}.cashctrl.com/api/v1"
 """Base URL of one organisation; ``subdomain`` is the organisation's (introduction.md)."""
-# A self-imposed pace: upstream documents no limit (ADR-0010 decision 1).
+# A self-imposed pace: upstream documents no per-second or per-minute limit (ADR-0010 decision 1).
 RATE_LIMIT = RateLimit(per_minute=60, burst=1)
 """Per organisation and self-imposed: upstream documents only a 429 and "add delays".
 

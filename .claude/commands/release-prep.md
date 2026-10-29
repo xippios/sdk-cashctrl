@@ -7,10 +7,13 @@ at the `pypi` environment until Johannes approves the run. No session and no hum
 the tag.
 
 A release PR changes only `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, `README.md`,
-`CLAUDE.md` and `docs/handover.md` (and `scripts/check-siblings.sh` where the source has
-one), the subset of conventions §12; the `merge-class` check makes any other changed path
-`human`. What a release needs beyond it is a PR of its own, merged before this one: the
-removal of a core pin (step 1) and the refresh of packaged reference data (step 2).
+`CLAUDE.md` and `docs/handover.md`, the subset of conventions §12; the `merge-class` check
+makes any other changed path `human`. What a release needs beyond the subset is a PR of
+its own, merged before this one: the removal of a core pin (step 1) and the refresh of
+packaged reference data (step 2). The PR meets the definition of done,
+https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, and the
+reviewer judges it against
+https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md.
 
 1. **No git-pinned core.** cashctrl carries no `[tool.uv.sources]` pin and runs no
    `copier update` (D35). Should a pin ever be needed, the package depends on an
@@ -43,14 +46,14 @@ removal of a core pin (step 1) and the refresh of packaged reference data (step 
 7. README: the status table reflects what this version covers; install snippets are
    current.
 8. Run the full suite: `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest && uv run pre-commit run --all-files`.
-   If live tests can run (`XIPPIOS_LIVE_TESTS=1`), run them too and report the result.
-9. Open the PR with the definition-of-done checklist, the live calls it spent counted
-   and its `## Decisions taken` block. After the reviewer's `ready`, if the `merge-class`
-   check says `auto`, the session enables auto-merge from the family workspace root, the
-   directory that holds the family `CLAUDE.md`, because this repository's
-   `.claude/settings.json` denies `gh pr merge`; `-R` names the repository, which `gh`
-   cannot infer there:
-   `gh pr merge --auto --squash -R xippios/sdk-cashctrl <number>`. GitHub
+   If live tests can run (`XIPPIOS_LIVE_TESTS=1`), run them too, demo only, as
+   `CLAUDE.md` gives the command:
+   `direnv exec ~/github/sdk env -u CASHCTRL_ORGS XIPPIOS_LIVE_TESTS=1 uv run pytest -m live --tb=short`,
+   and report the result.
+9. Open the PR, its body as the definition of done says. After the reviewer's `ready`,
+   if the `merge-class` check says `auto`, the session enables auto-merge here, as
+   `.claude/settings.json` allows; every other `gh pr merge` meets the permission
+   prompt: `gh pr merge --auto --squash -R xippios/sdk-cashctrl <number>`. GitHub
    merges once `ci` is green and review threads are resolved; a `human` release waits
    for Johannes (ADR-0018, amendment (e)). Then stop and report: the merge tags
    `v<version>` through `publish.yml`, and Johannes approves the `pypi` run in the

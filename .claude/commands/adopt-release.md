@@ -8,7 +8,10 @@ Never). The family rule is still the adoption PR of conventions §15 (ADR-0018):
 before the next release, that adopts core `X.Y.Z` and changes nothing else; no new
 endpoints, tasks or fixtures ride along. It may delete the fixtures, mounts and tests
 that the adoption itself makes dead, and nothing more (ADR-0018, amendment (d)). A
-release tag is not part of an adoption.
+release tag is not part of an adoption. The PR meets the definition of done,
+https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, and the
+reviewer judges it against
+https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md.
 
 1. **Where the repository stands.** `.copier-answers.yml` stays at `_commit: v0.2.2` and
    is not edited; its `core_version` is the record of the last render, not the floor.
@@ -18,14 +21,18 @@ release tag is not part of an adoption.
    keeps the `chore/template-update*` class that rule 8 of the coordination rules names.
 
 2. **What core X.Y.Z asks.** Read sdk-core at `vX.Y.Z`
-   (`git -C ../sdk-core show vX.Y.Z:<path>` in the family workspace, or
-   `https://github.com/xippios/sdk-core/tree/vX.Y.Z`): its `CHANGELOG.md` section
-   `[X.Y.Z]`, the ADRs it names with their Consequences, and `docs/handover.md`, "Adopting
-   core X.Y.Z", its "Every source" and "sdk-cashctrl" sections, for what this source
-   deletes and declares. Read sdk-template's `CHANGELOG.md` only to see which template
-   release accompanies core X.Y and its Hand-apply list: since no `copier update` runs,
-   the template changes the new conventions version needs are applied by hand (step 4,
-   row 118).
+   (`https://github.com/xippios/sdk-core/tree/vX.Y.Z`, or
+   `git -C <workspace root>/sdk-core show vX.Y.Z:<path>` where the family workspace holds
+   a clone, the workspace root being the directory that holds the workspace's own
+   `CLAUDE.md`; a relative path does not resolve from a worktree): its `CHANGELOG.md`
+   section `[X.Y.Z]`, the ADRs it names with their Consequences, and `docs/handover.md`,
+   "Adopting core X.Y.Z", its "Every source" and "sdk-cashctrl" sections, for what this
+   source deletes and declares. Read sdk-template's `CHANGELOG.md`
+   (`https://github.com/xippios/sdk-template/blob/<tag>/CHANGELOG.md`, or
+   `git -C <workspace root>/sdk-template show <tag>:CHANGELOG.md`) only to see which
+   template release accompanies core X.Y and its Hand-apply list: since no
+   `copier update` runs, the template changes the new conventions version needs are
+   applied by hand (step 4, row 118).
 
 3. **Item 1: the core floor, by hand.** In `pyproject.toml`, raise `xippios-core` and its
    `mcp`, `http` and `testing` extras to `~=X.Y.0` (or `~=X.Y.Z` when patch `Z` shipped
@@ -37,9 +44,12 @@ release tag is not part of an adoption.
    the Hand-apply bullets of the template releases after v0.2.2 up to the one that
    accompanies core X.Y, and the template-owned files' changes it makes (`ci.yml`,
    `publish.yml`, `gates.yml`, `live.yml`, the PR template, `.claude/commands/`,
-   `tests/conftest.py`, `tests/test_family.py`, the template's parts of `CLAUDE.md`;
-   row 118): path, change, reason. Every template-rendered file is cashctrl's own, so a
-   change is ported in cashctrl's form. A change that does not apply says why in the PR,
+   `.claude/settings.json`, `.claude/family.md`, `tests/conftest.py`,
+   `tests/test_family.py`, the template's parts of `CLAUDE.md`; row 118): path, change,
+   reason. Every template-rendered file is cashctrl's own, so a change is ported in
+   cashctrl's form; `.claude/family.md` alone is copied again whole from the template's
+   file at that tag, and a line of cashctrl's own goes to `CLAUDE.md`, never into it.
+   A change that does not apply says why in the PR,
    among them every one D35 rules out (deleting `mcp_write.py`, `tasks_write.py` or
    `tests/test_tasks_write.py`, `api_key_location: query`).
 
@@ -91,12 +101,11 @@ release tag is not part of an adoption.
     `## Decisions taken` block. Its merge class is `human` when a hand-maintained
     workflow changes (`ci.yml`, `publish.yml`, `gates.yml`, `live.yml`), and likewise for
     a protected path or a build or install route (ADR-0018, amendment (e); the merge
-    classes are in the README of the organisation's `.github` repository); a `human`
-    adoption waits for Johannes. After the reviewer's `ready`, if the `merge-class` check
-    says `auto`, the session enables auto-merge from the family workspace root, the
-    directory that holds the family `CLAUDE.md`, because this repository's
-    `.claude/settings.json` denies `gh pr merge`; `-R` names the repository, which `gh`
-    cannot infer there:
+    classes are in the README of the gates repository,
+    https://github.com/xippios/sdk-gates); a `human` adoption waits for Johannes. After
+    the reviewer's `ready`, if the `merge-class` check says `auto`, the session enables
+    auto-merge here, as `.claude/settings.json` allows; every other `gh pr merge` meets
+    the permission prompt:
 
     ```bash
     gh pr merge --auto --squash -R xippios/sdk-cashctrl <number>
