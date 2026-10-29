@@ -1,14 +1,15 @@
 """Live smoke tests: skipped unless XIPPIOS_LIVE_TESTS=1 (conventions §10).
 
-Every task function gets a live smoke test here, next to the reachability check. Every
-live test takes the ``demo_org`` fixture: live runs reach the demo organisation only, whose
-books are synthetic (``scripts/seed_demo.py``). Each read test makes one call, but the
-reads, which first look an id up in a list (account 1020 by number, the first journal
-entry, person and sales order), ``list_order_book_entries``, which first lists the
-purchase orders for one that books, and ``get_report_data``, which first reads the report
-tree for the balance sheet's element id (the tree it keeps, so a payroll report of it is
-refused with no request). ``fiscal_periods`` looks the fiscal periods up
-once for the module: the API user's current period is 2025, and the orders are in 2026.
+Every task function gets a live smoke test here, next to the reachability check, two
+list exports excepted (below). Every live test takes the ``demo_org`` fixture: live runs
+reach the demo organisation only, whose books are synthetic (``scripts/seed_demo.py``).
+Each read test makes one call, but the reads, which first look an id up in a list
+(account 1020 by number, the first journal entry, person and sales order),
+``list_order_book_entries``, which first lists the purchase orders for one that books,
+and ``get_report_data``, which first reads the report tree for the balance sheet's
+element id (the tree it keeps, so a payroll report of it is refused with no request).
+``fiscal_periods`` looks the fiscal periods up once for the module: the API user's
+current period is 2025, and the orders are in 2026.
 
 The write tools are tested live per resource, one test that calls each of its write
 tools once with ``confirm=True`` (create, update, delete), so that every record a test
@@ -32,27 +33,41 @@ creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10
 That refusal is checked live once, read-only: a delete without ``confirm`` of an entry a
 seeded purchase order booked, found with GET calls, is refused before any preview.
 
-The calls of one run: 29 for the reads (17, 9 for the discovery lists and the reports:
-one each, and the tree ``get_report_data`` reads first, and 3 for the book entries of an
-order, with the list of purchase orders they read first, and the history), 4 lookups
-(accounts, tax codes, customers, the sales categories), 9 for the journal (sweep,
-create, the sweep's query seeing the new entry, the update's preview, the update as read
-and write, the read back, the delete as read and write), 7 for a person (the same
-without the query, the delete one call), 10 for an order (sweep, create, the update's
-preview, two updates as read and write, the first without items and the second with,
-each read back, the delete) and 2 for the refused delete of an entry an order booked
-(the list, the delete's read); 61 in all, one more per leftover swept, two for a journal
-entry.
+The file tasks tested live write into pytest's temporary directory and assert the file's
+size and content type only: one seeded sales order's document, its id from the list, the
+journal of 2025 as CSV, at most five entries (``limit=5``), and the persons as CSV with
+the columns ``export_persons`` names by default, which upstream must accept (queue row
+235). The two exports stand for the four, which share one download path (G5 (7) of
+2026-10-28): ``export_accounts`` and ``export_orders`` have no live test of their own.
+One more asks for the document of an order that does not exist and expects
+``NotFoundError`` and no file: CashCtrl answers it with HTTP 404 (observed on
+2026-10-29), which ``classify`` maps to ``NotFoundError`` on a ``read.pdf`` by ``ids``
+(queue row 235).
+
+The calls of one run: 31 for the reads (17, 9 for the discovery lists and the reports:
+one each, and the tree ``get_report_data`` reads first, 3 for the book entries of an
+order, with the list of purchase orders they read first, and the history, and 2 for an
+order's document, with the list of sales orders it reads first), 5 for the files (the
+list of sales orders, the order's PDF, the refused PDF of an unknown order, the journal
+export, the person export), 4 lookups (accounts, tax codes, customers, the sales
+categories), 9 for the journal (sweep, create, the sweep's query seeing the new entry,
+the update's preview, the update as read and write, the read back, the delete as read
+and write), 7 for a person (the same without the query, the delete one call), 10 for an
+order (sweep, create, the update's preview, two updates as read and write, the first
+without items and the second with, each read back, the delete) and 2 for the refused
+delete of an entry an order booked (the list, the delete's read); 68 in all, one more
+per leftover swept, two for a journal entry.
 """
 
 import json
 from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
-from xippios.core import InvalidRequestError
+from xippios.core import InvalidRequestError, NotFoundError
 
 from xippios.cashctrl import api, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
@@ -223,6 +238,68 @@ async def test_list_history(demo_org: str) -> None:
     assert result.meta.total >= len(result.data)
     created = [entry.created for entry in result.data if entry.created is not None]
     assert created == sorted(created, reverse=True), "newest first, upstream's default"
+
+
+async def test_get_order_document(demo_org: str, fiscal_periods: dict[str, int]) -> None:
+    # The document of a seeded sales order of 2026; its id comes from the list.
+    period = fiscal_periods["2026"]
+    orders = await tasks.list_orders_async(demo_org, type="SALES", fiscal_period_id=period, limit=1)
+    (listed,) = orders.data
+    result = await tasks.get_order_document_async(demo_org, listed.id)
+    assert result.meta.request == {"org": demo_org, "id": listed.id}
+    assert result.meta.endpoint == "order/document/read.json"
+
+
+def media_type(content_type: str | None) -> str:
+    """``application/pdf`` of ``application/pdf;charset=UTF-8``; empty when none was sent."""
+    return (content_type or "").split(";", 1)[0].strip().lower()
+
+
+async def test_download_order_document(
+    demo_org: str, fiscal_periods: dict[str, int], tmp_path: Path
+) -> None:
+    # A seeded sales order of 2026; its id comes from the list, never from a constant.
+    period = fiscal_periods["2026"]
+    orders = await tasks.list_orders_async(demo_org, type="SALES", fiscal_period_id=period, limit=1)
+    (listed,) = orders.data
+    dest = tmp_path / "order.pdf"
+    result = await tasks.download_order_document_async(demo_org, [listed.id], dest)
+    assert result.data.path == dest
+    assert result.data.bytes == dest.stat().st_size > 0
+    assert media_type(result.data.content_type) == "application/pdf"
+    assert result.meta.request == {"org": demo_org, "ids": str(listed.id)}
+
+
+async def test_export_journal_entries(
+    demo_org: str, fiscal_periods: dict[str, int], tmp_path: Path
+) -> None:
+    period = fiscal_periods["2025"]
+    dest = tmp_path / "journal.csv"
+    result = await tasks.export_journal_entries_async(
+        demo_org, "csv", dest, fiscal_period_id=period, limit=5
+    )
+    assert result.data.bytes == dest.stat().st_size > 0
+    assert media_type(result.data.content_type) == "text/csv"
+    assert result.meta.endpoint == "journal/list.csv"
+
+
+async def test_export_persons_with_the_default_columns(demo_org: str, tmp_path: Path) -> None:
+    # No columns: the task names PersonProjection's 74 fields, which upstream must accept.
+    dest = tmp_path / "persons.csv"
+    result = await tasks.export_persons_async(demo_org, "csv", dest)
+    assert result.data.bytes == dest.stat().st_size > 0
+    assert media_type(result.data.content_type) == "text/csv"
+    assert result.meta.request["columns"] == ",".join(tasks.PERSON_COLUMNS)
+
+
+async def test_the_document_of_an_unknown_order_is_not_found(demo_org: str, tmp_path: Path) -> None:
+    # Upstream answers HTTP 404, NotFoundError for a read.pdf by ids (queue row 235);
+    # anything else fails here: a file written, another error, or no error.
+    dest = tmp_path / "missing.pdf"
+    with pytest.raises(NotFoundError) as info:
+        await tasks.download_order_document_async(demo_org, [999999], dest)
+    assert str(info.value).endswith("(/order/document/read.pdf)")
+    assert list(tmp_path.iterdir()) == [], "no file, no temporary file"
 
 
 @pytest.fixture(scope="module")

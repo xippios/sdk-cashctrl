@@ -66,19 +66,22 @@ invoices = tasks.list_orders("demo", type="SALES", fiscal_period_id=current.id)
 ```
 
 Every task returns `Result[T]`: `data` holds models that mirror CashCtrl's payloads
-under upstream's names in snake_case (`is_current`, `end_amount`), in Python and in every
-tool and route result alike (the report rows of `get_report_data` excepted, which come
-as upstream sends them), `meta` the upstream operation, the parameters as sent under
-upstream's names (`onlyActive`), the organisation as `tenant`, when they were fetched
-and, for a list, `total`, upstream's count of the matching records. Async twins are
-named `<task>_async` (`list_organisations` has none). The tasks are listed in the status
-table below. Persons come back without the personal identifiers `ssn` and `iban`
+under upstream's names in snake_case (`is_current`, `end_amount`), in Python and in
+every tool and route result alike (the report rows of `get_report_data` excepted, which
+come as upstream sends them, and the file tasks' `Downloaded`, which describes a file;
+Files below), `meta` the upstream operation, the parameters as sent under upstream's
+names (`onlyActive`), the organisation as `tenant`, when they were fetched and, for a
+list, `total`, upstream's count of the matching records. Async twins are named
+`<task>_async` (`list_organisations` has none). The tasks are listed in the status table
+below. Persons come back without the personal identifiers `ssn` and `iban`
 (`list_persons`, `get_person`, the persons `get_journal_entry` names; ADR-0017),
-locations without their bank account numbers `iban` and `qr_iban` (`list_locations`),
-and report rows without any key named `ssn`, `iban` or `qrIban` (`get_report_data`, which
-refuses payroll and people reports outright). An API user that wrote or changed a record
-shows as `API:REDACTED` in `created_by` and `last_updated_by`, as in the fixtures; CashCtrl
-writes `API:` and the first four characters of its key there.
+locations and an order's document without their bank account numbers (`iban` and
+`qr_iban`, `list_locations`; `orgIban`, `orgQrIban` and `recipientIban`,
+`get_order_document`), and report rows without any key named `ssn`, `iban` or `qrIban`
+(`get_report_data`, which refuses payroll and people reports outright). An API user that
+wrote or changed a record shows as `API:REDACTED` in `created_by` and `last_updated_by`,
+as in the fixtures; CashCtrl writes `API:` and the first four characters of its key
+there.
 
 ## MCP
 
@@ -240,6 +243,43 @@ assert isinstance(done.data, WriteResult)
 print(done.data.insert_id)  # the new entry's id
 ```
 
+## Files
+
+Five tasks write a file instead of returning records: `download_order_document`, the
+documents of orders as one PDF, and the list exports `export_journal_entries`,
+`export_accounts`, `export_persons` and `export_orders`, each with `format` (`csv`,
+`xlsx` or `pdf`), the filters of the list it mirrors and `columns`. They are Python
+only: no MCP tool and no HTTP route serves them, since no tool hands an agent a file
+path (`BULK_TASKS`, ADR-0019). Each streams the file to `dest`, the path the caller
+gives; nothing is read into the result, kept in memory or cached, and `data` describes
+the file (`path`, `bytes`, `content_type`, `filename`, `retrieved_at`). A refusal
+raises and writes nothing, and a file already at `dest` stays as it was:
+`RequestRejected` for one CashCtrl sends as HTTP 200, `NotFoundError` for an unknown
+order id, which CashCtrl answers with HTTP 404.
+
+- **Cut at 100.** Upstream exports at most `limit` records, 100 when `limit` is left
+  out (the account export, like its list, takes no `limit`): read the list task's
+  `meta.total` first and pass a `limit` of at least that.
+- **Personal identifiers.** Without `columns`, the person export names the fields
+  `list_persons` returns as its columns, so `ssn` and `iban` stay out of the file; a
+  caller that names them in `columns` gets them, deliberately (ADR-0017). An order
+  document is what its recipient gets: an invoice's QR-bill may carry the
+  organisation's IBAN or QR-IBAN and the recipient's name and address. Where a file
+  goes is the caller's choice.
+
+```python
+from pathlib import Path
+
+from xippios.cashctrl import tasks
+
+count = tasks.list_journal_entries("demo", fiscal_period_id=2, limit=1).meta.total or 1
+journal = tasks.export_journal_entries(
+    "demo", "csv", Path("journal-2025.csv"), fiscal_period_id=2, limit=count
+)
+print(journal.data.path, journal.data.bytes, journal.data.content_type)
+invoice = tasks.download_order_document("demo", [3], Path("RE-2026-103.pdf"))
+```
+
 ## HTTP
 
 `xippios.cashctrl.http.router` is a FastAPI router the consumer mounts. It has no lock:
@@ -271,6 +311,7 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET person/read.json` (Read person) | `get_person` | `cashctrl_get_person` | available |
 | `GET order/list.json` (List orders) | `list_orders` | `cashctrl_list_orders` | available; paged; HTTP route is `POST` |
 | `GET order/read.json` (Read order) | `get_order` | `cashctrl_get_order` | available |
+| `GET order/document/read.json` (Read document) | `get_order_document` | `cashctrl_get_order_document` | available; layout, sender, recipient, payment references; without `orgIban`, `orgQrIban` and `recipientIban`; the PDF from `download_order_document` |
 | `GET order/bookentry/list.json` (List book entries) | `list_order_book_entries` | `cashctrl_list_order_book_entries` | available; one order's (`order_id`, sent as `id`) |
 | `GET order/category/list.json` (List categories) | `list_order_categories` | `cashctrl_list_order_categories` | available |
 | `GET customfield/list.json` (List custom fields) | `list_custom_fields` | `cashctrl_list_custom_fields` | available; one module (`type`) a call |
@@ -282,6 +323,11 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET report/tree.json` (Get tree of reports) | `get_report_tree` | `cashctrl_get_report_tree` | available |
 | `GET report/element/data.json` (Read JSON data) | `get_report_data` | `cashctrl_get_report_data` | available; rows as upstream sends them; payroll and people reports refused |
 | `GET history/list.json` (List history) | `list_history` | `cashctrl_list_history` | available; paged; HTTP route is `POST` |
+| `GET order/document/read.pdf` (Download PDF) | `download_order_document` | none, Python only | available; one PDF to `dest`; an invoice's QR-bill may carry the organisation's IBAN or QR-IBAN and the recipient's address |
+| `GET journal/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_journal_entries` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100 |
+| `GET account/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_accounts` | none, Python only | available; a file to `dest`; every matching account |
+| `GET person/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_persons` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100; without `ssn` and `iban` unless `columns` names them |
+| `GET order/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_orders` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100 |
 | `POST journal/create.json`, `update.json`, `delete.json` | `create_journal_entry`, `update_journal_entry`, `delete_journal_entry` | `cashctrl_create_journal_entry`, ... | available on the write server only |
 | `POST person/create.json`, `update.json`, `delete.json` | `create_person`, `update_person`, `delete_person` | `cashctrl_create_person`, ... | available on the write server only |
 | `POST order/create.json`, `update.json`, `delete.json` | `create_order`, `update_order`, `delete_order` | `cashctrl_create_order`, ... | available on the write server only |

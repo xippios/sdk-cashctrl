@@ -8,6 +8,43 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `get_order_document` (`order/document/read.json`, the tool
+  `cashctrl_get_order_document`): one order's document, how it is printed and sent: its
+  layout and language, the sender's and the recipient's address as printed, the payment
+  references of the QR-bill and the mailing defaults. `OrderDocument` is typed from the
+  answer recorded on 2026-10-29; the task returns `OrderDocumentProjection`, without
+  `orgIban`, `orgQrIban` and `recipientIban` (G5 (5) of 2026-10-28; ADR-0017). The
+  recorder rewrites `iban` and `qrIban` by whole name only, so these compound names are
+  neither rewritten nor refused: the recorded document holds `null` for all three.
+- Five file tasks, `download_order_document` and the list exports
+  `export_journal_entries`, `export_accounts`, `export_persons` and `export_orders`,
+  named in `BULK_TASKS`: Python only, no MCP tool or HTTP route (G5 (5) and (6) of
+  2026-10-28; ADR-0019 decision 4). Each streams one file to `dest`, the path its caller
+  gives, through core's `AsyncClient.download` and returns `Result[Downloaded]` as core
+  gives it; nothing is read into a result, held in memory or cached.
+  `download_order_document` downloads `order/document/read.pdf` for `ids`, at least one
+  order, one PDF a call, sent comma-separated; its docstring and the README disclose that
+  an invoice's QR-bill may carry the organisation's IBAN or QR-IBAN and the recipient's
+  address (Johannes, 2026-10-28: disclosed, not stripped). An export takes `format`
+  (`csv`, `xlsx` or `pdf`, `models.ExportFormat`, queue row 214's practice), every
+  parameter of the list it mirrors and `columns`; `limit` is passed through, its upstream
+  default of 100 stated with the advice to read the list's `meta.total` first (the
+  account export documents no `limit`). Without `columns` the person export names
+  `PersonProjection`'s fields (`PERSON_COLUMNS`), so `ssn` and `iban` stay out unless the
+  caller names them; the other exports send `columns` as given (Johannes, 2026-10-28).
+  One wrapper per endpoint, `<module>_list_csv|xlsx|pdf` and `order_document_read_pdf`
+  (D95, conventions 1.22 §2), none with a fixture directory, since the recorder records
+  no binary body: the tests mount synthetic bytes with respx, and the live tests download
+  one order document, the journal and the persons as CSV, and expect the refusal of an
+  unknown order's document (G5 (7); queue row 235).
+- A download refused with HTTP 200 and `success: false` is raised, never kept as the
+  file: core writes a 2xx body unread (queue row 142), so `api/_download.py` streams to a
+  temporary file beside `dest` and reads `Content-Type` first. JSON goes through
+  `classify` (`RequestRejected`, or `NotFoundError` for a read by ids); the file is
+  removed and a file already at `dest` stays as it was. An id no order has is answered
+  with HTTP 404 (observed on 2026-10-29): `classify` raises `NotFoundError` for a 404 on
+  a `read.pdf` asked by `ids` and keeps every other 404 an unknown endpoint's
+  `UpstreamError` (queue row 235).
 - `scripts/seed_demo.py --discovery`, the seeder's second mode: one custom field on
   persons (`Kundenreferenz`, `TEXT`) and one cost centre (`100 Verkauf Büromöbel`) in a
   demo organisation seeded before. It keeps guards 1 and 2 and has its own guard 3: both

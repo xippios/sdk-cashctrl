@@ -14,13 +14,14 @@ generated into ``enums.py`` would be a ``StrEnum``, and one of integer ids an ``
 upstream concept, and nothing is renamed or computed.
 
 These read models stay faithful, documented personal identifiers included: ``ssn`` and
-``iban`` (``Person``, ``PersonDetail``, and ``JournalEntryDetail.associates``), and a
-location's ``iban`` and ``qrIban`` (``Location``, row 123). The projections tasks return
-leave those out (``PersonProjection``, ``PersonDetailProjection``,
-``JournalEntryDetailProjection``, ``LocationProjection``), as ``get_report_data`` drops
-them from its raw rows (``ReportData`` itself keeps what upstream sends), a write task
-does not echo one in ``meta.request`` and its preview shows one as ``REDACTED``, and
-fixtures never carry their values (ADR-0017).
+``iban`` (``Person``, ``PersonDetail``, and ``JournalEntryDetail.associates``), a
+location's ``iban`` and ``qrIban`` (``Location``, row 123), and an order document's
+``orgIban``, ``orgQrIban`` and ``recipientIban`` (``OrderDocument``). The projections
+tasks return leave those out (``PersonProjection``, ``PersonDetailProjection``,
+``JournalEntryDetailProjection``, ``LocationProjection``, ``OrderDocumentProjection``),
+as ``get_report_data`` drops them from its raw rows (``ReportData`` itself keeps what
+upstream sends), a write task does not echo one in ``meta.request`` and its preview
+shows one as ``REDACTED``, and fixtures never carry their values (ADR-0017).
 
 ``created_by`` and ``last_updated_by`` are ``AuditUser`` on every model that has them:
 CashCtrl writes an API user there as ``API:`` and the first four characters of its key,
@@ -30,15 +31,15 @@ a live answer and a fixture have one shape (G5 (2) of 2026-10-28, queue row 129)
 as sent: no recorded message carries a tag.
 
 ``docs/upstream/`` shows no response bodies. Field types come from the create and update
-parameter tables where they describe the field, and from the answers recorded against the
-demo organisation where they do not: on 2026-10-23 and 2026-10-24 for the ledger,
+parameter tables where they describe the field, and from the answers recorded against
+the demo organisation where they do not: on 2026-10-23 and 2026-10-24 for the ledger,
 journal, person and order models, on 2026-10-27 for the category, title, location and
-report models, and on 2026-10-28 for the custom field and cost center models, whose
-records ``scripts/seed_demo.py --discovery`` created. The latter fields are named in each
-model's docstring as typed from observation. Two demo organisations answered on 2026-10-23: the
-first, a copy of real books, since retired, and the synthetic one seeded by
-``scripts/seed_demo.py``; the committed fixtures come from the synthetic one only. What
-those answers showed:
+report models, on 2026-10-28 for the custom field and cost center models, whose records
+``scripts/seed_demo.py --discovery`` created, and on 2026-10-29 for the order document.
+The latter fields are named in each model's docstring as typed from observation. Two
+demo organisations answered on 2026-10-23: the first, a copy of real books, since
+retired, and the synthetic one seeded by ``scripts/seed_demo.py``; the committed
+fixtures come from the synthetic one only. What those answers showed:
 
 - Timestamps come as ``YYYY-MM-DD HH:MM:SS.f`` (``2026-10-23 07:06:39.0``) without a zone;
   they are kept as naive ``datetime``.
@@ -88,6 +89,7 @@ __all__ = [
     "CustomField",
     "CustomFieldType",
     "Direction",
+    "ExportFormat",
     "Filter",
     "FiscalPeriod",
     "HistoryEntry",
@@ -109,6 +111,8 @@ __all__ = [
     "OrderCategory",
     "OrderCategoryStatus",
     "OrderDetail",
+    "OrderDocument",
+    "OrderDocumentProjection",
     "OrderItem",
     "OrderItemInput",
     "OrderItemType",
@@ -175,6 +179,11 @@ Comparison = Literal["eq", "like", "gt", "lt"]
 
 Direction = Literal["ASC", "DESC"]
 """The values of ``dir`` on every list that documents it: "Possible values: ASC, DESC"."""
+
+ExportFormat = Literal["csv", "xlsx", "pdf"]
+"""The file a list export writes, the extension of its path: ``list.csv``, ``list.xlsx``,
+``list.pdf`` ("Export to CSV", "Export to Excel", "Export to PDF" of the journal, account,
+person and order lists)."""
 
 
 class ListResponse[T](UpstreamModel):
@@ -1200,6 +1209,93 @@ class OrderDetail(_OrderFields):
     hash: str | None = None
     file_id: JsonValue = Field(default=None, validation_alias="fileId")
     recurrence_id: JsonValue = Field(default=None, validation_alias="recurrenceId")
+
+
+class _OrderDocumentFields(UpstreamModel):
+    """The fields of an order's document that ``OrderDocumentProjection`` keeps."""
+
+    order_id: int = Field(validation_alias="orderId")
+    nr: str | None = None
+    category_id: int | None = Field(default=None, validation_alias="categoryId")
+    associate_id: int | None = Field(default=None, validation_alias="associateId")
+    name_singular: str | None = Field(default=None, validation_alias="nameSingular")
+    layout_id: int | None = Field(default=None, validation_alias="layoutId")
+    template_id: int | None = Field(default=None, validation_alias="templateId")
+    language: str | None = None
+    org_location_id: int | None = Field(default=None, validation_alias="orgLocationId")
+    org_address: str | None = Field(default=None, validation_alias="orgAddress")
+    org_address_csv: str | None = Field(default=None, validation_alias="orgAddressCsv")
+    org_bank_account_id: int | None = Field(default=None, validation_alias="orgBankAccountId")
+    org_bic: JsonValue = Field(default=None, validation_alias="orgBic")
+    recipient_address_id: int | None = Field(default=None, validation_alias="recipientAddressId")
+    recipient_address: str | None = Field(default=None, validation_alias="recipientAddress")
+    recipient_address_csv: str | None = Field(default=None, validation_alias="recipientAddressCsv")
+    recipient_bank_account_id: int | None = Field(
+        default=None, validation_alias="recipientBankAccountId"
+    )
+    recipient_bic: JsonValue = Field(default=None, validation_alias="recipientBic")
+    header: str | None = None
+    footer: str | None = None
+    qr_reference: str | None = Field(default=None, validation_alias="qrReference")
+    iso11649_reference: str | None = Field(default=None, validation_alias="iso11649Reference")
+    generated_reference: str | None = Field(default=None, validation_alias="generatedReference")
+    custom_reference: str | None = Field(default=None, validation_alias="customReference")
+    mail_to: str | None = Field(default=None, validation_alias="mailTo")
+    mail_from: str | None = Field(default=None, validation_alias="mailFrom")
+    mail_cc: str | None = Field(default=None, validation_alias="mailCc")
+    mail_bcc: str | None = Field(default=None, validation_alias="mailBcc")
+    mail_subject: str | None = Field(default=None, validation_alias="mailSubject")
+    mail_text: str | None = Field(default=None, validation_alias="mailText")
+    sent_status_id: int | None = Field(default=None, validation_alias="sentStatusId")
+    file_id: int | None = Field(default=None, validation_alias="fileId")
+    user_id: JsonValue = Field(default=None, validation_alias="userId")
+    date_received: JsonValue = Field(default=None, validation_alias="dateReceived")
+    is_display_item_gross: bool = Field(validation_alias="isDisplayItemGross")
+    is_display_prices: bool = Field(validation_alias="isDisplayPrices")
+    is_file_replacement: bool = Field(validation_alias="isFileReplacement")
+    is_switch_recipient: bool = Field(validation_alias="isSwitchRecipient")
+
+
+class OrderDocument(_OrderDocumentFields):
+    """The document of one order as ``order/document/read.json`` returns it (``order.md``).
+
+    How the order is printed and sent, not the order itself. ``docs/upstream/`` shows no
+    response body; typed from the answer recorded on 2026-10-29 for the seeded invoice
+    RE-2026-103 (``tests/fixtures/order_document_read/by_id.json``) and, where they
+    describe a field, from the tables of "Update document" (``header`` and ``footer`` as
+    HTML, ``custom_reference``, ``file_id``, ``language`` ``DE``, ``EN``, ``FR``, ``IT``,
+    ``layout_id``, ``org_bank_account_id``, ``org_location_id``, ``recipient_address_id``,
+    ``recipient_bank_account_id``, ``is_display_item_gross``, ``is_file_replacement``) and
+    "Mail document" (the ``mail_*`` texts, ``sent_status_id``). Typed from observation:
+    ``order_id`` (the order's id, the read's ``id``), ``nr``, ``category_id``,
+    ``associate_id``, ``name_singular`` (the category's name, localised), ``template_id``,
+    the sender's and the recipient's address as printed (``org_address``,
+    ``recipient_address``, a line each, and their ``*_csv`` forms), the payment
+    references (``qr_reference``, 27 digits; ``iso11649_reference`` and
+    ``generated_reference``, ``RF...``) and the flags ``is_display_prices`` and
+    ``is_switch_recipient``. Only seen ``null`` and kept as sent: ``org_bic``,
+    ``recipient_bic``, ``user_id``, ``date_received``, and ``org_iban``, ``org_qr_iban``
+    and ``recipient_iban``, the organisation's and the recipient's bank account numbers.
+
+    This read model stays faithful; ``get_order_document`` returns
+    ``OrderDocumentProjection``, which leaves out the three bank account numbers
+    (ADR-0017). The recorder rewrites ``iban`` and ``qrIban`` by whole name only, not
+    these compound names; the recorded answer holds ``null`` for all three.
+    """
+
+    org_iban: JsonValue = Field(default=None, validation_alias="orgIban")
+    org_qr_iban: JsonValue = Field(default=None, validation_alias="orgQrIban")
+    recipient_iban: JsonValue = Field(default=None, validation_alias="recipientIban")
+
+
+class OrderDocumentProjection(_OrderDocumentFields):
+    """An order's document without ``org_iban``, ``org_qr_iban`` and ``recipient_iban``.
+
+    What ``get_order_document`` returns (ADR-0017): every field of ``OrderDocument`` but
+    the organisation's and the recipient's bank account numbers, under the same names;
+    ``org_bank_account_id`` and ``recipient_bank_account_id`` name the bank accounts
+    instead.
+    """
 
 
 class OrderBookEntry(UpstreamModel):

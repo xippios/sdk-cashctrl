@@ -17,8 +17,9 @@ stay empty. Every list task sets ``meta.total`` to upstream's ``total``, its cou
 records matching the request (ADR-0012); it is never computed from ``len(data)``.
 
 The persons a task returns are projections without the personal identifiers ``ssn`` and
-``iban`` (ADR-0017, ``_person`` and its neighbours), the locations projections without
-their bank account numbers ``iban`` and ``qr_iban`` (``_location``), and the rows of a
+``iban`` (ADR-0017, ``_person`` and its neighbours), the locations and an order's
+document projections without their bank account numbers (``_location``,
+``_order_document``), and the rows of a
 report, kept as upstream sends them, lose every key named ``ssn``, ``iban`` or
 ``qrIban`` in any letter case and at any depth (``_report``); the endpoint wrappers' read
 models keep them. ``get_report_data`` refuses payroll and people reports by their type,
@@ -36,8 +37,20 @@ the end is answered with an empty ``data`` and the same ``total`` (observed on
 2026-10-23). ``meta.request`` holds the parameters as the first request sent them; when
 every page is collected it leaves out ``limit``, the page size, so the same arguments
 collect the same records again.
+
+The file tasks, ``download_order_document`` and the list exports ``export_*``, are named
+in ``BULK_TASKS``: Python only, no tool and no route (ADR-0019 decision 4). Each streams
+one file to the path its caller gives and returns core's ``Downloaded``; ``meta.endpoint``
+is the file's operation (``journal/list.csv``) and ``meta.retrieved_at`` the time the
+file was complete. A refusal sent as HTTP 200 is raised, never written
+(``api/_download.py``, queue row 142). A file may hold what a projection leaves out, at
+its caller's request or as upstream renders it: the person export names
+``PERSON_COLUMNS`` unless its caller names columns, ``ssn`` or ``iban`` among them
+deliberately, and an invoice's QR-bill may carry the organisation's IBAN or QR-IBAN
+(ADR-0017; Johannes, 2026-10-28).
 """
 
+import os
 import threading
 import weakref
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -48,6 +61,7 @@ from pydantic import JsonValue, ValidationError
 from pydantic_core import ErrorDetails
 from xippios.core import (
     AsyncClient,
+    Downloaded,
     InvalidRequestError,
     Result,
     ResultCap,
@@ -70,6 +84,7 @@ from xippios.cashctrl.models import (
     CustomField,
     CustomFieldType,
     Direction,
+    ExportFormat,
     Filter,
     FiscalPeriod,
     HistoryEntry,
@@ -83,6 +98,8 @@ from xippios.cashctrl.models import (
     OrderBookEntry,
     OrderCategory,
     OrderDetail,
+    OrderDocument,
+    OrderDocumentProjection,
     OrderType,
     Person,
     PersonCategory,
@@ -96,9 +113,15 @@ from xippios.cashctrl.models import (
 )
 
 __all__ = [
+    "download_order_document",
+    "export_accounts",
+    "export_journal_entries",
+    "export_orders",
+    "export_persons",
     "get_account",
     "get_journal_entry",
     "get_order",
+    "get_order_document",
     "get_person",
     "get_report_data",
     "get_report_tree",
@@ -122,7 +145,17 @@ __all__ = [
 ]
 
 # A task named here is Python-only: no tool, no route; the adapters skip it (ADR-0019 decision 4).
-BULK_TASKS: frozenset[str] = frozenset()
+BULK_TASKS: frozenset[str] = frozenset(
+    {
+        "download_order_document",
+        "export_accounts",
+        "export_journal_entries",
+        "export_orders",
+        "export_persons",
+    }
+)
+"""The file tasks: each streams a file to the path its caller gives and returns
+``Result[Downloaded]``, so no tool or route serves it (G5 (5) and (6) of 2026-10-28)."""
 
 MCP_CAPS: Mapping[str, ResultCap] = {
     "get_report_data": ResultCap(
@@ -170,6 +203,18 @@ ORDER_TYPES: tuple[str, ...] = get_args(OrderType)
 """The values of ``type`` on ``order/list.json`` and ``order/category/list.json``."""
 CUSTOM_FIELD_TYPES: tuple[str, ...] = get_args(CustomFieldType)
 """The values of ``type`` on ``customfield/list.json``, the modules: ``JOURNAL``, ``PERSON``, ..."""
+EXPORT_FORMATS: tuple[str, ...] = get_args(ExportFormat)
+"""The values of ``format`` on the list exports, their extensions: ``csv``, ``xlsx``, ``pdf``."""
+PERSON_COLUMNS: tuple[str, ...] = tuple(
+    field.validation_alias if isinstance(field.validation_alias, str) else name
+    for name, field in PersonProjection.model_fields.items()
+)
+"""The ``columns`` ``export_persons`` sends when its caller names none.
+
+``PersonProjection``'s fields, what ``list_persons`` returns, under upstream's names
+(``firstName``), in its order: the personal identifiers ``ssn`` and ``iban`` stay out of
+the file unless the caller names them (ADR-0017; Johannes, 2026-10-28).
+"""
 PAGE_SIZE = 100
 """Records per request when a list task collects every page.
 
@@ -179,15 +224,25 @@ Upstream's documented default for ``limit`` on the journal, person and order lis
 
 
 def _meta(
-    org: str, endpoint: str, params: dict[str, Any], *, total: int | None = None
+    org: str,
+    endpoint: str,
+    params: Mapping[str, Any],
+    *,
+    total: int | None = None,
+    retrieved_at: datetime | None = None,
 ) -> ResultMeta:
-    """``meta`` of a task's result: ``org`` as the tenant and first in ``request``."""
+    """``meta`` of a task's result: ``org`` as the tenant and first in ``request``.
+
+    ``retrieved_at`` is a file's, when it was complete; otherwise now.
+    """
+    when = {} if retrieved_at is None else {"retrieved_at": retrieved_at}
     return ResultMeta(
         source=SOURCE,
         endpoint=endpoint,
         request={"org": org, **params},
         total=total,
         tenant=org,
+        **when,
     )
 
 
@@ -279,6 +334,22 @@ def _whole(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _column_problems(columns: object) -> list[str]:
+    """What keeps ``columns`` from being the comma-separated names an export takes."""
+    if isinstance(columns, str | bytes) or not isinstance(columns, Sequence):
+        return [
+            'columns takes a list of column names such as ["nr", "name"], '
+            f"not {type(columns).__name__}"
+        ]
+    if not columns:
+        return ["columns names at least one column; leave it out for the default columns"]
+    return [
+        f"columns[{index}] must be a column name without a comma, not {name!r}"
+        for index, name in enumerate(columns)
+        if not isinstance(name, str) or not name.strip() or "," in name
+    ]
+
+
 def _check_list_arguments(
     *,
     dir: object = None,
@@ -287,6 +358,7 @@ def _check_list_arguments(
     choices: dict[str, tuple[object, tuple[str, ...]]] | None = None,
     start: object = 0,
     limit: object = None,
+    columns: object = None,
 ) -> list[Filter] | None:
     """Refuse what upstream would silently ignore, before anything is sent (ADR-0007).
 
@@ -294,9 +366,11 @@ def _check_list_arguments(
     ``filter`` item is a ``Filter``, or a mapping that validates as one, whose
     ``comparison`` is ``eq``, ``like``, ``gt`` or ``lt``, the text parameters
     (``query``, ``sort``) are strings, and a documented value set (``choices``, such as
-    the orders' ``type``) holds the value given. Paging is the task's own: ``start`` is a
-    whole number of at least 0, ``limit`` one of at least 1. Column names in ``sort`` and
-    ``Filter.field`` are not documented, so they are not checked. The parameter types say
+    the orders' ``type`` or an export's ``format``) holds the value given. Paging is the
+    task's own: ``start`` is a whole number of at least 0, ``limit`` one of at least 1.
+    An export's ``columns`` is a list of at least one name, none holding the comma that
+    separates them. Column names in ``sort``, ``Filter.field`` and ``columns`` are not
+    documented, so they are not checked. The parameter types say
     the same, so the MCP and HTTP adapters refuse a wrong value before the task runs;
     this check is for Python callers, whose arguments nothing else validates.
 
@@ -334,6 +408,8 @@ def _check_list_arguments(
         problems.append(f"start must be a whole number of at least 0, not {start!r}")
     if limit is not None and (not _whole(limit) or limit < 1):
         problems.append(f"limit must be a whole number of at least 1, not {limit!r}")
+    if columns is not None:
+        problems += _column_problems(columns)
     if problems:
         raise InvalidRequestError("; ".join(problems), source=SOURCE)
     return filters
@@ -837,6 +913,37 @@ async def get_order_async(org: str, id: int) -> Result[OrderDetail]:
     """
     order = await api.order_read(org, id)
     return Result(data=order, meta=_meta(org, "order/read.json", {"id": id}))
+
+
+def _order_document(document: OrderDocument) -> OrderDocumentProjection:
+    """An order's document without ``org_iban``, ``org_qr_iban`` and ``recipient_iban``."""
+    return OrderDocumentProjection.project(document)
+
+
+async def get_order_document_async(org: str, id: int) -> Result[OrderDocumentProjection]:
+    """Read the document of one order: how it is printed and sent, sender and recipient.
+
+    The document is not the order itself (``get_order`` has its items and amounts) but
+    how it goes out: ``nr`` and ``name_singular`` (the kind, e.g. ``Rechnung``), the
+    layout (``layout_id``, ``template_id``) and ``language``, the sender
+    (``org_location_id``, ``org_address`` as printed, ``org_bank_account_id``), the
+    recipient (``associate_id``, ``recipient_address_id``, ``recipient_address`` as
+    printed, ``recipient_bank_account_id``), the ``header`` and ``footer`` texts, the
+    payment references a QR-bill carries (``qr_reference``, ``iso11649_reference``,
+    ``generated_reference``, ``custom_reference``) and what mailing it would use
+    (``mail_to``, ``mail_subject``, ``mail_text``, ``sent_status_id``, the status set
+    after sending). The bank account numbers of the organisation and the recipient
+    (``orgIban``, ``orgQrIban``, ``recipientIban``) are left out. The PDF itself comes
+    from ``download_order_document``, from Python only. An id no order has raises
+    ``NotFoundError`` (assumed, as for ``get_order``).
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        id: The order's ``id`` as ``list_orders`` gives it, e.g. ``3``; not its number
+            ``nr``.
+    """
+    document = _order_document(await api.order_document_read(org, id))
+    return Result(data=document, meta=_meta(org, "order/document/read.json", {"id": id}))
 
 
 async def list_order_book_entries_async(org: str, order_id: int) -> Result[list[OrderBookEntry]]:
@@ -1379,6 +1486,486 @@ async def get_report_data_async(
     return Result(data=report, meta=meta)
 
 
+# The file tasks (G5 (5) and (6) of 2026-10-28; ADR-0019 decision 4), named in BULK_TASKS:
+# Python only. Each streams one file to the path its caller gives, through a file wrapper
+# and api/_download.py, and returns core's Downloaded; nothing is read into a result.
+
+FileWrapper = Callable[
+    [str, Mapping[str, str | int], str | os.PathLike[str]], Awaitable[Downloaded]
+]
+"""A list export's wrapper: ``org``, the query, ``dest``; the file written."""
+
+_JOURNAL_EXPORTS: Mapping[str, FileWrapper] = {
+    "csv": api.journal_list_csv,
+    "xlsx": api.journal_list_xlsx,
+    "pdf": api.journal_list_pdf,
+}
+_ACCOUNT_EXPORTS: Mapping[str, FileWrapper] = {
+    "csv": api.account_list_csv,
+    "xlsx": api.account_list_xlsx,
+    "pdf": api.account_list_pdf,
+}
+_PERSON_EXPORTS: Mapping[str, FileWrapper] = {
+    "csv": api.person_list_csv,
+    "xlsx": api.person_list_xlsx,
+    "pdf": api.person_list_pdf,
+}
+_ORDER_EXPORTS: Mapping[str, FileWrapper] = {
+    "csv": api.order_list_csv,
+    "xlsx": api.order_list_xlsx,
+    "pdf": api.order_list_pdf,
+}
+
+
+async def _export(
+    org: str,
+    format: str,
+    dest: str | os.PathLike[str],
+    params: Mapping[str, str | int],
+    *,
+    path: str,
+    wrappers: Mapping[str, FileWrapper],
+) -> Result[Downloaded]:
+    """One list export: ``format``'s wrapper writes ``dest``; ``meta`` names ``<path>.<format>``."""
+    downloaded = await wrappers[format](org, params, dest)
+    meta = _meta(org, f"{path}.{format}", params, retrieved_at=downloaded.retrieved_at)
+    return Result(data=downloaded, meta=meta)
+
+
+def _check_ids(ids: object) -> None:
+    """``ids`` is a list of at least one order id, each a whole number."""
+    if isinstance(ids, str | bytes) or not isinstance(ids, Sequence) or not ids:
+        raise InvalidRequestError(
+            f"ids takes a list of at least one order id such as [3], not {ids!r}",
+            source=SOURCE,
+        )
+    wrong = [item for item in ids if not _whole(item)]
+    if wrong:
+        raise InvalidRequestError(
+            f"ids must be whole numbers, the orders' ids, not {wrong[0]!r}", source=SOURCE
+        )
+
+
+async def download_order_document_async(
+    org: str, ids: list[int], dest: str | os.PathLike[str]
+) -> Result[Downloaded]:
+    """Download the documents of one or more orders as one PDF file at ``dest``.
+
+    The PDF is upstream's order document (``order/document/read.pdf``) as the order's
+    recipient gets it: sender and recipient, items and totals, and on an invoice the
+    Swiss QR-bill, which may carry the organisation's IBAN or QR-IBAN and the
+    recipient's name and address. Several ids give one PDF that holds each order's
+    document. The file is streamed to ``dest``, the path the caller gives, and is never
+    read into a result, kept in memory or cached; no MCP tool or HTTP route serves it
+    (``BULK_TASKS``), so where it goes is the caller's choice. ``data`` describes it:
+    ``path``, ``bytes``, ``content_type``, ``filename`` and ``retrieved_at``. An id no
+    order has raises ``NotFoundError`` (upstream answers it with HTTP 404, observed on
+    2026-10-29) and a refusal ``RequestRejected``; either way nothing is written, and a
+    file already at ``dest`` stays as it was.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        ids: The orders' ``id`` as ``list_orders`` gives them, at least one, e.g. ``[3]``
+            or ``[3, 4]``; not their numbers ``nr``. Sent comma-separated, as upstream
+            takes ``ids``.
+        dest: The PDF to write, e.g. ``"RE-2026-103.pdf"``, in a directory that exists;
+            a file there is replaced once the download is complete.
+    """
+    _check_ids(ids)
+    params = api.order_document_read_pdf_params(ids)
+    downloaded = await api.order_document_read_pdf(org, ids, dest)
+    meta = _meta(org, "order/document/read.pdf", params, retrieved_at=downloaded.retrieved_at)
+    return Result(data=downloaded, meta=meta)
+
+
+async def export_journal_entries_async(
+    org: str,
+    format: ExportFormat,
+    dest: str | os.PathLike[str],
+    *,
+    fiscal_period_id: int | None = None,
+    account_id: int | None = None,
+    associate_id: int | None = None,
+    query: str | None = None,
+    filter: list[Filter] | None = None,
+    columns: list[str] | None = None,
+    only_collective: bool = False,
+    only_cost_centers: bool = False,
+    only_imported: bool = False,
+    only_manual: bool = False,
+    only_notes: bool = False,
+    only_purchase: bool = False,
+    only_salary: bool = False,
+    only_sales: bool = False,
+    only_untaxed: bool = False,
+    sort: str | None = None,
+    dir: Direction | None = None,
+    start: int | None = None,
+    limit: int | None = None,
+) -> Result[Downloaded]:
+    """Export an organisation's journal entries to a CSV, Excel or PDF file at ``dest``.
+
+    The file is upstream's export of the journal list (``journal/list.csv``,
+    ``list.xlsx`` or ``list.pdf``) with the filters of ``list_journal_entries``, in the
+    columns upstream chooses or those ``columns`` names. It is streamed to ``dest``, the
+    path the caller gives, and is never read into a result, kept in memory or cached;
+    no MCP tool or HTTP route serves it (``BULK_TASKS``). ``data`` describes the file:
+    ``path``, ``bytes``, ``content_type``, ``filename`` and ``retrieved_at``.
+
+    Upstream exports at most ``limit`` entries, 100 when ``limit`` is left out: read
+    ``meta.total`` of ``list_journal_entries`` with the same filters first (``limit=1``
+    is one request) and pass a ``limit`` of at least that, or a longer journal is cut
+    at 100 without a word. Pass ``fiscal_period_id`` for a reproducible file; without it
+    upstream uses the API user's current period. A refusal (HTTP 200 with
+    ``success: false``) raises ``RequestRejected`` and writes nothing, and a file
+    already at ``dest`` stays as it was. Arguments upstream would ignore are refused
+    before anything is sent, as by ``list_journal_entries``.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        format: The file: ``csv``, ``xlsx`` (Excel) or ``pdf``.
+        dest: The file to write, e.g. ``"journal-2025.csv"``, in a directory that exists;
+            a file there is replaced once the export is complete.
+        fiscal_period_id: The fiscal period, an ``id`` from ``list_fiscal_periods``,
+            e.g. ``2``; the API user's current period when left out.
+        account_id: Only the entries that book to one account, an ``id`` from
+            ``list_accounts`` (not the account number), e.g. ``3``.
+        associate_id: Only the entries that name one person, an ``id`` from
+            ``list_persons``, e.g. ``8``.
+        query: Full-text search, e.g. ``"Miete"``.
+        filter: Filters that must all match, as ``list_journal_entries`` takes them, e.g.
+            ``[{"comparison": "eq", "field": "reference", "value": "RE-2025-003"}]``.
+        columns: The columns of the file, field names of ``journal/list.json`` as upstream
+            spells them, e.g. ``["dateAdded", "title", "amount"]``; upstream's own when
+            left out.
+        only_collective: ``True`` for collective entries only.
+        only_cost_centers: ``True`` for entries with cost centers only.
+        only_imported: ``True`` for imported entries only.
+        only_manual: ``True`` for manual entries only.
+        only_notes: ``True`` for entries with notes only.
+        only_purchase: ``True`` for entries booked by purchase orders only.
+        only_salary: ``True`` for salary entries only.
+        only_sales: ``True`` for entries booked by sales orders only.
+        only_untaxed: ``True`` for untaxed entries only.
+        sort: The column to sort by, e.g. ``dateAdded`` (upstream's default).
+        dir: ``DESC`` (upstream's default) or ``ASC``.
+        start: The offset of the first entry, e.g. ``100``; upstream's default is 0.
+        limit: The most entries the file holds, e.g. ``500``; upstream's default is 100.
+    """
+    filters = _check_list_arguments(
+        dir=dir,
+        filter=filter,
+        texts={"query": query, "sort": sort},
+        choices={"format": (format, EXPORT_FORMATS)},
+        start=0 if start is None else start,
+        limit=limit,
+        columns=columns,
+    )
+    params = api.journal_list_params(
+        account_id=account_id,
+        associate_id=associate_id,
+        dir=dir,
+        filter=filters,
+        fiscal_period_id=fiscal_period_id,
+        only_collective=only_collective or None,
+        only_cost_centers=only_cost_centers or None,
+        only_imported=only_imported or None,
+        only_manual=only_manual or None,
+        only_notes=only_notes or None,
+        only_purchase=only_purchase or None,
+        only_salary=only_salary or None,
+        only_sales=only_sales or None,
+        only_untaxed=only_untaxed or None,
+        query=query,
+        sort=sort,
+        start=start,
+        limit=limit,
+    )
+    query_sent = api.export_params(params, columns)
+    return await _export(
+        org, format, dest, query_sent, path="journal/list", wrappers=_JOURNAL_EXPORTS
+    )
+
+
+async def export_accounts_async(
+    org: str,
+    format: ExportFormat,
+    dest: str | os.PathLike[str],
+    *,
+    query: str | None = None,
+    filter: list[Filter] | None = None,
+    columns: list[str] | None = None,
+    category_id: int | None = None,
+    fiscal_period_id: int | None = None,
+    only_active: bool = False,
+    only_cost_centers: bool = False,
+    only_notes: bool = False,
+    sort: str | None = None,
+    dir: Direction | None = None,
+) -> Result[Downloaded]:
+    """Export an organisation's accounts, its chart of accounts, to a CSV, Excel or PDF file.
+
+    The file is upstream's export of the account list (``account/list.csv``,
+    ``list.xlsx`` or ``list.pdf``) with the filters of ``list_accounts``, balances
+    included, in the columns upstream chooses or those ``columns`` names; every matching
+    account is in it, since the export, like the list, documents no ``limit``. It is
+    streamed to ``dest``, the path the caller gives, and is never read into a result,
+    kept in memory or cached; no MCP tool or HTTP route serves it (``BULK_TASKS``).
+    ``data`` describes the file: ``path``, ``bytes``, ``content_type``, ``filename`` and
+    ``retrieved_at``. A refusal (HTTP 200 with ``success: false``) raises
+    ``RequestRejected`` and writes nothing, and a file already at ``dest`` stays as it
+    was. Arguments upstream would ignore are refused before anything is sent, as by
+    ``list_accounts``.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        format: The file: ``csv``, ``xlsx`` (Excel) or ``pdf``.
+        dest: The file to write, e.g. ``"accounts-2025.xlsx"``, in a directory that
+            exists; a file there is replaced once the export is complete.
+        query: Full-text search, e.g. ``"Finanz"``.
+        filter: Filters that must all match, as ``list_accounts`` takes them, e.g.
+            ``[{"comparison": "eq", "field": "number", "value": "1020"}]``.
+        columns: The columns of the file, field names of ``account/list.json`` as upstream
+            spells them, e.g. ``["number", "name", "endAmount"]``; upstream's own when
+            left out.
+        category_id: Only the accounts of one account category, e.g. ``1``.
+        fiscal_period_id: The fiscal period whose balances the file shows, an ``id``
+            from ``list_fiscal_periods``, e.g. ``2``; the current one when left out.
+        only_active: ``True`` to leave out inactive accounts.
+        only_cost_centers: ``True`` to export only accounts with cost centers.
+        only_notes: ``True`` to export only accounts with notes.
+        sort: The column to sort by, e.g. ``number`` (upstream's default) or ``name``.
+        dir: ``ASC`` (upstream's default) or ``DESC``.
+    """
+    filters = _check_list_arguments(
+        dir=dir,
+        filter=filter,
+        texts={"query": query, "sort": sort},
+        choices={"format": (format, EXPORT_FORMATS)},
+        columns=columns,
+    )
+    params = api.account_list_params(
+        category_id=category_id,
+        dir=dir,
+        filter=filters,
+        fiscal_period_id=fiscal_period_id,
+        only_active=only_active or None,
+        only_cost_centers=only_cost_centers or None,
+        only_notes=only_notes or None,
+        query=query,
+        sort=sort,
+    )
+    query_sent = api.export_params(params, columns)
+    return await _export(
+        org, format, dest, query_sent, path="account/list", wrappers=_ACCOUNT_EXPORTS
+    )
+
+
+async def export_persons_async(
+    org: str,
+    format: ExportFormat,
+    dest: str | os.PathLike[str],
+    *,
+    query: str | None = None,
+    filter: list[Filter] | None = None,
+    columns: list[str] | None = None,
+    category_id: int | None = None,
+    only_active: bool = False,
+    only_customers: bool = False,
+    only_vendors: bool = False,
+    only_employees: bool = False,
+    only_insurances: bool = False,
+    only_families: bool = False,
+    only_notes: bool = False,
+    only_with_images: bool = False,
+    only_without_category: bool = False,
+    only_without_role: bool = False,
+    sort: str | None = None,
+    dir: Direction | None = None,
+    start: int | None = None,
+    limit: int | None = None,
+) -> Result[Downloaded]:
+    """Export an organisation's persons, its customers, vendors and contacts, to a file.
+
+    The file is upstream's export of the people list (``person/list.csv``, ``list.xlsx``
+    or ``list.pdf``) with the filters of ``list_persons``. Without ``columns`` it holds
+    the fields ``list_persons`` returns, named one by one (``PERSON_COLUMNS``), so the
+    personal identifiers ``ssn`` and ``iban`` stay out of it. A column ``columns`` names
+    is exported as named: a caller that names ``ssn``, ``iban`` or ``qrIban`` fetches
+    them deliberately and gets them in the file (ADR-0017). The file is streamed to
+    ``dest``, the path the caller gives, and is never read into a result, kept in memory
+    or cached; no MCP tool or HTTP route serves it (``BULK_TASKS``). ``data`` describes
+    it: ``path``, ``bytes``, ``content_type``, ``filename`` and ``retrieved_at``.
+
+    Upstream exports at most ``limit`` persons, 100 when ``limit`` is left out: read
+    ``meta.total`` of ``list_persons`` with the same filters first (``limit=1`` is one
+    request) and pass a ``limit`` of at least that, or a longer list is cut at 100
+    without a word. A refusal (HTTP 200 with ``success: false``) raises
+    ``RequestRejected`` and writes nothing, and a file already at ``dest`` stays as it
+    was. Arguments upstream would ignore are refused before anything is sent, as by
+    ``list_persons``.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        format: The file: ``csv``, ``xlsx`` (Excel) or ``pdf``.
+        dest: The file to write, e.g. ``"customers.csv"``, in a directory that exists; a
+            file there is replaced once the export is complete.
+        query: Full-text search, e.g. ``"Muster"``.
+        filter: Filters that must all match, as ``list_persons`` takes them, e.g.
+            ``[{"comparison": "eq", "field": "city", "value": "Basel"}]``.
+        columns: The columns of the file, field names of ``person/list.json`` as upstream
+            spells them, e.g. ``["nr", "name", "city"]``; the fields of ``list_persons``
+            when left out, without ``ssn`` and ``iban``.
+        category_id: Only the persons of one person category, e.g. ``1``.
+        only_active: ``True`` to leave out inactive persons.
+        only_customers: ``True`` for customers only.
+        only_vendors: ``True`` for vendors only.
+        only_employees: ``True`` for employees only.
+        only_insurances: ``True`` for insurances only.
+        only_families: ``True`` for families only.
+        only_notes: ``True`` for persons with notes only.
+        only_with_images: ``True`` for persons with images only.
+        only_without_category: ``True`` for persons without a category only.
+        only_without_role: ``True`` for persons without a role only.
+        sort: The column to sort by, e.g. ``name`` (upstream's default) or ``nr``.
+        dir: ``ASC`` (upstream's default) or ``DESC``.
+        start: The offset of the first person, e.g. ``100``; upstream's default is 0.
+        limit: The most persons the file holds, e.g. ``500``; upstream's default is 100.
+    """
+    filters = _check_list_arguments(
+        dir=dir,
+        filter=filter,
+        texts={"query": query, "sort": sort},
+        choices={"format": (format, EXPORT_FORMATS)},
+        start=0 if start is None else start,
+        limit=limit,
+        columns=columns,
+    )
+    params = api.person_list_params(
+        category_id=category_id,
+        dir=dir,
+        filter=filters,
+        only_active=only_active or None,
+        only_customers=only_customers or None,
+        only_employees=only_employees or None,
+        only_families=only_families or None,
+        only_insurances=only_insurances or None,
+        only_notes=only_notes or None,
+        only_vendors=only_vendors or None,
+        only_with_images=only_with_images or None,
+        only_without_category=only_without_category or None,
+        only_without_role=only_without_role or None,
+        query=query,
+        sort=sort,
+        start=start,
+        limit=limit,
+    )
+    query_sent = api.export_params(params, PERSON_COLUMNS if columns is None else columns)
+    return await _export(
+        org, format, dest, query_sent, path="person/list", wrappers=_PERSON_EXPORTS
+    )
+
+
+async def export_orders_async(
+    org: str,
+    format: ExportFormat,
+    dest: str | os.PathLike[str],
+    *,
+    type: OrderType | None = None,
+    fiscal_period_id: int | None = None,
+    query: str | None = None,
+    filter: list[Filter] | None = None,
+    columns: list[str] | None = None,
+    category_id: int | None = None,
+    status_id: int | None = None,
+    person_id: int | None = None,
+    group_id: int | None = None,
+    only_open: bool = False,
+    only_overdue: bool = False,
+    only_cost_centers: bool = False,
+    only_notes: bool = False,
+    sort: str | None = None,
+    dir: Direction | None = None,
+    start: int | None = None,
+    limit: int | None = None,
+) -> Result[Downloaded]:
+    """Export an organisation's orders (offers, invoices and the like) to a file.
+
+    The file is upstream's export of the order list (``order/list.csv``, ``list.xlsx``
+    or ``list.pdf``) with the filters of ``list_orders``, in the columns upstream
+    chooses or those ``columns`` names; without ``type`` it holds both types, as the
+    list does. It is streamed to ``dest``, the path the caller gives, and is never read
+    into a result, kept in memory or cached; no MCP tool or HTTP route serves it
+    (``BULK_TASKS``). ``data`` describes the file: ``path``, ``bytes``,
+    ``content_type``, ``filename`` and ``retrieved_at``.
+
+    Upstream exports at most ``limit`` orders, 100 when ``limit`` is left out: read
+    ``meta.total`` of ``list_orders`` with the same filters first (``limit=1`` is one
+    request) and pass a ``limit`` of at least that, or a longer list is cut at 100
+    without a word. Pass ``fiscal_period_id`` for a reproducible file; without it
+    upstream uses the API user's current period. A refusal (HTTP 200 with
+    ``success: false``) raises ``RequestRejected`` and writes nothing, and a file
+    already at ``dest`` stays as it was. Arguments upstream would ignore are refused
+    before anything is sent, as by ``list_orders``.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        format: The file: ``csv``, ``xlsx`` (Excel) or ``pdf``.
+        dest: The file to write, e.g. ``"invoices-2026.pdf"``, in a directory that
+            exists; a file there is replaced once the export is complete.
+        type: ``SALES`` or ``PURCHASE``; both when left out.
+        fiscal_period_id: The fiscal period, an ``id`` from ``list_fiscal_periods``,
+            e.g. ``1``; the API user's current period when left out.
+        query: Full-text search, e.g. ``"Büromöbel"``.
+        filter: Filters that must all match, as ``list_orders`` takes them, e.g.
+            ``[{"comparison": "eq", "field": "nr", "value": "RE-2026-101"}]``.
+        columns: The columns of the file, field names of ``order/list.json`` as upstream
+            spells them, e.g. ``["nr", "date", "total"]``; upstream's own when left out.
+        category_id: Only the orders of one order category, e.g. ``4``.
+        status_id: Only the orders in one status, e.g. ``12``.
+        person_id: Only the orders of one person, an ``id`` from ``list_persons``,
+            e.g. ``10``.
+        group_id: Only the orders of one order group (dossier), e.g. ``3``.
+        only_open: ``True`` for open orders only (a status like Open, not Paid).
+        only_overdue: ``True`` for orders past their due date only.
+        only_cost_centers: ``True`` for orders with cost centers only.
+        only_notes: ``True`` for orders with notes only.
+        sort: The column to sort by, e.g. ``date`` (upstream's default) or ``nr``.
+        dir: ``DESC`` (upstream's default) or ``ASC``.
+        start: The offset of the first order, e.g. ``100``; upstream's default is 0.
+        limit: The most orders the file holds, e.g. ``500``; upstream's default is 100.
+    """
+    filters = _check_list_arguments(
+        dir=dir,
+        filter=filter,
+        texts={"query": query, "sort": sort},
+        choices={"type": (type, ORDER_TYPES), "format": (format, EXPORT_FORMATS)},
+        start=0 if start is None else start,
+        limit=limit,
+        columns=columns,
+    )
+    params = api.order_list_params(
+        category_id=category_id,
+        dir=dir,
+        filter=filters,
+        fiscal_period_id=fiscal_period_id,
+        group_id=group_id,
+        only_cost_centers=only_cost_centers or None,
+        only_notes=only_notes or None,
+        only_open=only_open or None,
+        only_overdue=only_overdue or None,
+        person_id=person_id,
+        query=query,
+        sort=sort,
+        status_id=status_id,
+        type=type,
+        start=start,
+        limit=limit,
+    )
+    query_sent = api.export_params(params, columns)
+    return await _export(org, format, dest, query_sent, path="order/list", wrappers=_ORDER_EXPORTS)
+
+
 LIST_ORGANISATIONS_DOC = """List the organisations this server can reach, by name.
 
 On a server that serves every declared organisation, every other tool takes one of these
@@ -1402,6 +1989,7 @@ list_persons = sync(list_persons_async)
 get_person = sync(get_person_async)
 list_orders = sync(list_orders_async)
 get_order = sync(get_order_async)
+get_order_document = sync(get_order_document_async)
 list_order_book_entries = sync(list_order_book_entries_async)
 list_history = sync(list_history_async)
 list_order_categories = sync(list_order_categories_async)
@@ -1413,3 +2001,8 @@ list_cost_centers = sync(list_cost_centers_async)
 list_locations = sync(list_locations_async)
 get_report_tree = sync(get_report_tree_async)
 get_report_data = sync(get_report_data_async)
+download_order_document = sync(download_order_document_async)
+export_journal_entries = sync(export_journal_entries_async)
+export_accounts = sync(export_accounts_async)
+export_persons = sync(export_persons_async)
+export_orders = sync(export_orders_async)
