@@ -348,9 +348,8 @@ cashctrl's form.
   cashctrl runs no `copier update` (D35), and a core minor arrives through the
   core-only `/adopt-release`, as the next bullet says.
 - Core updates: a new core minor arrives in one adoption PR, a `chore/template-update*`
-  branch, before the next release (conventions §15); when its merge class is `auto` the
-  session enables auto-merge after the reviewer's `ready` (ADR-0018, amendment (e)). An
-  adoption of a later core minor runs no `copier update` (D35, D85): it raises the floor
+  branch, before the next release (conventions §15). An adoption of a later core minor
+  runs no `copier update` (D35, D85): it raises the floor
   to `~=X.Y.0` by hand in `pyproject.toml`, runs `uv lock` and ports that core release's
   Hand-apply list (`/adopt-release`). The reference-data scaffolding (`params.py`,
   `enums.py`, `reference/`, `scripts/refresh_reference.py`) does not come back, since
