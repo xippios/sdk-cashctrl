@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `CLAUDE.md` drops the rule that enabled auto-merge on a core adoption PR after the
+  reviewer's `ready`: it belonged to the merge gates, which are retired. The bullet on
+  core updates keeps the adoption PR, its branch and the hand steps of a later core minor.
+
 ## [0.3.0] - 2026-10-29
 
 The third release. It ships on xippios-core 0.3.0 (`xippios-core~=0.3.0` from PyPI, its
