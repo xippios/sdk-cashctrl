@@ -1,0 +1,10 @@
+# sdk-cashctrl's own, written by hand from the member human paths of C70 (as amended by
+# coordinate-core#122 and #167): sdk-cashctrl holds at sdk-template v0.2.2 and adopts no
+# render that would write this file. A change to these paths needs the human's review.
+
+/.github/** @jdidaskalu
+/CLAUDE.md @jdidaskalu
+/.claude/** @jdidaskalu
+/rules/** @jdidaskalu
+/pyproject.toml @jdidaskalu
+/.copier-answers.yml @jdidaskalu
