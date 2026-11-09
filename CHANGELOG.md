@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format follows
 - `CLAUDE.md` drops the rule that enabled auto-merge on a core adoption PR after the
   reviewer's `ready`: it belonged to the merge gates, which are retired. The bullet on
   core updates keeps the adoption PR, its branch and the hand steps of a later core minor.
+- `.github/CODEOWNERS` names the member human paths (`.github/**`, `CLAUDE.md`,
+  `.claude/**`, `rules/**`, `pyproject.toml`, `.copier-answers.yml`) with jdidaskalu as
+  their owner, so a change to them needs the human's review.
 
 ## [0.3.0] - 2026-10-29
 
