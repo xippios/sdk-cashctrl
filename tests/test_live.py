@@ -119,6 +119,7 @@ from xippios.cashctrl.models import (
     PaymentType,
     PersonDetail,
     PersonDetailProjection,
+    ReportFormat,
     ReportTreeNode,
     WritePreview,
     WriteResult,
@@ -355,7 +356,7 @@ async def test_the_document_of_an_unknown_order_is_not_found(demo_org: str, tmp_
     assert list(tmp_path.iterdir()) == [], "no file, no temporary file"
 
 
-REPORT_MEDIA = {
+REPORT_MEDIA: dict[ReportFormat, str] = {
     "pdf": "application/pdf",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }

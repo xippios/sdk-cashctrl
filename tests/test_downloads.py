@@ -37,7 +37,7 @@ from xippios.cashctrl._client import DEMO, SOURCE
 from xippios.cashctrl.errors import FieldError, RequestRejected
 from xippios.cashctrl.mcp import server
 from xippios.cashctrl.mcp_write import server as write_server
-from xippios.cashctrl.models import Filter, Person, PersonProjection
+from xippios.cashctrl.models import Filter, Person, PersonProjection, ReportFormat
 
 BASE = "https://demo.cashctrl.com/api/v1"
 """The placeholder host every offline test replays against (``tests/conftest.py``)."""
@@ -620,7 +620,7 @@ def test_the_report_files_are_pdf_and_excel() -> None:
 
 @pytest.mark.parametrize("format", ["pdf", "xlsx"])
 def test_download_report_writes_the_file_where_the_caller_says(
-    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path, format: str
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path, format: ReportFormat
 ) -> None:
     tree = mount_tree(respx_mock, fixtures_dir)
     endpoint = f"report/element/download.{format}"
@@ -668,7 +668,7 @@ def test_a_report_file_takes_and_sends_the_parameters_of_get_report_data(
 
 @pytest.mark.parametrize("format", ["pdf", "xlsx"])
 def test_download_report_collection_writes_the_file_where_the_caller_says(
-    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path, format: str
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path, format: ReportFormat
 ) -> None:
     """Collection 1 holds the balance sheet and the profit and loss: both pass."""
     tree = mount_tree(respx_mock, fixtures_dir)
@@ -721,7 +721,7 @@ def test_a_payroll_or_people_report_is_refused_before_its_download(
     tmp_path: Path,
     element_id: int,
     report_type: str,
-    format: str,
+    format: ReportFormat,
 ) -> None:
     tree = mount_tree(respx_mock, fixtures_dir)
     route = mount_report(respx_mock, f"report/element/download.{format}", format)

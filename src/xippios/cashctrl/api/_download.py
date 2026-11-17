@@ -1,7 +1,8 @@
 """CashCtrl's files, downloaded one way: core's ``download`` and the refusal it cannot see.
 
 Every file operation this package wraps (the list exports ``<module>/list.csv``,
-``list.xlsx`` and ``list.pdf``, and ``order/document/read.pdf``) is a ``GET`` whose query
+``list.xlsx`` and ``list.pdf``, ``order/document/read.pdf`` and the report module's
+``download.pdf``, ``download.xlsx`` and ``download_annualreport.pdf``) is a ``GET`` whose query
 is the operation's parameters under upstream's names, as for a ``.json`` read.
 ``download`` sends it through the organisation's client with core's
 ``AsyncClient.download`` (ADR-0019 decision 1): the body streams to a file, never held in
@@ -38,7 +39,7 @@ from xippios.core import (
 
 from xippios.cashctrl._client import NEUTRAL_HOST, SOURCE, classify, client_for
 
-__all__ = ["JSON_MEDIA_TYPE", "download", "export_params", "is_json"]
+__all__ = ["JSON_MEDIA_TYPE", "check_dest", "download", "export_params", "is_json"]
 
 JSON_MEDIA_TYPE = "application/json"
 """The media type of CashCtrl's JSON answers, a refusal of a download among them."""
@@ -85,6 +86,25 @@ def _refusal(
     )
 
 
+def check_dest(dest: str | os.PathLike[str]) -> Path:
+    """``dest`` as a ``Path``, once it names a file in a directory that exists.
+
+    A task that sends a request of its own before the download (a report's tree) checks
+    ``dest`` first, so that a bad one sends nothing; ``download`` checks it again.
+
+    Raises:
+        InvalidRequestError: ``dest`` is a directory, or its directory does not exist,
+            a bad argument (conventions §5) where core's ``download`` raises
+            ``ValueError``.
+    """
+    target = Path(dest)
+    if target.is_dir():
+        raise InvalidRequestError("dest is a directory; name the file to write", source=SOURCE)
+    if not target.parent.is_dir():
+        raise InvalidRequestError("dest's directory does not exist; create it first", source=SOURCE)
+    return target
+
+
 async def download(
     org: str,
     params: Mapping[str, str | int],
@@ -115,11 +135,7 @@ async def download(
         XippiosError: Core's taxonomy for any other failure; ``dest`` stays as it was.
     """
     client = client_for(org)
-    target = Path(dest)
-    if target.is_dir():
-        raise InvalidRequestError("dest is a directory; name the file to write", source=SOURCE)
-    if not target.parent.is_dir():
-        raise InvalidRequestError("dest's directory does not exist; create it first", source=SOURCE)
+    target = check_dest(dest)
     handle, name = tempfile.mkstemp(
         dir=target.parent, prefix=f".{target.name}.", suffix=".download"
     )
