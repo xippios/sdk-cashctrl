@@ -535,19 +535,10 @@ and expects an unknown order's refusal.
 ### How to record a fixture
 
 `/record-fixture <endpoint> <case> <parameters>` walks it, and the docstring of
-`scripts/record_fixture.py` holds the recorder's policies in full; the demo-only rule
-above names what it scrubs and refuses. It sends one request to the demo organisation
-through a client that never retries, builds the fixture with core's
-`fixture_from_response` and `Scrub` (conventions §10), then runs its own step,
-`TenantScrub` (sdk-core ADR-0024, decision 4), which rewrites the demo host to
-`demo.cashctrl.com` and the key in every encoded form to `REDACTED`, and `scrub_text`.
-Its final check refuses, before the one write to `tests/fixtures/<wrapper>/<case>.json`,
-a fixture that still holds the subdomain, the key or its first four characters, an
-e-mail address, an API user tag, or a value but `null` or `REDACTED` under a token-like
-or identifier name; a compound name such as `publicHash` goes to review. After a write it
-names the `insertId` and asks for the matching delete. The write fixtures record marked
-records created, read, updated and deleted again (2026-10-24, 2026-10-27), a purchase
-order's status and payments (2026-10-29) and a marked order's book entry (2026-11-17).
+`scripts/record_fixture.py` holds the recorder's policies in full: one request through a
+client that never retries, core's `Scrub` (conventions §10) and its own `TenantScrub`
+(sdk-core ADR-0024, decision 4), the final check before the one write, and the delete it
+asks for after a write. The demo-only rule above names what it scrubs and refuses.
 Before committing, run the grep block of `/record-fixture` (step 5); its last two greps
 print `0`. Fixtures are never typed in by hand.
 
