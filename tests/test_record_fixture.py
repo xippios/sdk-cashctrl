@@ -1,6 +1,7 @@
 """The fixture recorder records the demo organisation only and never writes its host or key.
 
-It also holds to its policies: GET, and POST for the write tools' operations only, an
+It also holds to its policies: GET only for a path the snapshot in docs/upstream/ documents
+as a GET, and POST for the write tools' operations only, an
 order write only for orders marked xippios-live, read first; .json only; no e-mail
 address, in the request body neither. The demo
 organisation is synthetic, so every module and every amount may be recorded. The key as
@@ -464,12 +465,155 @@ def test_a_get_to_a_write_path_is_refused(
     capsys: pytest.CaptureFixture[str],
     endpoint: str,
 ) -> None:
-    """A write is recorded as a POST or not at all (row 242 item 10; the rest is row 245)."""
+    """A write is recorded as a POST or not at all (row 242 item 10).
+
+    Any other path the snapshot documents as a POST is refused by the tests below.
+    """
     assert recorder.main([endpoint, "get", "ids=26"]) == 1
     assert not respx_mock.calls, "refused before any request"
     assert not (tmp_path / "tests" / "fixtures").exists()
     assert capsys.readouterr().out == (
         f"not recorded: {endpoint} is a write: it is recorded with --method POST or not at all\n"
+    )
+
+
+# A GET only where the snapshot documents a GET (https://github.com/xippios/sdk-cashctrl/issues/27).
+
+SNAPSHOT = Path(__file__).resolve().parents[1] / "docs" / "upstream"
+ONLY_A_GET = "a GET is recorded only for a path the snapshot documents as a GET alone"
+
+
+def endpoint_block(method: str, path: str, fence: str = "```") -> str:
+    """One operation's ``#### Endpoint`` block, as ``scripts/refresh_upstream.py`` writes it."""
+    return f"#### Endpoint\n\n{fence}\n{method} /api/v1/{path}\n{fence}\n"
+
+
+def test_the_documented_method_comes_from_each_endpoint_block(tmp_path: Path) -> None:
+    """Only an ``#### Endpoint`` block counts: a curl example or a loose line does not."""
+    recorder = load_recorder()
+    (tmp_path / "thing.md").write_text(
+        "### List things\n\n"
+        + endpoint_block("GET", "thing/list.json")
+        + "\n#### Example\n\n```\ncurl -X POST https://x.example/api/v1/thing/list.json\n```\n\n"
+        + endpoint_block("POST", "thing/create.json", fence="````")
+        + "\nGET /api/v1/thing/create.json\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "other.md").write_text(
+        endpoint_block("POST", "other/both.json") + "\n" + endpoint_block("GET", "other/both.json"),
+        encoding="utf-8",
+    )
+    assert recorder.documented_methods(tmp_path) == {
+        "thing/list.json": frozenset({"GET"}),
+        "thing/create.json": frozenset({"POST"}),
+        "other/both.json": frozenset({"GET", "POST"}),
+    }
+
+
+def test_every_endpoint_block_of_the_snapshot_is_read() -> None:
+    """One path per block, none left unread; the eleven write paths are POSTs upstream."""
+    recorder = load_recorder()
+    assert recorder.UPSTREAM == SNAPSHOT
+    documented = recorder.documented_methods(SNAPSHOT)
+    blocks = sum(
+        len(re.findall(r"(?m)^#### Endpoint$", path.read_text(encoding="utf-8")))
+        for path in SNAPSHOT.glob("*.md")
+    )
+    assert blocks > 300
+    assert len(documented) == blocks
+    assert set(documented.values()) == {frozenset({"GET"}), frozenset({"POST"})}
+    for endpoint in ELEVEN:
+        assert documented[endpoint] == frozenset({"POST"}), endpoint
+
+
+def test_every_committed_fixture_was_recorded_with_its_documented_method() -> None:
+    documented = load_recorder().documented_methods(SNAPSHOT)
+    fixtures = sorted((Path(__file__).parent / "fixtures").glob("*/*.json"))
+    assert fixtures
+    for path in fixtures:
+        request = json.loads(path.read_text(encoding="utf-8"))["request"]
+        endpoint = httpx.URL(request["url"]).path.removeprefix("/api/v1/")
+        assert documented.get(endpoint) == frozenset({request["method"]}), path.name
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "account/create.json",
+        "order/bookentry/create.json",
+        "order/bookentry/update.json",
+        "order/bookentry/delete.json",
+        "order/continue.json",
+        "fiscalperiod/switch.json",
+        "journal/update_attachments.json",
+        "person/categorize.json",
+        "order/document/mail.json",
+    ],
+)
+@pytest.mark.parametrize("method", [[], ["--method", "get"]])
+def test_a_get_to_a_path_the_snapshot_documents_as_a_post_is_refused(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+    method: list[str],
+) -> None:
+    """Whether upstream acts on a GET to a POST path is unverified, so none is sent."""
+    assert recorder.main([endpoint, "get", *method, "id=1"]) == 1
+    assert not respx_mock.calls, "refused before any request"
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    assert capsys.readouterr().out == (
+        f"not recorded: docs/upstream/ documents {endpoint} as POST: {ONLY_A_GET}\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "endpoint", ["order/continue_as.json", "account/unknown/list.json", "journal/read_all.json"]
+)
+def test_a_get_to_a_path_the_snapshot_does_not_document_is_refused(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+) -> None:
+    """Fails closed: a path without an Endpoint block has no method the recorder can trust."""
+    assert recorder.main([endpoint, "get"]) == 1
+    assert not respx_mock.calls, "refused before any request"
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    assert capsys.readouterr().out == (
+        f"not recorded: {endpoint} is not in docs/upstream/: {ONLY_A_GET}\n"
+    )
+
+
+def test_the_refusal_follows_the_snapshot_not_a_list(
+    recorder: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A refreshed snapshot moves the refusal with it; two methods for one path refuse a GET."""
+    snapshot = tmp_path / "upstream"
+    snapshot.mkdir()
+    (snapshot / "account.md").write_text(
+        "\n".join(
+            (
+                endpoint_block("POST", "account/list.json"),
+                endpoint_block("GET", "account/create.json"),
+                endpoint_block("GET", "account/read.json"),
+                endpoint_block("POST", "account/read.json"),
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(recorder, "UPSTREAM", snapshot)
+    assert recorder.refusal("GET", "account/create.json") is None
+    assert recorder.refusal("GET", "account/list.json") == (
+        f"docs/upstream/ documents account/list.json as POST: {ONLY_A_GET}"
+    )
+    assert recorder.refusal("GET", "account/read.json") == (
+        f"docs/upstream/ documents account/read.json as GET and POST: {ONLY_A_GET}"
+    )
+    assert recorder.refusal("GET", "currency/list.json") == (
+        f"currency/list.json is not in docs/upstream/: {ONLY_A_GET}"
     )
 
 
