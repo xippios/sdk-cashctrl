@@ -26,7 +26,14 @@ described in ``docs/demo-org.md``: invented companies on placeholder streets,
 recorded. These policies stand all the same; every refusal writes nothing, says why,
 never shows a value, and exits with status 1:
 
-- GET, and POST for the eleven write paths only. ``--method POST`` is allowed for
+- GET for what the snapshot documents as a GET, and POST for the eleven write paths
+  only. A GET is sent only to a path whose Endpoint block in ``docs/upstream/``
+  (``UPSTREAM``) reads ``GET`` and nothing else (``documented_methods``): a path the
+  snapshot documents as a POST (``account/create.json``,
+  ``order/bookentry/create.json``, ``fiscalperiod/switch.json``) or does not document
+  at all is refused before a request is sent, since whether upstream acts on a GET to
+  a POST path is unverified (https://github.com/xippios/sdk-cashctrl/issues/27); a
+  refreshed snapshot moves the refusal with it. ``--method POST`` is allowed for
   exactly the operations this package's write tools call (``WRITE_PATHS``):
   ``journal/create.json``, ``journal/update.json``, ``journal/delete.json``,
   ``person/create.json``, ``person/update.json``, ``person/delete.json``,
@@ -36,8 +43,8 @@ never shows a value, and exits with status 1:
   ``application/x-www-form-urlencoded; charset=UTF-8``). Every other POST
   (``order/continue.json``, ``account/create.json``, ``order/bookentry/create.json``,
   a POST to a list) and every other method is refused before a request is sent, and so
-  are a GET to one of the write paths (a write is recorded as a POST or not at all; the
-  general case is queue row 245) and a ``create.json`` whose pairs do not carry the
+  are a GET to one of the write paths (a write is recorded as a POST or not at all) and
+  a ``create.json`` whose pairs do not carry the
   marker ``xippios-live`` (``MARK``) in a value, ``order/payment/create.json`` excepted,
   whose orders are the marker: a write records a marked record, a change to it or its
   delete, and nothing else.
@@ -145,6 +152,13 @@ from xippios.cashctrl.models import is_identifier_key
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
+UPSTREAM = ROOT / "docs" / "upstream"
+"""The snapshot of the upstream documentation, whose Endpoint blocks give each path's method."""
+_ENDPOINT_BLOCK = re.compile(
+    r"^#### Endpoint\n\n(?P<fence>`{3,})\n(?P<method>[A-Z]+) /api/v1/(?P<path>\S+)\n(?P=fence)$",
+    re.MULTILINE,
+)
+"""One operation's Endpoint block as ``scripts/refresh_upstream.py`` writes it."""
 REPLAY_HOST = "demo.cashctrl.com"
 WRONG_KEY = "not-a-valid-key"  # pragma: allowlist secret (a deliberately invalid key)
 KEY_LIKE = re.compile(r"api[_-]?key|token|secret|authorization|password|hash", re.IGNORECASE)
@@ -268,7 +282,10 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--method",
         default="GET",
-        help="HTTP method: GET, or POST for one of the eleven write paths the write tools call",
+        help=(
+            "HTTP method: GET for a path docs/upstream/ documents as a GET, or POST for one "
+            "of the eleven write paths the write tools call"
+        ),
     )
     parser.add_argument(
         "--wrong-key", action="store_true", help=f"send {WRONG_KEY!r} instead of the key"
@@ -315,12 +332,29 @@ def is_write(method: str) -> bool:
     return method.upper() == "POST"
 
 
+def documented_methods(snapshot: Path) -> dict[str, frozenset[str]]:
+    """Each path the snapshot documents, with its methods: ``{"account/create.json": {"POST"}}``.
+
+    Read from the ``#### Endpoint`` block of every operation in ``snapshot/*.md``, its one
+    line ``POST /api/v1/account/create.json``; a curl example or any other line counts for
+    nothing. A path the blocks name twice keeps both methods, and ``refusal`` then refuses
+    its GET.
+    """
+    methods: dict[str, set[str]] = {}
+    for page in sorted(snapshot.glob("*.md")):
+        for block in _ENDPOINT_BLOCK.finditer(page.read_text(encoding="utf-8")):
+            methods.setdefault(block["path"], set()).add(block["method"])
+    return {path: frozenset(found) for path, found in methods.items()}
+
+
 def refusal(method: str, endpoint: str) -> str | None:
     """Why the request must not be sent at all, else ``None``.
 
     Refused: a method other than GET and POST; a POST to anything but ``WRITE_PATHS``;
-    a GET to one of ``WRITE_PATHS`` (queue row 245 holds the general case); an endpoint
-    without ``.json``.
+    a GET to one of ``WRITE_PATHS``; an endpoint without ``.json``; a GET to any other
+    path the snapshot does not document as a GET alone (``documented_methods``), since
+    whether upstream acts on a GET to a POST path is unverified
+    (https://github.com/xippios/sdk-cashctrl/issues/27).
     """
     if method.upper() not in ("GET", "POST"):
         return (
@@ -338,6 +372,16 @@ def refusal(method: str, endpoint: str) -> str | None:
             f"only .json endpoints are recorded, not {endpoint}: one without the extension "
             "answers a bare number or a document, and an export is a file"
         )
+    if not is_write(method):
+        documented = documented_methods(UPSTREAM).get(endpoint, frozenset())
+        only_a_get = "a GET is recorded only for a path the snapshot documents as a GET alone"
+        if not documented:
+            return f"{endpoint} is not in docs/upstream/: {only_a_get}"
+        if documented != {"GET"}:
+            return (
+                f"docs/upstream/ documents {endpoint} as {' and '.join(sorted(documented))}: "
+                f"{only_a_get}"
+            )
     return None
 
 
