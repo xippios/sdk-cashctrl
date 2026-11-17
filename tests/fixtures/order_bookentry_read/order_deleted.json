@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-11-17T18:14:47.842982Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/order/bookentry/read.json?id=150"
+  },
+  "response": {
+    "body": "{\"success\":false,\"errorMessage\":\"This book entry does not exist.\",\"data\":null}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 17 Nov 2026 18:14:47 GMT"
+      ],
+      [
+        "etag",
+        "\"1794633337004\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

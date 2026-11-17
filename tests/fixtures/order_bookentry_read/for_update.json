@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-11-17T18:13:56.875280Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/order/bookentry/read.json?id=146"
+  },
+  "response": {
+    "body": "{\"success\":true,\"data\":{\"id\":146,\"created\":\"2026-11-17 19:13:50.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-11-17 19:13:50.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"templateId\":null,\"orderId\":70,\"accountId\":3,\"debitId\":null,\"creditId\":null,\"taxId\":null,\"currencyId\":null,\"importEntryId\":null,\"type\":\"MANUAL\",\"date\":\"2026-10-24 00:00:00.0\",\"description\":\"xippios-live payment\",\"amount\":50,\"currencyRate\":null,\"reference\":null,\"allocations\":[],\"name\":\"\",\"original\":false,\"costCenterNumbers\":\"\",\"rows\":[{\"fcDebit\":50,\"fcCredit\":0,\"acDebit\":50,\"acCredit\":0,\"dcDebit\":50,\"dcCredit\":0,\"fcTax\":0,\"acTax\":0,\"dcTax\":0,\"taxPercentage\":null,\"accountName\":\"2000 <values><de>Kreditoren</de><en>Accounts payable</en><fr>Cr\u00e9anciers</fr><it>Creditori</it></values>\",\"accountId\":9,\"isTaxed\":false,\"isTax\":false},{\"fcDebit\":0,\"fcCredit\":50,\"acDebit\":0,\"acCredit\":50,\"dcDebit\":0,\"dcCredit\":50,\"fcTax\":0,\"acTax\":0,\"dcTax\":0,\"taxPercentage\":null,\"accountName\":\"1020 <values><de>Bank</de><en>Bank account</en><fr>Compte courant</fr><it>Conto corrente</it></values>\",\"accountId\":3,\"isTaxed\":false,\"isTax\":false}],\"defaultCurrencyAmount\":50,\"separate\":false,\"taxAmount\":0,\"debitName\":\"2000 <values><de>Kreditoren</de><en>Accounts payable</en><fr>Cr\u00e9anciers</fr><it>Creditori</it></values>\",\"creditName\":\"1020 <values><de>Bank</de><en>Bank account</en><fr>Compte courant</fr><it>Conto corrente</it></values>\",\"netAmount\":50,\"isAllowTax\":true}}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 17 Nov 2026 18:13:56 GMT"
+      ],
+      [
+        "etag",
+        "\"1794633337004-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

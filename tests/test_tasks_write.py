@@ -17,6 +17,12 @@ status ids from the recorded categories (``order_category_list/default`` and
 ``purchase``), never a guess. Their fixtures of 2026-10-29 record the marked purchase
 order 26 (created and deleted through the write tools, not recorded): its status set,
 its payment as ``PAIN`` refused and as ``CASH_PDF`` created.
+
+The book entries (https://github.com/xippios/sdk-cashctrl/issues/43) record on 2026-11-17
+the marked purchase order 70 (created and deleted through the write tools, not
+recorded): its book entry 146 booked, read, updated, read back and deleted, and the entry
+150, booked on it through the create tool, read after the order's delete. The entry the
+seeded purchase order 5 booked from its items is ``order_bookentry_read/generated``.
 """
 
 import inspect
@@ -61,6 +67,7 @@ from xippios.cashctrl.models import (
     JournalEntryDetailProjection,
     JournalItemInput,
     ListResponse,
+    OrderBookEntry,
     OrderCategory,
     OrderDetail,
     OrderItemInput,
@@ -145,6 +152,7 @@ def test_every_write_task_returns_a_preview_or_a_result(task: Callable[..., Any]
         JournalEntryDetailProjection,
         PersonDetailProjection,
         OrderDetail,
+        OrderBookEntry,
     )
     assert result is WriteResult
 
@@ -249,12 +257,18 @@ async def assert_write_tools(
 async def test_the_write_server_serves_write_tasks_only() -> None:
     """Conventions §8: a write server, its tools exactly the write tasks, confirm last.
 
-    So the organisation list, a reference tool, stays on the read server. Eleven write
+    So the organisation list, a reference tool, stays on the read server. Fourteen write
     tasks: create, update and delete for journal entries, persons and orders, an order's
-    status and an order's payment (G5 (8) of 2026-10-28).
+    status and an order's payment (G5 (8) of 2026-10-28), and create, update and delete
+    for an order's book entries (https://github.com/xippios/sdk-cashctrl/issues/43).
     """
-    assert len(WRITE_TASKS) == 11
+    assert len(WRITE_TASKS) == 14
     assert {"update_order_status", "create_order_payment"} <= WRITE_TASKS.keys()
+    assert {
+        "create_order_book_entry",
+        "update_order_book_entry",
+        "delete_order_book_entry",
+    } <= WRITE_TASKS.keys()
     await assert_write_tools(
         write_server,
         list(WRITE_TASKS.values()),
@@ -1037,12 +1051,19 @@ UPDATE_TABLES: dict[str, dict[str, str]] = {
     "update_journal_entry": tasks_write.JOURNAL_UPDATE,
     "update_person": tasks_write.PERSON_UPDATE,
     "update_order": tasks_write.ORDER_UPDATE,
+    "update_order_book_entry": tasks_write.BOOK_ENTRY_UPDATE,
 }
 """Each update task's table of the parameters its ``update.json`` documents."""
 UPDATES = [getattr(tasks_write, name) for name in UPDATE_TABLES]
+NUMBERED = [
+    getattr(tasks_write, name)
+    for name, table in UPDATE_TABLES.items()
+    if "sequence_number_id" in table
+]
+"""The updates whose ``update.json`` documents ``sequenceNumberId``; a book entry's does not."""
 
 
-@pytest.mark.parametrize("task", UPDATES, ids=lambda t: t.__name__)
+@pytest.mark.parametrize("task", NUMBERED, ids=lambda t: t.__name__)
 def test_clearing_a_parameter_that_is_never_sent_is_refused(
     respx_mock: respx.MockRouter, task: Callable[..., Any]
 ) -> None:
@@ -1100,6 +1121,12 @@ def test_the_update_takes_every_documented_parameter_but_the_unsent_from_the_rec
     assert set(tasks_write.ORDER_UPDATE) - set(order_values) - set(order_stored) == set(
         tasks_write._UNSENT
     )
+    book_entry = OrderBookEntry.model_validate(
+        recorded_read(fixtures_dir, "order_bookentry_read", "generated")["data"]
+    )
+    entry_values, entry_stored = tasks_write._book_entry_values(book_entry)
+    assert set(tasks_write.BOOK_ENTRY_UPDATE) == set(entry_values), "nothing it cannot derive"
+    assert set(entry_stored) == {"allocations"}, "not an update parameter, so never sent"
 
 
 def test_update_person_refuses_an_address_it_cannot_carry(
@@ -1893,6 +1920,379 @@ def test_the_status_and_payment_wrappers_build_upstreams_fields() -> None:
     ) == {"date": "2026-10-24", "orderIds": "3,5", "amount": "12.5", "isCombine": "true"}
 
 
+# Order book entries ------------------------------------------------------------------
+
+GENERATED_ENTRY = 5
+"""The entry the seeded purchase order 5 booked from its items (``order_bookentry_read``)."""
+
+
+def test_create_order_book_entry_previews_the_payload_without_a_request(
+    respx_mock: respx.MockRouter,
+) -> None:
+    result = tasks_write.create_order_book_entry(
+        DEMO,
+        3,
+        [ORDER, 21],
+        amount=Decimal("50.00"),
+        currency_id=2,
+        currency_rate=Decimal("0.95"),
+        date=DAY,
+        description="Zahlung",
+        reference="ZA-1",
+        tax_id=9,
+        template_id=4,
+    )
+    assert not respx_mock.calls, "a create's preview sends nothing"
+    preview = preview_of(result)
+    assert preview.endpoint == "order/bookentry/create.json"
+    assert list(preview.payload.items()) == [
+        ("accountId", "3"),
+        ("orderIds", f"{ORDER},21"),
+        ("amount", "50.00"),
+        ("currencyId", "2"),
+        ("currencyRate", "0.95"),
+        ("date", "2026-10-24"),
+        ("description", "Zahlung"),
+        ("reference", "ZA-1"),
+        ("taxId", "9"),
+        ("templateId", "4"),
+    ], "the order of the parameter table"
+    assert (preview.before, preview.changes) == (None, None)
+    assert (result.meta.endpoint, result.meta.tenant) == ("order/bookentry/create.json", DEMO)
+    assert result.meta.request == {"org": DEMO}, "the payload is in data, never twice"
+
+
+def test_create_order_book_entry_leaves_upstreams_defaults_to_upstream(
+    respx_mock: respx.MockRouter,
+) -> None:
+    """Without ``amount`` upstream books the order's open amount, in the default currency."""
+    preview = preview_of(tasks_write.create_order_book_entry(DEMO, 3, [ORDER]))
+    assert preview.payload == {"accountId": "3", "orderIds": str(ORDER)}
+    assert not respx_mock.calls
+
+
+@pytest.mark.parametrize("confirm", [False, True])
+@pytest.mark.parametrize("write", ["update", "delete"])
+def test_an_entry_booked_from_the_items_is_refused_after_one_read(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, confirm: bool, write: str
+) -> None:
+    """Upstream: an entry made from the items "cannot be manipulated directly"; never sent.
+
+    The seeded order 5's entry, ``type`` ``GENERATED``, read as recorded.
+    """
+    read = replay_fixture("order_bookentry_read", "generated")
+    sent = respx_mock.post(url__regex=rf"{re.escape(BASE)}/order/bookentry/.*")
+    arguments: dict[str, Any] = {"description": "x"} if write == "update" else {}
+    task = WRITE_TASKS[f"{write}_order_book_entry"]
+    with pytest.raises(InvalidRequestError) as refused:
+        task(DEMO, GENERATED_ENTRY, **arguments, confirm=confirm)
+    assert str(refused.value) == (
+        f"book entry {GENERATED_ENTRY} was booked from its order's items (type GENERATED); "
+        f"upstream documents that such entries cannot be {write}d directly, only by changing "
+        "the order's items with update_order. Nothing was sent"
+    )
+    assert read.call_count == 1, "one read, confirmed or not"
+    assert not sent.called
+
+
+def test_update_order_book_entry_refuses_allocations_it_cannot_send(
+    respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """``update.json`` documents no allocations, which upstream would empty; changed in memory.
+
+    The recorded entry is made a manual one holding an allocation, never observed filled.
+    """
+    body = recorded_read(fixtures_dir, "order_bookentry_read", "generated")
+    body["data"].update(type="MANUAL", allocations=[{"share": 1, "toCostCenterId": 1}])
+    read = serve_read(respx_mock, "order/bookentry/read.json", body)
+    write = respx_mock.post(f"{BASE}/order/bookentry/update.json")
+    with pytest.raises(InvalidRequestError, match="allocations, never observed filled"):
+        tasks_write.update_order_book_entry(DEMO, GENERATED_ENTRY, description="x", confirm=True)
+    assert (read.call_count, write.called) == (1, False)
+
+
+def test_update_order_book_entry_refuses_an_entry_without_its_account(
+    respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """``accountId`` is mandatory: a read without it, changed in memory, stops the update."""
+    body = recorded_read(fixtures_dir, "order_bookentry_read", "generated")
+    body["data"].update(type="MANUAL", accountId=None)
+    serve_read(respx_mock, "order/bookentry/read.json", body)
+    write = respx_mock.post(f"{BASE}/order/bookentry/update.json")
+    with pytest.raises(InvalidRequestError, match="the book entry gives no accountId"):
+        tasks_write.update_order_book_entry(DEMO, GENERATED_ENTRY, description="x")
+    with pytest.raises(InvalidRequestError, match="the book entry gives no accountId"):
+        tasks_write.update_order_book_entry(DEMO, GENERATED_ENTRY, clear=["account_id"])
+    preview = preview_of(tasks_write.update_order_book_entry(DEMO, GENERATED_ENTRY, account_id=3))
+    assert preview.payload["accountId"] == "3", "given, it is sent"
+    assert not write.called
+
+
+@pytest.mark.parametrize(
+    ("call", "message"),
+    [
+        (
+            lambda: tasks_write.create_order_book_entry(DEMO, 3, []),
+            "order_ids takes a list of at least one order id",
+        ),
+        (
+            lambda: tasks_write.create_order_book_entry(DEMO, 3, ORDER),  # type: ignore[arg-type]
+            "order_ids takes a list of at least one order id, e.g. [20], not 20",
+        ),
+        (
+            lambda: tasks_write.create_order_book_entry(DEMO, 3, [ORDER, 0]),
+            "order_ids: an id is a whole number of at least 1, not 0",
+        ),
+        (
+            lambda: tasks_write.update_order_book_entry(DEMO, 0, description="x"),
+            "id must be a whole number of at least 1",
+        ),
+        (
+            lambda: tasks_write.delete_order_book_entry(DEMO, True),
+            "id must be a whole number of at least 1",
+        ),
+        (
+            lambda: tasks_write.update_order_book_entry(DEMO, 31, clear=["sequence_number_id"]),
+            "clear: 'sequence_number_id' is not an update.json parameter here",
+        ),
+        (
+            lambda: tasks_write.update_order_book_entry(DEMO, 31, clear=["orderIds"]),
+            "clear: 'orderIds' is not an update.json parameter here",
+        ),
+        (
+            lambda: tasks_write.update_order_book_entry(
+                DEMO, 31, reference="ZA-2", clear=["reference"]
+            ),
+            "clear: 'reference' is both changed and cleared",
+        ),
+    ],
+)
+def test_book_entry_arguments_are_refused_before_any_request(
+    respx_mock: respx.MockRouter, call: Callable[[], Any], message: str
+) -> None:
+    with pytest.raises(InvalidRequestError, match=re.escape(message)):
+        call()
+    assert not respx_mock.calls
+
+
+@pytest.mark.anyio
+async def test_the_book_entry_tools_take_their_ids() -> None:
+    tools = {tool.name: tool for tool in await write_server.list_tools()}
+    assert tools["cashctrl_create_order_book_entry"].input_schema["required"] == [
+        "org",
+        "account_id",
+        "order_ids",
+    ]
+    assert tools["cashctrl_update_order_book_entry"].input_schema["required"] == ["org", "id"]
+    assert tools["cashctrl_delete_order_book_entry"].input_schema["required"] == ["org", "id"]
+
+
+def test_the_book_entry_wrappers_build_upstreams_fields() -> None:
+    assert api.order_bookentry_fields(account_id=3, order_ids=[5, 6]) == {
+        "accountId": "3",
+        "orderIds": "5,6",
+    }
+    assert api.order_bookentry_fields(
+        id=31, account_id=3, amount=Decimal("12.5"), date=DAY, reference=None
+    ) == {"id": "31", "accountId": "3", "amount": "12.5", "date": "2026-10-24"}
+
+
+@pytest.mark.anyio
+async def test_the_book_entry_read_stays_faithful(replay_fixture: ReplayFixture) -> None:
+    """The read an update and a delete start from: the entry as upstream sends it."""
+    route = replay_fixture("order_bookentry_read", "generated")
+    entry = await api.order_bookentry_read(DEMO, GENERATED_ENTRY)
+    assert isinstance(entry, OrderBookEntry)
+    assert (entry.id, entry.order_id, entry.type, entry.account_id) == (5, 5, "GENERATED", 45)
+    assert (entry.date, entry.amount, entry.tax_id) == (date(2026, 2, 2), Decimal("4650"), 13)
+    assert len(entry.rows) == 3
+    assert route.call_count == 1
+
+
+BOOKED = 70
+"""The marked purchase order the book entry fixtures of 2026-11-17 book on."""
+BOOK_ENTRY = 146
+"""Its book entry, booked, read, updated, read back and deleted for the fixtures."""
+
+
+def book_the_recorded_entry(confirm: bool = False) -> Any:
+    """The call that books ``order_bookentry_create/ok``: 50.00 from the bank (1020, id 3)."""
+    return tasks_write.create_order_book_entry(
+        DEMO,
+        3,
+        [BOOKED],
+        amount=Decimal("50.00"),
+        date=DAY,
+        description="xippios-live payment",
+        confirm=confirm,
+    )
+
+
+def update_the_recorded_entry(confirm: bool = False) -> Any:
+    """The call that sent ``order_bookentry_update/ok``: a new amount and description."""
+    return tasks_write.update_order_book_entry(
+        DEMO,
+        BOOK_ENTRY,
+        amount=Decimal("60.00"),
+        description="xippios-live payment updated",
+        confirm=confirm,
+    )
+
+
+def test_create_order_book_entry_with_confirm_replays_the_recorded_create(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    recorded = recorded_body(fixtures_dir, "order_bookentry_create", "ok")
+    preview = preview_of(book_the_recorded_entry())
+    assert list(preview.payload.items()) == recorded, "the preview is what upstream received"
+    route = replay_fixture("order_bookentry_create", "ok")
+    result = book_the_recorded_entry(confirm=True)
+    assert len(respx_mock.calls) == 1, "no read before a create"
+    assert route.calls.last.request.headers["Content-Type"] == FORM_CONTENT_TYPE
+    assert sent_body(route) == recorded
+    assert isinstance(result.data, WriteResult)
+    assert (result.data.insert_id, result.data.message) == (BOOK_ENTRY, "null saved"), (
+        "upstream's message, as it was sent"
+    )
+    assert result.meta.endpoint == "order/bookentry/create.json"
+    assert result.meta.request == {"org": DEMO, **dict(recorded)}
+
+
+def test_update_order_book_entry_previews_the_whole_entry_after_one_read(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    read = replay_fixture("order_bookentry_read", "for_update")
+    write = respx_mock.post(f"{BASE}/order/bookentry/update.json")
+    preview = preview_of(update_the_recorded_entry())
+    assert (read.call_count, write.called) == (1, False)
+    recorded = recorded_body(fixtures_dir, "order_bookentry_update", "ok")
+    assert list(preview.payload.items()) == recorded, "every parameter the entry gives"
+    assert preview.changes == {"amount": "60.00", "description": "xippios-live payment updated"}
+    assert isinstance(preview.before, OrderBookEntry)
+    assert (preview.before.type, preview.before.order_id, preview.before.amount) == (
+        "MANUAL",
+        BOOKED,
+        Decimal("50"),
+    )
+
+
+def test_update_order_book_entry_with_confirm_reads_then_sends_the_whole_entry(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    read = replay_fixture("order_bookentry_read", "for_update")
+    route = replay_fixture("order_bookentry_update", "ok")
+    result = update_the_recorded_entry(confirm=True)
+    assert (read.call_count, route.call_count) == (1, 1), "one read, then the write"
+    recorded = recorded_body(fixtures_dir, "order_bookentry_update", "ok")
+    assert sent_body(route) == recorded
+    assert isinstance(result.data, WriteResult)
+    assert (result.data.insert_id, result.data.message) == (BOOK_ENTRY, "Book entry saved")
+    assert result.meta.request == {"org": DEMO, **dict(recorded)}
+
+
+def test_the_recorded_update_kept_every_field_it_did_not_change(fixtures_dir: Path) -> None:
+    """``order_bookentry_read/after_update``: the two changed, every other as stored."""
+    before = OrderBookEntry.model_validate(
+        recorded_read(fixtures_dir, "order_bookentry_read", "for_update")["data"]
+    )
+    after = OrderBookEntry.model_validate(
+        recorded_read(fixtures_dir, "order_bookentry_read", "after_update")["data"]
+    )
+    values, _ = tasks_write._book_entry_values(before)
+    changed, _ = tasks_write._book_entry_values(after)
+    assert changed == values | {
+        "amount": Decimal("60"),
+        "description": "xippios-live payment updated",
+    }
+    assert (after.type, after.order_id) == (before.type, before.order_id)
+
+
+def test_update_order_book_entry_clears_what_it_is_told_to(replay_fixture: ReplayFixture) -> None:
+    """A cleared amount is left out, so upstream books the order's open amount."""
+    replay_fixture("order_bookentry_read", "for_update")
+    preview = preview_of(
+        tasks_write.update_order_book_entry(DEMO, BOOK_ENTRY, clear=["amount", "description"])
+    )
+    assert list(preview.payload.items()) == [
+        ("id", str(BOOK_ENTRY)),
+        ("accountId", "3"),
+        ("date", "2026-10-24"),
+    ]
+    assert preview.changes == {"amount": "", "description": ""}
+
+
+def test_delete_order_book_entry_reads_the_entry_then_deletes(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    """The entry is read, confirmed or not; the preview sends no write."""
+    read = replay_fixture("order_bookentry_read", "after_update")
+    write = replay_fixture("order_bookentry_delete", "ok")
+    preview = preview_of(tasks_write.delete_order_book_entry(DEMO, BOOK_ENTRY))
+    assert (read.call_count, write.call_count) == (1, 0)
+    assert isinstance(preview.before, OrderBookEntry)
+    assert (preview.before.description, preview.payload) == (
+        "xippios-live payment updated",
+        {"ids": str(BOOK_ENTRY)},
+    )
+    result = tasks_write.delete_order_book_entry(DEMO, BOOK_ENTRY, confirm=True)
+    assert (read.call_count, write.call_count) == (2, 1)
+    assert sent_body(write) == recorded_body(fixtures_dir, "order_bookentry_delete", "ok")
+    assert isinstance(result.data, WriteResult)
+    assert (result.data.insert_id, result.data.message) == (None, "1 book entry deleted")
+
+
+def test_an_orders_delete_takes_its_manual_entries(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter
+) -> None:
+    """The check of https://github.com/xippios/sdk-cashctrl/issues/44, made once, live.
+
+    The entry 150, booked by the create tool on the marked order 70, read after the
+    order's delete on 2026-11-17: upstream answers that it does not exist.
+    """
+    replay_fixture("order_bookentry_read", "order_deleted")
+    write = respx_mock.post(url__regex=rf"{re.escape(BASE)}/order/bookentry/.*")
+    with pytest.raises(NotFoundError):
+        tasks_write.delete_order_book_entry(DEMO, 150, confirm=True)
+    with pytest.raises(NotFoundError):
+        tasks_write.update_order_book_entry(DEMO, 150, description="x", confirm=True)
+    assert not write.called
+
+
+@pytest.mark.anyio
+async def test_the_book_entry_writes_through_the_write_server(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """The create tool previews without a request and books with ``confirm``; a refusal."""
+    create = replay_fixture("order_bookentry_create", "ok")
+    booking = {
+        "org": DEMO,
+        "account_id": 3,
+        "order_ids": [BOOKED],
+        "amount": "50.00",
+        "date": "2026-10-24",
+        "description": "xippios-live payment",
+    }
+    planned = await mcp_call(write_server, "cashctrl_create_order_book_entry", booking)
+    assert planned["data"]["payload"] == dict(
+        recorded_body(fixtures_dir, "order_bookentry_create", "ok")
+    )
+    assert not respx_mock.calls
+    done = await mcp_call(
+        write_server, "cashctrl_create_order_book_entry", {**booking, "confirm": True}
+    )
+    assert (done["data"]["performed"], done["data"]["insert_id"]) == (True, BOOK_ENTRY)
+    assert create.call_count == 1
+    replay_fixture("order_bookentry_read", "generated")
+    refused = await mcp_call_text(
+        write_server,
+        "cashctrl_delete_order_book_entry",
+        {"org": DEMO, "id": GENERATED_ENTRY, "confirm": True},
+    )
+    assert refused.startswith(
+        "error: InvalidRequestError: book entry 5 was booked from its order's items"
+    )
+
+
 # The confirm gate --------------------------------------------------------------------
 
 NOT_TRUE: list[Any] = ["false", "no", 1, [0], "true", 1.0]
@@ -1939,6 +2339,21 @@ def test_a_status_or_a_payment_writes_only_when_confirm_is_true(
     assert isinstance(status.data, WritePreview)
     assert isinstance(payment.data, WritePreview)
     assert not respx_mock.calls, "no request at all"
+
+
+@pytest.mark.parametrize("confirm", NOT_TRUE, ids=[repr(value) for value in NOT_TRUE])
+def test_a_book_entry_write_writes_only_when_confirm_is_true(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, confirm: Any
+) -> None:
+    read = replay_fixture("order_bookentry_read", "for_update")
+    writes = respx_mock.post(url__regex=rf"{re.escape(BASE)}/order/bookentry/.*")
+    results = [
+        book_the_recorded_entry(confirm=confirm),
+        tasks_write.update_order_book_entry(DEMO, BOOK_ENTRY, description="x", confirm=confirm),
+        tasks_write.delete_order_book_entry(DEMO, BOOK_ENTRY, confirm=confirm),
+    ]
+    assert all(isinstance(result.data, WritePreview) for result in results)
+    assert (read.call_count, writes.called) == (2, False), "the reads only, never a write"
 
 
 @pytest.mark.parametrize("confirm", NOT_TRUE, ids=[repr(value) for value in NOT_TRUE])
@@ -2280,6 +2695,10 @@ WRITE_TOOL_CASES: dict[str, tuple[list[tuple[str, str]], dict[str, Any]]] = {
     "preview of an order update": (
         [("order_read", "for_update")],
         {"tool": "cashctrl_update_order", "id": ORDER, "due_days": 30},
+    ),
+    "preview of a book entry update": (
+        [("order_bookentry_read", "for_update")],
+        {"tool": "cashctrl_update_order_book_entry", "id": BOOK_ENTRY, "description": "x"},
     ),
     "a performed status update": (
         [("order_update_status", "ok")],

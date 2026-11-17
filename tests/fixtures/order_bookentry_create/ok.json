@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-11-17T18:13:50.477378Z",
+  "request": {
+    "body": "accountId=3&orderIds=70&amount=50.00&date=2026-10-24&description=xippios-live+payment",
+    "body_base64": false,
+    "content_type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "method": "POST",
+    "url": "https://demo.cashctrl.com/api/v1/order/bookentry/create.json"
+  },
+  "response": {
+    "body": "{\"success\":true,\"message\":\"null saved\",\"insertId\":146}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 17 Nov 2026 18:13:50 GMT"
+      ],
+      [
+        "etag",
+        "\"1794633337004\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

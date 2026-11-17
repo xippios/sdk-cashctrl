@@ -46,6 +46,17 @@ The first run, on 2026-10-29, recorded ``refusal (HTTP 400, text/plain)``: no fi
 served for the payment of a deleted order; whether upstream keeps the payment itself
 cannot be seen, as the API has no payment read or list.
 
+``create_order_book_entry``, ``update_order_book_entry`` and ``delete_order_book_entry``
+are tested on one marked purchase invoice of a seeded vendor
+(https://github.com/xippios/sdk-cashctrl/issues/43 and
+https://github.com/xippios/sdk-cashctrl/issues/44): created in its category's first
+status, which books its items, an entry of 50.00 booked on it from the bank, the delete
+tool's refusal of the entry the items booked, the entry's amount updated and read back,
+the entry deleted with the delete tool, then the order. An order's delete takes its
+manual entries (checked once, live, on 2026-11-17: ``order_bookentry_read/order_deleted``),
+so the sweep of marked orders leaves no entry behind, and the ``finally`` deletes the
+order alone.
+
 The file tasks tested live write into pytest's temporary directory and assert the file's
 size and content type only: one seeded sales order's document, its id from the list, the
 journal of 2025 as CSV, at most five entries (``limit=5``), and the persons as CSV with
@@ -69,9 +80,12 @@ read and write), 7 for a person (the same without the query, the delete one call
 for an order (sweep, create, the update's preview, two updates as read and write, the
 first without items and the second with, each read back, the delete), 9 for an order's
 status and payment (the purchase categories, sweep, create, the status, its read back,
-the payment, the delete, the purchase orders' journal entries, the download probe) and 2
-for the refused delete of an entry an order booked (the list, the delete's read); 78 in
-all, one more per leftover swept, two for a journal entry.
+the payment, the delete, the purchase orders' journal entries, the download probe), 2
+for the refused delete of an entry an order booked (the list, the delete's read) and 13
+for an order's book entry (the purchase categories, sweep, the order's create, the
+entry's create, the order's entries, the refused delete's read, the update's preview,
+the update as read and write, the read back, the delete as read and write, the order's
+delete); 91 in all, one more per leftover swept, two for a journal entry.
 """
 
 import json
@@ -90,6 +104,7 @@ from xippios.cashctrl.models import (
     Filter,
     JournalEntryDetail,
     JournalEntryDetailProjection,
+    OrderBookEntry,
     OrderCategory,
     OrderDetail,
     PaymentType,
@@ -476,6 +491,12 @@ def order_values(order: OrderDetail) -> dict[str, Any]:
     return values
 
 
+def book_entry_values(entry: OrderBookEntry) -> dict[str, Any]:
+    """The parameters ``update_order_book_entry`` derives from ``entry``."""
+    values, _ = tasks_write._book_entry_values(entry)
+    return values
+
+
 def item_values(order: OrderDetail) -> list[dict[str, Any]]:
     """The order's items as stored, every field but the id upstream gives them anew."""
     return [item.model_dump(exclude={"id"}) for item in order.items]
@@ -830,3 +851,94 @@ async def test_order_status_payment_delete(
     kind = media_type(response.headers.get("content-type"))
     outcome = "file" if response.status_code == 200 and kind != "application/json" else "refusal"
     record_property("payment_download", f"{outcome} (HTTP {response.status_code}, {kind})")
+
+
+async def test_order_book_entry_create_update_delete(
+    demo_org: str, write_ids: dict[str, int]
+) -> None:
+    """A marked purchase invoice: an entry booked on it, updated, read back, deleted.
+
+    The purchase invoice category and its first status, which books the items, come
+    from ``list_order_categories`` (``PURCHASE``), live. The entry books 50.00 from the
+    bank (1020) on the order; the delete tool refuses the entry the items booked
+    (``GENERATED``) after its read; the update changes the amount, and the entry read
+    back holds it, every other field the update derives unchanged. The entry is deleted
+    with the delete tool, then the order (https://github.com/xippios/sdk-cashctrl/issues/44);
+    should an assertion fail first, the ``finally`` deletes the order through the
+    wrapper, which takes its entries with it.
+    """
+    purchase_categories = await tasks.list_order_categories_async(demo_org, type="PURCHASE")
+    (invoice,) = [
+        category
+        for category in purchase_categories.data
+        if "<en>Invoice</en>" in (category.name_singular or "") and not category.is_inactive
+    ]
+    first = invoice.status[0]
+    assert first.is_book, "the purchase invoice's first status books its items"
+    leftovers = await tasks.list_orders_async(
+        demo_org, query=MARK, fiscal_period_id=write_ids["fp2026"], limit=50
+    )
+    for order in leftovers.data:
+        if marked(order.description, order.nr):
+            performed(await tasks_write.delete_order_async(demo_org, order.id, confirm=True))
+    created: int | None = None
+    try:
+        result = await tasks_write.create_order_async(
+            demo_org,
+            associate_id=write_ids["vendor"],
+            category_id=invoice.id,
+            date=DAY,
+            nr=MARK,
+            description=f"{MARK} book entry test",
+            status_id=first.id,
+            items=[
+                {  # type: ignore[list-item]
+                    "account_id": write_ids["purchases"],
+                    "name": f"{MARK} item",
+                    "unit_price": Decimal("100.00"),
+                    "tax_id": write_ids["vn1"],
+                }
+            ],
+            confirm=True,
+        )
+        created = performed(result).insert_id
+        assert isinstance(created, int)
+        booking = await tasks_write.create_order_book_entry_async(
+            demo_org,
+            write_ids["bank"],
+            [created],
+            amount=Decimal("50.00"),
+            date=DAY,
+            description=f"{MARK} payment",
+            confirm=True,
+        )
+        entry = performed(booking).insert_id
+        assert isinstance(entry, int)
+        entries = (await tasks.list_order_book_entries_async(demo_org, created)).data
+        types = {listed.id: listed.type for listed in entries}
+        assert types[entry] == "MANUAL"
+        (generated,) = [listed for listed, kind in types.items() if kind == "GENERATED"]
+        with pytest.raises(InvalidRequestError, match="booked from its order's items"):
+            await tasks_write.delete_order_book_entry_async(demo_org, generated, confirm=True)
+        planned = await tasks_write.update_order_book_entry_async(
+            demo_org, entry, amount=Decimal("60.00")
+        )
+        assert isinstance(planned.data, WritePreview)
+        assert isinstance(planned.data.before, OrderBookEntry)
+        stored = book_entry_values(planned.data.before)
+        assert stored["amount"] == Decimal("50")
+        updated = await tasks_write.update_order_book_entry_async(
+            demo_org, entry, amount=Decimal("60.00"), confirm=True
+        )
+        performed(updated)
+        assert updated.meta.request == {"org": demo_org, **planned.data.payload}
+        read_back = book_entry_values(await api.order_bookentry_read(demo_org, entry))
+        assert read_back["amount"] == Decimal("60")
+        assert derived_except(read_back, "amount") == derived_except(stored, "amount")
+        deleted = await tasks_write.delete_order_book_entry_async(demo_org, entry, confirm=True)
+        assert performed(deleted).message
+        performed(await tasks_write.delete_order_async(demo_org, created, confirm=True))
+        created = None
+    finally:
+        if created is not None:
+            await api.order_delete(demo_org, [created])
