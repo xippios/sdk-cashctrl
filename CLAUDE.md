@@ -341,10 +341,12 @@ replay-tested with a real value.
   asked of upstream. Other reports come back as sent, every key `ssn` or ending in `iban`
   dropped at any depth, in any case (`_report`; sdk-core ADR-0003, amendment 2026-10-26).
 - A task that fetches them deliberately may return them and says so in its docstring.
-  Two files may carry them, at the caller's path, never in a result or a tool
+  Files may carry them, at the caller's path, never in a result or a tool
   (`BULK_TASKS`): `export_persons` names `PERSON_COLUMNS` unless its caller names
   columns, `ssn` or `iban` among them; `download_order_document`'s PDF
-  may carry the organisation's IBAN or QR-IBAN and the recipient's address (QR-bill).
+  may carry the organisation's IBAN or QR-IBAN and the recipient's address (QR-bill);
+  a report file is refused by `get_report_data`'s type rule on the tree read right
+  before it (`_tree_now`), but no key is dropped from a file.
 
 ## Commands
 
@@ -518,19 +520,19 @@ Upstream's documented error shapes go into `classify` in `_client.py`, once; wra
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
 for an unknown id on a `read.json` by `id`; a 404 is an unknown endpoint
-(`UpstreamError`), on a `read.pdf` by `ids` an unknown id (`NotFoundError`, observed
-2026-10-29). Observed shapes say so, with the date, in its docstring.
+(`UpstreamError`), on a `read.pdf` by `ids` or a report download by its id an unknown
+id (`NotFoundError`, observed 2026-10-29 and 2026-11-17). Observed shapes say so, with the date, in its docstring.
 
-Files: the wrappers `<module>_list_csv|xlsx|pdf` and
-`order_document_read_pdf` (conventions §2) call `api/_download.py`'s `download`, which streams
+Files: the wrappers `<module>_list_csv|xlsx|pdf`,
+`order_document_read_pdf` and `report_*_download_*` (conventions §2) call `api/_download.py`'s `download`, which streams
 through core's `download` into a temporary file beside `dest` and renames it there: a
 file lands where the caller says, and nothing is read into a result, held in memory or
 cached. Core writes a 2xx body unread, so `download` reads `Content-Type`
 first: JSON is a refusal sent as HTTP 200, whose head goes through `classify`; the file
 is removed and `dest` left as it was. The recorder never records a binary body or a
 file endpoint, so a file wrapper has no fixture directory: `tests/test_downloads.py`
-mounts synthetic bytes; `test_live.py` downloads one order document and two exports
-and expects an unknown order's refusal.
+mounts synthetic bytes; `test_live.py` downloads one order document, two exports and
+the five report files, and expects an unknown order's and an unknown report's refusal.
 
 ### How to record a fixture
 

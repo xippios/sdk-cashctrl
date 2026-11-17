@@ -131,6 +131,7 @@ __all__ = [
     "ReadResponse",
     "Recurrence",
     "ReportData",
+    "ReportFormat",
     "ReportTreeNode",
     "ServicePeriodInput",
     "TaxCode",
@@ -197,6 +198,10 @@ ExportFormat = Literal["csv", "xlsx", "pdf"]
 """The file a list export writes, the extension of its path: ``list.csv``, ``list.xlsx``,
 ``list.pdf`` ("Export to CSV", "Export to Excel", "Export to PDF" of the journal, account,
 person and order lists)."""
+
+ReportFormat = Literal["pdf", "xlsx"]
+"""The file a report download writes, the extension of its path: ``download.pdf`` and
+``download.xlsx`` ("Download PDF", "Download Excel" of a report element and a collection)."""
 
 
 class ListResponse[T](UpstreamModel):

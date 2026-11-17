@@ -281,17 +281,20 @@ print(done.data.insert_id)  # the new entry's id
 
 ## Files
 
-Five tasks write a file instead of returning records: `download_order_document`, the
-documents of orders as one PDF, and the list exports `export_journal_entries`,
+Eight tasks write a file instead of returning records: `download_order_document`, the
+documents of orders as one PDF; the list exports `export_journal_entries`,
 `export_accounts`, `export_persons` and `export_orders`, each with `format` (`csv`,
-`xlsx` or `pdf`), the filters of the list it mirrors and `columns`. They are Python
+`xlsx` or `pdf`), the filters of the list it mirrors and `columns`; and the report files
+`download_report`, one report of `get_report_tree`, `download_report_collection`, a
+collection of them as one document, each with `format` (`pdf` or `xlsx`) and the period
+`get_report_data` takes, and `download_annual_report`, a PDF. They are Python
 only: no MCP tool and no HTTP route serves them, since no tool hands an agent a file
 path (`BULK_TASKS`, ADR-0019). Each streams the file to `dest`, the path the caller
 gives; nothing is read into the result, kept in memory or cached, and `data` describes
 the file (`path`, `bytes`, `content_type`, `filename`, `retrieved_at`). A refusal
 raises and writes nothing, and a file already at `dest` stays as it was:
 `RequestRejected` for one CashCtrl sends as HTTP 200, `NotFoundError` for an unknown
-order id, which CashCtrl answers with HTTP 404.
+order or report id, which CashCtrl answers with HTTP 404.
 
 - **Cut at 100.** Upstream exports at most `limit` records, 100 when `limit` is left
   out (the account export, like its list, takes no `limit`): read the list task's
@@ -302,6 +305,12 @@ order id, which CashCtrl answers with HTTP 404.
   document is what its recipient gets: an invoice's QR-bill may carry the
   organisation's IBAN or QR-IBAN and the recipient's name and address. Where a file
   goes is the caller's choice.
+- **Reports.** A report file that holds a payroll or people report is refused before
+  its download, by `get_report_data`'s rule (Status below) on the types the report tree
+  shows right then, one request; a collection holding one is refused whole. Anything
+  else in the file is upstream's rendering: no key is dropped from a file. The annual
+  report is the PDF of the collection the tree marks `is_system` (`Jahresbericht`, the
+  balance sheet and the profit and loss by default), refused when none is marked.
 
 ```python
 from pathlib import Path
@@ -314,6 +323,8 @@ journal = tasks.export_journal_entries(
 )
 print(journal.data.path, journal.data.bytes, journal.data.content_type)
 invoice = tasks.download_order_document("demo", [3], Path("RE-2026-103.pdf"))
+balance = tasks.download_report("demo", 1, "xlsx", Path("balance-2025.xlsx"), fiscal_period=2)
+annual = tasks.download_annual_report("demo", Path("annual-report-2025.pdf"), fiscal_period_id=2)
 ```
 
 ## HTTP
@@ -365,6 +376,9 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET account/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_accounts` | none, Python only | available; a file to `dest`; every matching account |
 | `GET person/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_persons` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100; without `ssn` and `iban` unless `columns` names them |
 | `GET order/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_orders` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100 |
+| `GET report/element/download.pdf`, `download.xlsx` (Download PDF, Excel) | `download_report` | none, Python only | available; a file to `dest`; payroll and people reports refused |
+| `GET report/collection/download.pdf`, `download.xlsx` (Download PDF, Excel) | `download_report_collection` | none, Python only | available; a file to `dest`; refused whole when it holds a payroll or people report |
+| `GET report/collection/download_annualreport.pdf` (Download annual report) | `download_annual_report` | none, Python only | available; a PDF to `dest`; refused as its collection would be |
 | `POST journal/create.json`, `update.json`, `delete.json` | `create_journal_entry`, `update_journal_entry`, `delete_journal_entry` | `cashctrl_create_journal_entry`, ... | available on the write server only |
 | `POST person/create.json`, `update.json`, `delete.json` | `create_person`, `update_person`, `delete_person` | `cashctrl_create_person`, ... | available on the write server only |
 | `POST order/create.json`, `update.json`, `delete.json` | `create_order`, `update_order`, `delete_order` | `cashctrl_create_order`, ... | available on the write server only |

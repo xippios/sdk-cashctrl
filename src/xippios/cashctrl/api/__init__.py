@@ -14,13 +14,13 @@ A write wrapper (``*_create``, ``*_update``, ``*_delete``, ``order_update_status
 parameters as upstream names them, so a task can preview exactly what it would send
 (``tasks_write``).
 
-A file wrapper (``*_list_csv``, ``*_list_xlsx``, ``*_list_pdf``, ``order_document_read_pdf``)
-streams the file to a path through ``_download.download`` and returns core's
-``Downloaded``; an export takes its list's query, from ``*_list_params``, with
-``columns`` added by ``export_params``.
+A file wrapper (``*_list_csv``, ``*_list_xlsx``, ``*_list_pdf``, ``order_document_read_pdf``,
+``report_*_download_*``) streams the file to a path through ``_download.download`` and
+returns core's ``Downloaded``; an export takes its list's query, from ``*_list_params``,
+with ``columns`` added by ``export_params``.
 """
 
-from xippios.cashctrl.api._download import export_params
+from xippios.cashctrl.api._download import check_dest, export_params
 from xippios.cashctrl.api._filter import encode_filter
 from xippios.cashctrl.api._form import custom_xml, delete_fields, merge_custom
 from xippios.cashctrl.api.account_category_list import account_category_list
@@ -90,10 +90,20 @@ from xippios.cashctrl.api.person_list_xlsx import person_list_xlsx
 from xippios.cashctrl.api.person_read import person_read
 from xippios.cashctrl.api.person_title_list import person_title_list
 from xippios.cashctrl.api.person_update import person_update
+from xippios.cashctrl.api.report_collection_download_annualreport_pdf import (
+    report_collection_download_annualreport_pdf,
+)
+from xippios.cashctrl.api.report_collection_download_pdf import (
+    report_collection_download_pdf,
+    report_collection_params,
+)
+from xippios.cashctrl.api.report_collection_download_xlsx import report_collection_download_xlsx
 from xippios.cashctrl.api.report_element_data import (
     report_element_data,
     report_element_data_params,
 )
+from xippios.cashctrl.api.report_element_download_pdf import report_element_download_pdf
+from xippios.cashctrl.api.report_element_download_xlsx import report_element_download_xlsx
 from xippios.cashctrl.api.report_tree import report_tree
 from xippios.cashctrl.api.tax_list import tax_list
 
@@ -107,6 +117,7 @@ __all__ = [
     "account_list_pdf",
     "account_list_xlsx",
     "account_read",
+    "check_dest",
     "currency_list",
     "custom_xml",
     "customfield_list",
@@ -167,8 +178,14 @@ __all__ = [
     "person_read",
     "person_title_list",
     "person_update",
+    "report_collection_download_annualreport_pdf",
+    "report_collection_download_pdf",
+    "report_collection_download_xlsx",
+    "report_collection_params",
     "report_element_data",
     "report_element_data_params",
+    "report_element_download_pdf",
+    "report_element_download_xlsx",
     "report_tree",
     "tax_list",
 ]

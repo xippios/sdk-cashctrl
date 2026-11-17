@@ -222,12 +222,36 @@ def test_a_404_on_a_read_pdf_by_ids_is_not_found(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        "/report/element/download.pdf?elementId=999999&fiscalPeriod=2",
+        "/report/element/download.xlsx?elementId=999999&startDate=2025-01-01&language=de",
+        "/report/collection/download.pdf?collectionId=999999",
+        "/report/collection/download.xlsx?collectionId=999999&fiscalPeriod=2",
+    ],
+)
+def test_a_404_on_a_report_download_by_its_id_is_not_found(path: str) -> None:
+    """Observed on 2026-11-17 for an element's PDF and a collection's Excel file."""
+    error = classify(response(path, 404, b"CashCtrl - 404 Not Found", {}))
+    assert isinstance(error, NotFoundError)
+    assert str(error) == (
+        f"CashCtrl: no record has an id asked, HTTP 404 ({path.split('?', 1)[0]})"
+    ), "the path, never the query or the host"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
         "/order/document/read.pdf",
         "/order/document/read.pdf?ids=",
         "/order/document/read.pdf?id=3",
         "/order/document/read.zip?ids=3",
         "/order/read.json?id=3",
         "/journal/list.pdf?limit=5",
+        "/report/element/download.pdf?fiscalPeriod=2",
+        "/report/element/download.pdf?elementId=",
+        "/report/element/download.pdf?collectionId=1",
+        "/report/element/download.xml?elementId=1",
+        "/report/collection/download.pdf?elementId=1",
+        "/report/collection/download_annualreport.pdf?fiscalPeriodId=2",
     ],
 )
 def test_every_other_404_is_an_unknown_endpoint(path: str) -> None:

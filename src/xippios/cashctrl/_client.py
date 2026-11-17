@@ -117,6 +117,13 @@ _BODY_HEADERS = frozenset(
 )
 _READS_BY_ID = {"/read.json": "id", "/read.pdf": "ids"}
 """The reads by id: a path's end and the parameter that names the record or records."""
+_REPORT_DOWNLOADS = {
+    "/report/element/download.pdf": "elementId",
+    "/report/element/download.xlsx": "elementId",
+    "/report/collection/download.pdf": "collectionId",
+    "/report/collection/download.xlsx": "collectionId",
+}
+"""The report downloads this package wraps: a path's end and the parameter naming the report."""
 
 
 def _field_errors(items: Any) -> list[FieldError]:
@@ -144,6 +151,14 @@ def _api_path(url: httpx.URL) -> str:
 def _reads_pdf_by_ids(url: httpx.URL) -> bool:
     """``<...>/read.pdf`` asked for records by non-empty ``ids``, at most ``lang`` besides."""
     return url.path.endswith("/read.pdf") and _reads_by_id(url)
+
+
+def _downloads_report_by_id(url: httpx.URL) -> bool:
+    """A report's PDF or Excel file asked by its non-empty ``elementId`` or ``collectionId``."""
+    for end, name in _REPORT_DOWNLOADS.items():
+        if url.path.endswith(end):
+            return _text(url.params.get(name)) is not None
+    return False
 
 
 def _reads_by_id(url: httpx.URL) -> bool:
@@ -210,15 +225,18 @@ def _status_error(response: httpx.Response) -> XippiosError | None:
     neutral = _without_tenant_host(response)
     error = error_from_response(neutral, source=SOURCE)
     url = response.request.url
-    if isinstance(error, NotFoundError) and _reads_pdf_by_ids(url):
+    if isinstance(error, NotFoundError) and (
+        _reads_pdf_by_ids(url) or _downloads_report_by_id(url)
+    ):
         # Observed on 2026-10-29: order/document/read.pdf answers an id no order has with
-        # a 404; upstream signals absence there (conventions §5).
+        # a 404, and on 2026-11-17 a report download an id no report has; upstream
+        # signals absence there (conventions §5).
         return NotFoundError(
             f"CashCtrl: no record has an id asked, HTTP 404 ({_api_path(url)})", source=SOURCE
         )
     if isinstance(error, NotFoundError):
         # error-handling.md: "404 - Not Found: The requested endpoint doesn't exist." An
-        # absent record is a 200 refusal (classify), or a 404 on a read.pdf by ids above.
+        # absent record is a 200 refusal (classify), or a 404 above.
         return UpstreamError(
             f"{error.message} (the endpoint does not exist upstream)",
             status=404,
@@ -243,7 +261,10 @@ def classify(response: httpx.Response) -> XippiosError | None:
     (``order/document/read.pdf``), which answered an id no order has with HTTP 404
     ("CashCtrl - 404 Not Found") on 2026-10-29 and served the existing order's PDF in
     the same run; it raises ``NotFoundError``, upstream signalling absence (conventions
-    §5), its message naming the path only.
+    §5), its message naming the path only. So does a 404 on a report's
+    ``download.pdf`` or ``download.xlsx`` by ``elementId`` or ``collectionId``, observed
+    on 2026-11-17 for an element and a collection no report has; the annual report's
+    download takes no such id.
 
     Documented refusals: validation errors come back as HTTP 200 with
     ``{"success": false, "errors": [{"field": ..., "message": ...}]}``. They raise

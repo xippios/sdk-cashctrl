@@ -69,12 +69,20 @@ One more asks for the document of an order that does not exist and expects
 2026-10-29), which ``classify`` maps to ``NotFoundError`` on a ``read.pdf`` by ``ids``
 (queue row 235).
 
+The report files (https://github.com/xippios/sdk-cashctrl/issues/45), their ids from the
+tree ``report_tree`` reads once: the balance sheet of 2025 and the system collection
+(``Jahresbericht`` in the seed) each as PDF and as Excel, and the annual report of 2025,
+each download reading the tree first; the payroll collection is refused after that read
+alone, and an element no report has is ``NotFoundError`` (HTTP 404, observed 2026-11-17).
+
 The calls of one run: 33 for the reads (19, 9 for the discovery lists and the reports:
 one each, and the tree ``get_report_data`` reads first, 3 for the book entries of an
 order, with the list of purchase orders they read first, and the history, and 2 for an
 order's document, with the list of sales orders it reads first), 5 for the files (the
 list of sales orders, the order's PDF, the refused PDF of an unknown order, the journal
-export, the person export), 5 lookups (accounts, tax codes, customers, vendors, the
+export, the person export), 14 for the report files (the tree, then a tree and a file
+for each of the five files and the unknown element, and a tree for the refusal), 5
+lookups (accounts, tax codes, customers, vendors, the
 sales categories), 9 for the journal (sweep, create, the sweep's query seeing the new
 entry, the update's preview, the update as read and write, the read back, the delete as
 read and write), 7 for a person (the same without the query, the delete one call), 10
@@ -86,7 +94,7 @@ for the refused delete of an entry an order booked (the list, the delete's read)
 for an order's book entry (the purchase categories, sweep, the order's create, the
 entry's create, the order's entries, the refused delete's read, the update's preview,
 the update as read and write, the read back, the delete as read and write, the order's
-delete); 93 in all, one more per leftover swept, two for a journal entry.
+delete); 107 in all, one more per leftover swept, two for a journal entry.
 """
 
 import json
@@ -111,6 +119,8 @@ from xippios.cashctrl.models import (
     PaymentType,
     PersonDetail,
     PersonDetailProjection,
+    ReportFormat,
+    ReportTreeNode,
     WritePreview,
     WriteResult,
 )
@@ -344,6 +354,88 @@ async def test_the_document_of_an_unknown_order_is_not_found(demo_org: str, tmp_
         await tasks.download_order_document_async(demo_org, [999999], dest)
     assert str(info.value).endswith("(/order/document/read.pdf)")
     assert list(tmp_path.iterdir()) == [], "no file, no temporary file"
+
+
+REPORT_MEDIA: dict[ReportFormat, str] = {
+    "pdf": "application/pdf",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+"""The media types of a report's PDF and Excel file, charset aside (observed 2026-11-17)."""
+
+
+@pytest.fixture(scope="module")
+def report_tree() -> list[ReportTreeNode]:
+    """Every node of the demo organisation's report tree, depth first, read once."""
+
+    def walk(nodes: Sequence[ReportTreeNode]) -> list[ReportTreeNode]:
+        return [each for node in nodes for each in (node, *walk(node.data))]
+
+    assert TENANTS.names() == (DEMO,), "live tests run against the demo organisation alone"
+    return walk(tasks.get_report_tree(DEMO).data)
+
+
+async def test_download_report(
+    demo_org: str, fiscal_periods: dict[str, int], report_tree: list[ReportTreeNode], tmp_path: Path
+) -> None:
+    (balance, *_) = [node for node in report_tree if node.type == "BALANCE"]
+    assert balance.element_id is not None
+    for format, media in REPORT_MEDIA.items():
+        dest = tmp_path / f"balance.{format}"
+        result = await tasks.download_report_async(
+            demo_org, balance.element_id, format, dest, fiscal_period=fiscal_periods["2025"]
+        )
+        assert result.data.bytes == dest.stat().st_size > 0
+        assert media_type(result.data.content_type) == media
+        assert result.meta.endpoint == f"report/element/download.{format}"
+
+
+async def test_download_report_collection(
+    demo_org: str, fiscal_periods: dict[str, int], report_tree: list[ReportTreeNode], tmp_path: Path
+) -> None:
+    (system,) = [node for node in report_tree if not node.leaf and node.is_system]
+    assert system.collection_id is not None
+    for format, media in REPORT_MEDIA.items():
+        dest = tmp_path / f"collection.{format}"
+        result = await tasks.download_report_collection_async(
+            demo_org, system.collection_id, format, dest, fiscal_period=fiscal_periods["2025"]
+        )
+        assert result.data.bytes == dest.stat().st_size > 0
+        assert media_type(result.data.content_type) == media
+        assert result.meta.request["collectionId"] == system.collection_id
+
+
+async def test_download_annual_report(
+    demo_org: str, fiscal_periods: dict[str, int], tmp_path: Path
+) -> None:
+    dest = tmp_path / "annual.pdf"
+    period = fiscal_periods["2025"]
+    result = await tasks.download_annual_report_async(demo_org, dest, fiscal_period_id=period)
+    assert result.data.bytes == dest.stat().st_size > 0
+    assert media_type(result.data.content_type) == "application/pdf"
+    assert result.meta.request == {"org": demo_org, "fiscalPeriodId": period}
+
+
+async def test_the_payroll_collection_is_refused_before_its_download(
+    demo_org: str, report_tree: list[ReportTreeNode], tmp_path: Path
+) -> None:
+    (payroll,) = [
+        node
+        for node in report_tree
+        if not node.leaf and any(child.type == "SALARY_LIST" for child in node.data)
+    ]
+    with pytest.raises(InvalidRequestError, match=r"holds reports of the types .*SALARY_LIST"):
+        await tasks.download_report_collection_async(
+            demo_org, payroll.collection_id or 0, "pdf", tmp_path / "payroll.pdf"
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+async def test_an_unknown_report_is_not_found(demo_org: str, tmp_path: Path) -> None:
+    # Not in the tree, so asked of upstream as given: HTTP 404 (observed 2026-11-17).
+    with pytest.raises(NotFoundError) as info:
+        await tasks.download_report_async(demo_org, 999999, "pdf", tmp_path / "missing.pdf")
+    assert str(info.value).endswith("(/report/element/download.pdf)")
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.fixture(scope="module")

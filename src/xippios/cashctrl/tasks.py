@@ -38,22 +38,25 @@ the end is answered with an empty ``data`` and the same ``total`` (observed on
 every page is collected it leaves out ``limit``, the page size, so the same arguments
 collect the same records again.
 
-The file tasks, ``download_order_document`` and the list exports ``export_*``, are named
-in ``BULK_TASKS``: Python only, no tool and no route (ADR-0019 decision 4). Each streams
-one file to the path its caller gives and returns core's ``Downloaded``; ``meta.endpoint``
-is the file's operation (``journal/list.csv``) and ``meta.retrieved_at`` the time the
-file was complete. A refusal sent as HTTP 200 is raised, never written
-(``api/_download.py``). A file may hold what a projection leaves out, at
-its caller's request or as upstream renders it: the person export names
-``PERSON_COLUMNS`` unless its caller names columns, ``ssn`` or ``iban`` among them
-deliberately, and an invoice's QR-bill may carry the organisation's IBAN or QR-IBAN
-(ADR-0017).
+The file tasks, ``download_order_document``, the list exports ``export_*`` and the
+report files ``download_report``, ``download_report_collection`` and
+``download_annual_report``, are named in ``BULK_TASKS``: Python only, no tool and no
+route (ADR-0019 decision 4). Each streams one file to the path its caller gives and
+returns core's ``Downloaded``; ``meta.endpoint`` is the file's operation
+(``journal/list.csv``) and ``meta.retrieved_at`` the time the file was complete. A
+refusal sent as HTTP 200 is raised, never written (``api/_download.py``). A file may
+hold what a projection leaves out, at its caller's request or as upstream renders it:
+the person export names ``PERSON_COLUMNS`` unless its caller names columns, ``ssn`` or
+``iban`` among them deliberately, and an invoice's QR-bill may carry the organisation's
+IBAN or QR-IBAN (ADR-0017). A report file is refused by ``get_report_data``'s type rule
+on the tree read right before its download (``_tree_now``), but no key is dropped from a
+file.
 """
 
 import os
 import threading
 import weakref
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from datetime import date, datetime
 from typing import Any, TypeGuard, get_args
 
@@ -108,13 +111,17 @@ from xippios.cashctrl.models import (
     PersonProjection,
     PersonTitle,
     ReportData,
+    ReportFormat,
     ReportTreeNode,
     TaxCode,
     is_identifier_key,
 )
 
 __all__ = [
+    "download_annual_report",
     "download_order_document",
+    "download_report",
+    "download_report_collection",
     "export_accounts",
     "export_journal_entries",
     "export_orders",
@@ -149,7 +156,10 @@ __all__ = [
 # A task named here is Python-only: no tool, no route; the adapters skip it (ADR-0019 decision 4).
 BULK_TASKS: frozenset[str] = frozenset(
     {
+        "download_annual_report",
         "download_order_document",
+        "download_report",
+        "download_report_collection",
         "export_accounts",
         "export_journal_entries",
         "export_orders",
@@ -207,6 +217,8 @@ CUSTOM_FIELD_TYPES: tuple[str, ...] = get_args(CustomFieldType)
 """The values of ``type`` on ``customfield/list.json``, the modules: ``JOURNAL``, ``PERSON``, ..."""
 EXPORT_FORMATS: tuple[str, ...] = get_args(ExportFormat)
 """The values of ``format`` on the list exports, their extensions: ``csv``, ``xlsx``, ``pdf``."""
+REPORT_FORMATS: tuple[str, ...] = get_args(ReportFormat)
+"""The values of ``format`` on the report files, their extensions: ``pdf``, ``xlsx``."""
 PERSON_COLUMNS: tuple[str, ...] = tuple(
     field.validation_alias if isinstance(field.validation_alias, str) else name
     for name, field in PersonProjection.model_fields.items()
@@ -1355,6 +1367,34 @@ async def _report_type(org: str, element_id: int) -> str | None:
     return _keep_report_types(client, tree.data).get(element_id)
 
 
+async def _tree_now(org: str) -> list[ReportTreeNode]:
+    """The organisation's report tree as upstream lists it now, kept for ``get_report_data``.
+
+    A report file holds the report as it is when upstream renders it, and a collection's
+    every report in it, which an element's create or update changes; so each report file
+    reads the tree right before its download, one request, where ``get_report_data``
+    reads the tree it keeps (``_report_type``).
+    """
+    client = client_for(org)
+    tree = await api.report_tree(org)
+    _keep_report_types(client, tree.data)
+    return tree.data
+
+
+def _collections(nodes: Sequence[ReportTreeNode]) -> Iterator[ReportTreeNode]:
+    """Every collection of a report tree, at any depth: each node that is no element."""
+    for node in nodes:
+        if node.element_id is None:
+            yield node
+        yield from _collections(node.data)
+
+
+def _refused_types(nodes: Sequence[ReportTreeNode]) -> str:
+    """The refused report types among ``nodes`` and their elements, sorted, each once."""
+    kinds = {kind for kind in _element_types(nodes).values() if kind is not None}
+    return ", ".join(sorted(kind for kind in kinds if _is_refused_report_type(kind)))
+
+
 def _without_identifiers(value: JsonValue) -> JsonValue:
     """``value`` without a key ``models.is_identifier_key`` names, at any depth.
 
@@ -1385,17 +1425,18 @@ def _report(report: ReportData) -> ReportData:
     )
 
 
-def _check_report_arguments(
+def _report_problems(
     *,
-    element_id: object,
+    ids: Mapping[str, object],
     fiscal_period: object,
     start_date: object,
     end_date: object,
     language: object,
     sort: object,
-) -> None:
-    """Refuse a ``get_report_data`` call upstream would answer for another period (ADR-0007).
+) -> list[str]:
+    """What a report's call gets wrong, or upstream would answer for another period (ADR-0007).
 
+    ``ids`` names the report, ``{"element_id": 1}`` or ``{"collection_id": 1}``.
     ``docs/upstream/report.md``, "Read JSON data": ``fiscalPeriod`` "overrides the
     ``startDate`` and ``endDate`` parameter, as these are derived from the fiscal
     period", so upstream would silently ignore dates given with it: the two forms are
@@ -1404,14 +1445,14 @@ def _check_report_arguments(
     ids are whole numbers, the dates ``date`` objects (not a ``datetime``, whose text
     would carry a time), ``language`` and ``sort`` strings. Whether one date may be
     given without the other, and what a start after the end answers, is not documented,
-    so neither is checked.
-
-    Raises:
-        InvalidRequestError: Naming every problem found.
+    so neither is checked. The same parameters, and so the same checks, are those of a
+    report's PDF and Excel file.
     """
-    problems: list[str] = []
-    if not _whole(element_id):
-        problems.append(f"element_id must be a whole number, not {element_id!r}")
+    problems = [
+        f"{name} must be a whole number, not {value!r}"
+        for name, value in ids.items()
+        if not _whole(value)
+    ]
     if fiscal_period is not None and not _whole(fiscal_period):
         problems.append(f"fiscal_period must be a whole number, not {fiscal_period!r}")
     for name, value in (("start_date", start_date), ("end_date", end_date)):
@@ -1425,8 +1466,21 @@ def _check_report_arguments(
             "give fiscal_period or start_date and end_date, not both: upstream derives "
             "the dates from the fiscal period and would ignore the ones given"
         )
+    return problems
+
+
+def _refuse(problems: Sequence[str]) -> None:
+    """Raise ``InvalidRequestError`` naming every problem, when there is one."""
     if problems:
         raise InvalidRequestError("; ".join(problems), source=SOURCE)
+
+
+def _report_refusal(subject: str, task: str) -> InvalidRequestError:
+    """The refusal of a payroll or people report by ``task``: ``subject``, then the rule."""
+    return InvalidRequestError(
+        f"{subject}: {task} refuses {_REFUSED_REPORT_RULE} (personal data, ADR-0017)",
+        source=SOURCE,
+    )
 
 
 async def get_report_data_async(
@@ -1486,13 +1540,15 @@ async def get_report_data_async(
         sort: The column to sort the rows by, a ``dataIndex`` of
             ``properties.columns``, e.g. ``text``.
     """
-    _check_report_arguments(
-        element_id=element_id,
-        fiscal_period=fiscal_period,
-        start_date=start_date,
-        end_date=end_date,
-        language=language,
-        sort=sort,
+    _refuse(
+        _report_problems(
+            ids={"element_id": element_id},
+            fiscal_period=fiscal_period,
+            start_date=start_date,
+            end_date=end_date,
+            language=language,
+            sort=sort,
+        )
     )
     arguments: dict[str, Any] = {
         "end_date": end_date,
@@ -1503,11 +1559,8 @@ async def get_report_data_async(
     }
     report_type = await _report_type(org, element_id)
     if report_type is not None and _is_refused_report_type(report_type):
-        raise InvalidRequestError(
-            f"report element {element_id} is of type {report_type}: get_report_data "
-            f"refuses {_REFUSED_REPORT_RULE} (personal data, ADR-0017)",
-            source=SOURCE,
-        )
+        subject = f"report element {element_id} is of type {report_type}"
+        raise _report_refusal(subject, "get_report_data")
     sent = api.report_element_data_params(element_id, **arguments)
     report = _report(await api.report_element_data(org, element_id, **arguments))
     meta = _meta(org, "report/element/data.json", sent, total=report.total)
@@ -1994,6 +2047,220 @@ async def export_orders_async(
     return await _export(org, format, dest, query_sent, path="order/list", wrappers=_ORDER_EXPORTS)
 
 
+ReportFileWrapper = Callable[..., Awaitable[Downloaded]]
+"""A report file's wrapper: ``org``, the report's id, ``dest``, then the period by name."""
+
+_ELEMENT_FILES: Mapping[str, ReportFileWrapper] = {
+    "pdf": api.report_element_download_pdf,
+    "xlsx": api.report_element_download_xlsx,
+}
+_COLLECTION_FILES: Mapping[str, ReportFileWrapper] = {
+    "pdf": api.report_collection_download_pdf,
+    "xlsx": api.report_collection_download_xlsx,
+}
+_SYSTEM_UNMARKED = (
+    "the report tree marks no collection as the system collection the annual report "
+    "prints, so its reports cannot be checked"
+)
+"""Why ``download_annual_report`` refuses a tree without its collection: it fails closed."""
+
+
+def _check_report_file(
+    format: object, ids: Mapping[str, object], period: Mapping[str, Any]
+) -> None:
+    """Refuse a report file's ``format``, its ``ids`` and its ``period`` before anything is sent.
+
+    ``period`` holds ``fiscal_period``, ``start_date``, ``end_date``, ``language`` and
+    ``sort``, the parameters ``get_report_data`` takes and checks.
+    """
+    problems = (
+        []
+        if format in REPORT_FORMATS
+        else [f"format must be {' or '.join(REPORT_FORMATS)}, not {format!r}"]
+    )
+    _refuse(problems + _report_problems(ids=ids, **period))
+
+
+async def download_report_async(
+    org: str,
+    element_id: int,
+    format: ReportFormat,
+    dest: str | os.PathLike[str],
+    *,
+    fiscal_period: int | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    language: str | None = None,
+    sort: str | None = None,
+) -> Result[Downloaded]:
+    """Download one report, such as a balance sheet, as a PDF or Excel file at ``dest``.
+
+    The file is upstream's ``report/element/download.pdf`` or ``download.xlsx`` of the
+    element ``element_id`` of ``get_report_tree``, for the fiscal period
+    ``fiscal_period`` or for ``start_date`` to ``end_date``, as ``get_report_data`` takes
+    them. It is streamed to ``dest``, the path the caller gives, and is never read into
+    a result, kept in memory or cached; no MCP tool or HTTP route serves it
+    (``BULK_TASKS``). ``data`` describes the file: ``path``, ``bytes``,
+    ``content_type``, ``filename`` (upstream's, e.g. ``Balance 2025.pdf``) and
+    ``retrieved_at``.
+
+    It refuses payroll and people reports as ``get_report_data`` does, by the type the
+    report tree shows, read right before the download. The file is upstream's
+    rendering, and no key is dropped from a file: the identifier drop of
+    ``get_report_data`` cannot reach into a PDF or a workbook. An element the tree does
+    not list is asked of upstream as given: an id no report has raises
+    ``NotFoundError`` (HTTP 404, observed on 2026-11-17), a refusal ``RequestRejected``;
+    either way nothing is written, and a file already at ``dest`` stays as it was.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        element_id: The report, an ``element_id`` from ``get_report_tree``, e.g. ``1``.
+        format: The file: ``pdf`` or ``xlsx`` (Excel).
+        dest: The file to write, e.g. ``"balance-2025.pdf"``, in a directory that exists;
+            a file there is replaced once the download is complete.
+        fiscal_period: The fiscal period, an ``id`` from ``list_fiscal_periods``, e.g.
+            ``2``; not together with ``start_date`` or ``end_date``.
+        start_date: The first day of the report period, e.g. ``2025-01-01``.
+        end_date: The last day of the report period, e.g. ``2025-12-31``.
+        language: The language of the report, e.g. ``en``; upstream lists no values.
+        sort: The column to sort the rows by, e.g. ``text``.
+    """
+    period: dict[str, Any] = {
+        "end_date": end_date,
+        "fiscal_period": fiscal_period,
+        "language": language,
+        "sort": sort,
+        "start_date": start_date,
+    }
+    _check_report_file(format, {"element_id": element_id}, period)
+    api.check_dest(dest)
+    report_type = _element_types(await _tree_now(org)).get(element_id)
+    if report_type is not None and _is_refused_report_type(report_type):
+        subject = f"report element {element_id} is of type {report_type}"
+        raise _report_refusal(subject, "download_report")
+    downloaded = await _ELEMENT_FILES[format](org, element_id, dest, **period)
+    sent = api.report_element_data_params(element_id, **period)
+    endpoint = f"report/element/download.{format}"
+    meta = _meta(org, endpoint, sent, retrieved_at=downloaded.retrieved_at)
+    return Result(data=downloaded, meta=meta)
+
+
+async def download_report_collection_async(
+    org: str,
+    collection_id: int,
+    format: ReportFormat,
+    dest: str | os.PathLike[str],
+    *,
+    fiscal_period: int | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    language: str | None = None,
+    sort: str | None = None,
+) -> Result[Downloaded]:
+    """Download a report collection, its reports in one PDF or Excel file, at ``dest``.
+
+    A collection of ``get_report_tree``, such as ``Jahresbericht`` (the balance sheet and
+    the profit and loss), is one document of the reports in it: upstream's
+    ``report/collection/download.pdf``, or ``download.xlsx`` with a worksheet for each
+    report, for the fiscal period ``fiscal_period`` or for ``start_date`` to
+    ``end_date``. It is streamed to ``dest``, the path the caller gives, and is never
+    read into a result, kept in memory or cached; no MCP tool or HTTP route serves it
+    (``BULK_TASKS``). ``data`` describes the file: ``path``, ``bytes``,
+    ``content_type``, ``filename`` and ``retrieved_at``.
+
+    It refuses payroll and people reports as ``get_report_data`` does: a collection that
+    holds one, by the types the report tree shows, read right before the download, is
+    refused whole. The file is upstream's rendering, and no key is dropped from a file.
+    A collection the tree does not list is asked of upstream as given: an id no
+    collection has raises ``NotFoundError`` (HTTP 404, observed on 2026-11-17), a
+    refusal ``RequestRejected``; either way nothing is written, and a file already at
+    ``dest`` stays as it was.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        collection_id: The collection, the ``collection_id`` of a node of
+            ``get_report_tree`` that has no ``element_id``, e.g. ``1``.
+        format: The file: ``pdf`` or ``xlsx`` (Excel).
+        dest: The file to write, e.g. ``"annual-2025.pdf"``, in a directory that exists;
+            a file there is replaced once the download is complete.
+        fiscal_period: The fiscal period, an ``id`` from ``list_fiscal_periods``, e.g.
+            ``2``; not together with ``start_date`` or ``end_date``.
+        start_date: The first day of the report period, e.g. ``2025-01-01``.
+        end_date: The last day of the report period, e.g. ``2025-12-31``.
+        language: The language of the reports, e.g. ``en``; upstream lists no values.
+        sort: The column to sort the rows by, e.g. ``text``.
+    """
+    period: dict[str, Any] = {
+        "end_date": end_date,
+        "fiscal_period": fiscal_period,
+        "language": language,
+        "sort": sort,
+        "start_date": start_date,
+    }
+    _check_report_file(format, {"collection_id": collection_id}, period)
+    api.check_dest(dest)
+    tree = await _tree_now(org)
+    held = [node for node in _collections(tree) if node.collection_id == collection_id]
+    refused = _refused_types(held)
+    if refused:
+        subject = f"report collection {collection_id} holds reports of the types {refused}"
+        raise _report_refusal(subject, "download_report_collection")
+    downloaded = await _COLLECTION_FILES[format](org, collection_id, dest, **period)
+    sent = api.report_collection_params(collection_id, **period)
+    endpoint = f"report/collection/download.{format}"
+    meta = _meta(org, endpoint, sent, retrieved_at=downloaded.retrieved_at)
+    return Result(data=downloaded, meta=meta)
+
+
+async def download_annual_report_async(
+    org: str, dest: str | os.PathLike[str], *, fiscal_period_id: int | None = None
+) -> Result[Downloaded]:
+    """Download the annual report of a fiscal period as a PDF file at ``dest``.
+
+    The file is upstream's ``report/collection/download_annualreport.pdf``, by default
+    the balance sheet and the profit and loss: the PDF of the collection the report tree
+    marks ``is_system`` (``Jahresbericht``), the same file but for its creation time
+    (observed on 2026-11-17). It is streamed to ``dest``, the path the caller gives,
+    and is never read into a result, kept in memory or cached; no MCP tool or HTTP route
+    serves it (``BULK_TASKS``). ``data`` describes the file: ``path``, ``bytes``,
+    ``content_type``, ``filename`` and ``retrieved_at``.
+
+    It refuses payroll and people reports as ``get_report_data`` does: when that
+    collection holds one, by the types the report tree shows, read right before the
+    download, or when the tree marks no collection system, so that what the report
+    holds cannot be checked. The file is upstream's rendering, and no key is dropped
+    from a file. Without ``fiscal_period_id``, and for an id no fiscal period has,
+    upstream answers with the API user's current period's report (observed on
+    2026-11-17). A refusal raises ``RequestRejected``; nothing is written then, and a
+    file already at ``dest`` stays as it was.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        dest: The PDF to write, e.g. ``"annual-report-2025.pdf"``, in a directory that
+            exists; a file there is replaced once the download is complete.
+        fiscal_period_id: The fiscal period, an ``id`` from ``list_fiscal_periods``,
+            e.g. ``2``; the API user's current period when left out.
+    """
+    if fiscal_period_id is not None and not _whole(fiscal_period_id):
+        _refuse([f"fiscal_period_id must be a whole number, not {fiscal_period_id!r}"])
+    api.check_dest(dest)
+    system = [node for node in _collections(await _tree_now(org)) if node.is_system]
+    if not system:
+        raise _report_refusal(_SYSTEM_UNMARKED, "download_annual_report")
+    refused = _refused_types(system)
+    if refused:
+        names = ", ".join(str(node.collection_id) for node in system)
+        subject = f"the annual report, report collection {names}, holds reports of the types"
+        raise _report_refusal(f"{subject} {refused}", "download_annual_report")
+    downloaded = await api.report_collection_download_annualreport_pdf(
+        org, dest, fiscal_period_id=fiscal_period_id
+    )
+    sent = {} if fiscal_period_id is None else {"fiscalPeriodId": fiscal_period_id}
+    endpoint = "report/collection/download_annualreport.pdf"
+    meta = _meta(org, endpoint, sent, retrieved_at=downloaded.retrieved_at)
+    return Result(data=downloaded, meta=meta)
+
+
 LIST_ORGANISATIONS_DOC = """List the organisations this server can reach, by name.
 
 On a server that serves every declared organisation, every other tool takes one of these
@@ -2035,3 +2302,6 @@ export_journal_entries = sync(export_journal_entries_async)
 export_accounts = sync(export_accounts_async)
 export_persons = sync(export_persons_async)
 export_orders = sync(export_orders_async)
+download_report = sync(download_report_async)
+download_report_collection = sync(download_report_collection_async)
+download_annual_report = sync(download_annual_report_async)
