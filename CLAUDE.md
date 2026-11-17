@@ -1,10 +1,10 @@
 # sdk-cashctrl — instructions for Claude Code
 
 `xippios-cashctrl` wraps CashCtrl as a typed Python client, an MCP server
-and FastAPI routes, built on `xippios-core`. This file holds the facts of this package;
-the family rules every source shares are in `.claude/family.md`, which the next line imports.
-
-@.claude/family.md
+and FastAPI routes, built on `xippios-core`. This file holds what an agent needs to work on
+the package: what it wraps, its layout, its commands and its code rules. The documents it
+follows, sdk-core's conventions among them, are listed under
+[`## Documents` in the README](README.md#documents); read them before you change a file.
 
 ## What this package wraps
 
@@ -14,11 +14,12 @@ the family rules every source shares are in `.claude/family.md`, which the next 
 | API base URL | `https://<subdomain>.cashctrl.com/api/v1`, one per organisation |
 | Documentation | https://app.cashctrl.com/static/help/en/api/index.html, snapshotted in `docs/upstream/` |
 | Credentials | `CASHCTRL_ORGS` names the organisations; per name `CASHCTRL_<NAME>_SUBDOMAIN` and `CASHCTRL_<NAME>_API_KEY`, the key sent as the HTTP basic user name. The reserved `demo` is declared by its own pair and never listed |
-| Rate limit | 60 requests per minute per organisation, burst 1; a self-imposed pace, upstream documents none, only a 429 (ADR-0010); enforced client-side in `_client.py`, one token bucket per organisation; see Rate limit below |
+| Rate limit | 60 requests per minute per organisation, burst 1; a self-imposed pace, upstream documents none, only a 429 (sdk-core ADR-0010); enforced client-side in `_client.py`, one token bucket per organisation; see Rate limit below |
 | Write tools | yes, in `tasks_write.py`, served by `xippios-cashctrl-mcp-write` |
-| Core | `xippios-core~=0.3.0` from PyPI, its `mcp`, `http` and `testing` extras likewise: one core minor, adopted through conventions §15 (ADR-0018); sdk-template v0.2.2, the last release it updates to (Workflow rules) |
+| Core | `xippios-core~=0.3.0` from PyPI, its `mcp`, `http` and `testing` extras likewise: one core minor, adopted through conventions §15 (sdk-core ADR-0018) |
 
-The snapshot in `docs/upstream/` is the reference for names, parameters and semantics.
+The snapshot listed in `docs/upstream/FETCHED.md` is the reference for names, parameters and
+semantics; a wrapper is never written from memory of the API.
 
 ## Organisations
 
@@ -29,7 +30,7 @@ organisation. `_client.py` is therefore a registry, not one client: `TENANTS`, a
 `check_subdomain` (one DNS label, lower-cased) as the subdomain's check. The registry,
 `list_organisations` and the `--org` lock are this package's: core held them as
 `xippios.core.Tenants`, `list_task` and `TenantLock` until 0.3.0 left them to it
-(ADR-0024, which supersedes ADR-0014's decisions on them); `_tenants.py` and
+(sdk-core ADR-0024, which supersedes sdk-core ADR-0014's decisions on them); `_tenants.py` and
 `_org_lock.py` are private, copied from sdk-core `cb8ecdf`, and nothing outside the
 package imports them. Core keeps `ResultMeta.tenant`, `main`'s option hooks and the
 write server's rules.
@@ -82,7 +83,7 @@ and nothing else, ever. The recorder takes no organisation; every live test take
 `tests/conftest.py` removes every `CASHCTRL_*` variable but the demo pair when pytest
 imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every test, sets the
 placeholder subdomain in every offline test and calls `TENANTS.reset()` around each.
-Core's plugin does the rest (ADR-0013): no network outside a test marked `live` or
+Core's plugin does the rest (sdk-core ADR-0013): no network outside a test marked `live` or
 `network`, no rate-limit waits, and the placeholder key on every auth object, with
 `CASHCTRL_DEMO_API_KEY` named in `xippios_placeholder_key_envs`. The demo organisation is
 synthetic: invented books seeded by `scripts/seed_demo.py` and described in
@@ -96,9 +97,9 @@ unmarked order, and any endpoint but `.json`. Writes against demo create a recor
 order (see Write tools). The demo subdomain is treated like a key: never in a file, a
 commit, a log line or a report. The repository is public.
 
-## Rate limit (ADR-0010)
+## Rate limit (sdk-core ADR-0010)
 
-Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 is deliberately not applied.
+Decisions 1, 2, 3 and 5 of sdk-core ADR-0010 are adopted; decision 4 is deliberately not applied.
 
 1. **Pace.** 60 requests per minute per organisation with a burst of 1, one request at
    a time and then one a second, one token bucket per client (`RATE_LIMIT` in
@@ -113,7 +114,7 @@ Decisions 1, 2, 3 and 5 of ADR-0010 are adopted; decision 4 is deliberately not 
    `x-cashctrl-requests-left` (299 on every answer observed on 2026-10-23, a 401
    included) with an unknown window and scope, so it is not read.
 4. **No firing into a spent quota** is deliberately not applied: no `QuotaPolicy` is
-   installed (decided by Johannes on 2026-10-25). Core's `QuotaPolicy` (ADR-0015) keeps
+   installed (decided by Johannes on 2026-10-25). Core's `QuotaPolicy` (sdk-core ADR-0015) keeps
    a long-window quota, and CashCtrl documents none, nor a window for
    `x-cashctrl-requests-left`; its 429 asks only for delays, a pace refusal. With no
    window to give it, a policy would take its default of an hour and turn one 429
@@ -129,14 +130,15 @@ src/xippios/cashctrl/
   py.typed         PEP 561 marker; consumers' mypy --strict needs it
   _version.py      __version__ from distribution metadata
   _client.py       organisation registry: TENANTS, client_for(org), classify
-  _tenants.py      Tenants and list_task, the registry's machinery (ADR-0024; private)
+  _tenants.py      Tenants and list_task, the registry's machinery (sdk-core ADR-0024; private)
   _org_lock.py     the --org lock: OrgLock and bind_tasks, org bound on every tool (private)
   _cli.py          --org for both MCP servers through core main's option hooks
   errors.py        RequestRejected (HTTP 200 with success:false) and FieldError
-  models.py        pydantic models mirroring upstream payloads (UpstreamModel), and the
-                   projections tasks return without ssn and iban (ADR-0017)
-  api/             endpoint wrappers, one module per upstream operation; _form.py encodes and posts writes,
-                   _download.py streams files
+  models.py        pydantic models mirroring upstream payloads (UpstreamModel), the
+                   projections tasks return without ssn and iban (sdk-core ADR-0017) and, written by
+                   hand, the value sets upstream documents that no packaged list renders
+  api/             endpoint wrappers, one module per upstream operation (conventions §2);
+                   _form.py encodes and posts writes, _download.py streams files
   tasks.py         task functions and list_organisations; __all__ is what the adapters register but
                    BULK_TASKS, the file tasks (Python only); MCP_CAPS the per-tool result caps
                    (list_custom_fields, list_cost_centers, get_report_data, list_history)
@@ -144,15 +146,20 @@ src/xippios/cashctrl/
   mcp_write.py     xippios-cashctrl-mcp-write entry point
   mcp.py           xippios-cashctrl-mcp entry point
   http.py          FastAPI router
+  params.py, enums.py, reference/  the packaged lists' scaffold: none is packaged
+                   (/refresh-reference-data)
 scripts/
+  refresh_reference.py   the template's skeleton, until a value set is packaged
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
   record_fixture.py      records one exchange with the demo organisation; core's Scrub, then its own
                          TenantScrub (host, encoded and JSON checks) and scrub_text
   seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md);
                          --discovery adds one custom field and one cost centre
+  adr_index.py           writes docs/adr.md and docs/adr.json from the records in docs/adr/;
+                         --check fails while either is stale
 tests/
   conftest.py      core's plugin; demo-only environment, placeholder subdomain, clients reset per test, demo_org
-  fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
+  fixtures/        recorded responses, <wrapper>/<case>.json, never hand-written
   test_family.py   core's family check, one line: namespace levels, py.typed, __version__,
                    the adapters serving exactly the tasks, task shapes and docstrings, the
                    README status table, the template tag, the core bound
@@ -168,21 +175,30 @@ tests/
   test_record_fixture.py  the recorder never writes the demo host, subdomain or key
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
   test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
-docs/upstream/     documentation snapshot and FETCHED.md
-docs/demo-org.md   the synthetic demo organisation: why, how to create and seed it, its books
-.github/workflows/ ci.yml (the required ci check, with the CHANGELOG and fixture-size steps),
+docs/
+  upstream/        documentation snapshot and FETCHED.md
+  demo-org.md      the synthetic demo organisation: why, how to create and seed it, its books
+  adr/             this package's design decisions, one NNNN-<slug>.md record each, laid
+                   out in its README.md
+  adr.md           the index of the decisions, written by scripts/adr_index.py, never by hand
+  adr.json         the same index, for machines
+  reports/         dated reports, the evidence a decision cites, laid out in its README.md
+changelog/         the next release's changelog entries, one fragment per change, laid out
+                   in its README.md
+CHANGELOG.md       the releases, each section assembled from the fragments
+.github/workflows/ ci.yml (the required ci check, with the changelog and fixture-size steps),
                    publish.yml (the release train: tag, build, PyPI), live.yml (nightly live
-                   tests), gates.yml (the merge gates as jobs, off until GATES_CALLER is 1)
-.claude/family.md  the family rules, the template's, imported above
-.claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep,
-                   adopt-release; refresh-reference-data does not apply here: cashctrl packages
-                   no reference data and has no scripts/refresh_reference.py, until a documented
-                   value set is needed
+                   tests), organization.yml (the organization's checks from xippios/.github:
+                   conventions, a review of a pull request against the documents the README
+                   lists, and adr-index, which runs scripts/adr_index.py --check)
+.claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep
 ```
 
 `src/xippios/` has **no** `__init__.py`: it is a PEP 420 namespace package shared with
 `xippios-core` and every other source package. The import path is `xippios.cashctrl`
-(ADR-0006).
+(sdk-core ADR-0006).
+Where the API's operation ids repeat across its services, `api/` keeps one module per service
+instead, named after the service, and this Layout says so (conventions §2).
 
 ## Write tools
 
@@ -282,7 +298,7 @@ nine in the interviews of 2026-10-23/24 and 2026-10-27, the last two in G5 (8) o
    live test deletes the paid order and leaves the payment, accepted residue (Johannes,
    2026-10-28).
 
-## Personal identifiers (ADR-0017)
+## Personal identifiers (sdk-core ADR-0017)
 
 CashCtrl documents two personal identifiers, a person's `ssn` ("Social security number
 of the employee") and the `iban` of each of a person's `bankAccounts` (the list sends an
@@ -291,13 +307,13 @@ of the employee") and the `iban` of each of a person's `bankAccounts` (the list 
 out of every projection a task returns and dropped from the raw report rows
 `get_report_data` returns. Johannes decided the two identifiers on
 2026-10-25; the session decided on 2026-10-27 that `iban` covers the organisation's own
-bank account numbers too, as ADR-0017's "bank account number", and gap row 123 queues the
+bank account numbers too, as sdk-core ADR-0017's "bank account number", and gap row 123 queues the
 question against sdk-core for Johannes to confirm or overturn. The recorder rewrites any
 value under `iban` in a body to `REDACTED`, so a projection that kept one could never be
 replay-tested with a real value.
 
 - The endpoint wrappers' read models stay faithful and carry them (`Person`,
-  `PersonDetail`, `JournalEntryDetail.associates`, `Location`, `OrderDocument`; ADR-0003).
+  `PersonDetail`, `JournalEntryDetail.associates`, `Location`, `OrderDocument`; sdk-core ADR-0003).
 - The tasks return projections without them, built with `UpstreamModel.project` in
   `tasks.py`: `PersonProjection` (`list_persons`), `PersonDetailProjection`
   (`get_person`; each bank account kept without its `iban`, which the projection's own
@@ -322,52 +338,118 @@ replay-tested with a real value.
   client, which `TENANTS.reset()` or a changed variable drops; `get_report_tree`
   refreshes it; an element the kept tree lacks reads it once more, one still missing is
   asked of upstream. Other reports come back as sent, every key `ssn` or ending in `iban`
-  dropped at any depth, in any case (`_report`; row 243; ADR-0003, amendment 2026-10-26).
+  dropped at any depth, in any case (`_report`; row 243; sdk-core ADR-0003, amendment 2026-10-26).
 - A task that fetches them deliberately may return them and says so in its docstring.
   Two files may carry them, at the caller's path, never in a result or a tool
   (`BULK_TASKS`; Johannes, 2026-10-28): `export_persons` names `PERSON_COLUMNS` unless
   its caller names columns, `ssn` or `iban` among them; `download_order_document`'s PDF
   may carry the organisation's IBAN or QR-IBAN and the recipient's address (QR-bill).
 
+## Commands
+
+```bash
+uv sync --all-extras
+uv run pytest                      # offline, replays the fixtures
+uv run ruff check . && uv run ruff format --check .
+uv run mypy
+uv run pre-commit run --all-files
+python3 scripts/adr_index.py --check   # the index matches the records in docs/adr/
+direnv exec ~/github/sdk env -u CASHCTRL_ORGS XIPPIOS_LIVE_TESTS=1 uv run pytest -m live --tb=short --assert=plain   # demo only
+
+uv run xippios-cashctrl-mcp --org demo   # stdio, bound to demo; --http for streamable HTTP
+uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loopback only
+```
+
+`uv run pytest` is offline: core's plugin refuses the network and skips the rate limiter's
+waits in every test not marked `live` (conventions §10, sdk-core ADR-0013). A test that
+asserts a limiter wait or a quota pause is marked `rate_limited`, one that must reach the
+network `network`. It sends the key's placeholder, with `CASHCTRL_DEMO_API_KEY` set to it
+because `pyproject.toml` names that variable under `xippios_placeholder_key_envs`; the
+package keeps no placeholder fixture of its own (`tests/conftest.py` keeps the demo-only
+environment, Organisations above).
+
+`.github/workflows/live.yml` runs the live tests nightly at 02:36 UTC, a time derived from
+the slug so that sources sharing a key never start together, and on demand; a pull request
+never runs them. Every `live` test runs, write tests included, so a live write test acts
+only on data kept for testing (the demo organisation, sdk-core ADR-0024) and cleans up after itself.
+Only its `uv run pytest -m live --tb=short --assert=plain` step sees the demo
+organisation's pair, from the secrets `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`
+(the `live_secrets` answer), beside the scaffold's `CASHCTRL_API_KEY`, which
+`tests/conftest.py` removes and nothing reads; both demo secrets must give sdk-cashctrl
+access for the nightly run to pass. Every live run takes `--tb=short --assert=plain`, since
+the log of `live.yml` is public: the first keeps a failing test's frame arguments out of
+it, a raw upstream payload among them, and the second the values a failed `assert`
+compares. A live test asserts on shapes and counts, never on a raw payload.
+
+## Code rules
+
+- Three layers (sdk-core ADR-0001, conventions §2): endpoint wrappers in `api/`, task
+  functions in `tasks.py`, adapters in `mcp.py` and `http.py`. The adapters register
+  `tasks.__all__` and call only tasks, the tasks call only wrappers and reference data, and
+  a wrapper returns models.
+- Upstream's documented error shapes go into `classify` in `_client.py`, once, and an error
+  class of the package's own into `errors.py`; a wrapper never inspects a status code
+  (conventions §5, §6).
+- A change brings its tests, written before the code, and passes the offline checks above;
+  its changelog entry is a fragment under `changelog/`, one file holding its bullet, as
+  `changelog/README.md` lays it out (conventions §12). Commit subjects follow Conventional
+  Commits (conventions §13): the rule binds a pull request's own commits, not the commit
+  that lands the pull request on `main`, whose subject GitHub writes.
+- `ruff` leaves `docs/` and `.claude/` alone (`pyproject.toml`), so the upstream snapshot
+  keeps its bytes: never reformat it.
+- A convention that seems wrong is followed anyway and said in the pull request; changing
+  it is a change of sdk-core's `docs/conventions.md` with an ADR.
+
+## Never
+
+- Never hand-write a fixture, and never commit one without grepping it for key patterns
+  (conventions §10).
+- Never read or print `.envrc`, `.env`, the credential variables of this package,
+  `CASHCTRL_<NAME>_SUBDOMAIN` and `CASHCTRL_<NAME>_API_KEY` of every organisation,
+  `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY` among them, the scaffold's
+  `CASHCTRL_API_KEY`, or any variable ending in `_API_KEY`, `_REFRESH_TOKEN` or `_SECRET`.
+- Never write a key, a token or another credential into a file or a commit.
+- Never put logic in `mcp.py` or `http.py`, and never add a route or a tool by hand: the
+  adapters register `tasks.__all__` (sdk-core ADR-0001).
+- Never rename or re-map an upstream concept to another source's (sdk-core ADR-0003).
+- Never return a documented personal identifier in a task's projection, echo one in
+  `meta.request`, or commit one in a fixture (sdk-core ADR-0017).
+- Never edit `docs/upstream/` by hand: `/refresh-upstream` fetches it, and the pull request
+  shows its diff (conventions §3).
+- Never add `src/xippios/__init__.py`, nor an `__init__.py` at a level between it and the
+  package (sdk-core ADR-0006).
+- Never push a tag by hand: a release's tag comes from `publish.yml` alone (conventions §12).
+
+## Template updates
+
+This repository is generated from sdk-template, at the tag `.copier-answers.yml` records. A
+template release reaches it in a pull request of its own, with
+`uvx --from 'copier>=9.19' copier update --defaults --vcs-ref=<tag>` (conventions §15): the
+update renders the template's files again and never overwrites the files this package
+fills, `__init__.py`, `_client.py`, `errors.py`, `models.py`, `api/`, `parse/`, `tasks.py`,
+`params.py`, `enums.py`, `reference/`, `scripts/refresh_reference.py`,
+`scripts/refresh_upstream.py`, `tests/test_tasks.py`, `tests/test_live.py`,
+`tests/fixtures/`, `docs/upstream/`, `docs/adr.md`, `docs/adr.json`, `README.md`,
+`CHANGELOG.md` and `CLAUDE.md`. sdk-template's
+[CHANGELOG](https://github.com/xippios/sdk-template/blob/main/CHANGELOG.md) says, per
+release, what to port into those by hand in the same pull request.
+
+## When something is unclear
+
+Prefer the smallest change that satisfies the documents the README lists, state the
+assumption in the pull request's description, and stop rather than guess at upstream
+semantics or the shape of the public API.
+
 ## CashCtrl specifics
 
-What `.claude/family.md` says holds here as well. The subsections below, named after its
-sections, hold cashctrl's own lines: where the family text and this section differ
-(`org` first and `client_for(org)` where it names `_client.client`, the demo-only
-recorder where it names `record_sync`, the live command, the updates), this section is
-cashctrl's form.
-
-### Workflow rules
-
-- `.claude/family.md` is a frozen copy of sdk-template v0.3.0's file, byte for byte,
-  imported by the line under this file's intro. Like every template-rendered file here
-  it is cashctrl's own and changes by hand only: at each template release it is copied
-  again from the template's file at that tag, never edited in place, and a line of
-  cashctrl's own goes into this file instead (row 118).
-- `.claude/family.md`'s "Template and core updates" bullet does not apply here:
-  cashctrl runs no `copier update` (D35), and a core minor arrives through the
-  core-only `/adopt-release`, as the next bullet says.
-- Core updates: a new core minor arrives in one adoption PR, a `chore/template-update*`
-  branch, before the next release (conventions §15). An adoption of a later core minor
-  runs no `copier update` (D35, D85): it raises the floor
-  to `~=X.Y.0` by hand in `pyproject.toml`, runs `uv lock` and ports that core release's
-  Hand-apply list (`/adopt-release`). The reference-data scaffolding (`params.py`,
-  `enums.py`, `reference/`, `scripts/refresh_reference.py`) does not come back, since
-  cashctrl runs no further `copier update` (D35); a future value set brings the script
-  back by hand from the `render_enums` port deleted here (`/refresh-reference-data`).
-  From template v0.2.2 on every template-rendered file is cashctrl's own (`ci.yml`,
-  `publish.yml`, `gates.yml`, `live.yml`, the PR template, the `.claude/commands` files,
-  `.claude/settings.json`, `.claude/family.md`, `tests/conftest.py`,
-  `tests/test_family.py`, the template's parts of this file), and a core adoption
-  hand-applies the template changes the conventions version it adopts needs (row 118).
-- cashctrl stays on template v0.2.2 after template v0.3.0 and keeps adopting core minors
-  through conventions §15; `copier update` must never be run past v0.2.2: the v0.3.0
-  template deletes `mcp_write.py`, `tasks_write.py` and `tests/test_tasks_write.py` and
-  rewrites `api_key_location: basic` to `query` without a conflict marker.
+The sections above and the commands under `.claude/commands/` hold here as well. The
+subsections below hold cashctrl's own lines: where the two differ (`org` first and
+`client_for(org)` where a command names `_client.client`, the demo-only recorder where it
+names `record_sync`, the live command), this section is cashctrl's form.
 
 ### How to add an endpoint
 
-`/add-endpoint` walks it. Steps 1, 5 and 7 are `.claude/family.md`'s, step 7's task name
+`/add-endpoint` walks it. Steps 1, 5 and 7 are the command's, step 7's task name
 first in its README cell as the family check reads it (cashctrl's README has no comment
 above its status table); steps 2 to 4 and 6 read here:
 
@@ -385,9 +467,9 @@ above its status table); steps 2 to 4 and 6 read here:
    `sync()`, add its name to `__all__`, re-export it from `__init__.py`. What it returns
    leaves out documented personal identifiers (`ssn`, `iban` and their like) unless it
    fetches them deliberately and says so, and a write task does not echo one in
-   `meta.request` (ADR-0017).
+   `meta.request` (sdk-core ADR-0017).
 
-Step 5, the docstring for agents, is the family's; then:
+Step 5, the docstring for agents, is the command's; then:
 
 6. `/record-fixture` for at least one case (demo only), a replay test in `test_tasks.py`
    with `org="demo"` that also calls the tool end to end with
@@ -400,7 +482,7 @@ Step 5, the docstring for agents, is the family's; then:
    `test_live.py` that takes the `demo_org` fixture.
 
 A list that documents `start` and `limit` (journal, persons, orders, history) pages through
-`_offset_pages` in `tasks.py` (conventions §4, ADR-0012): `limit` given is one request
+`_offset_pages` in `tasks.py` (conventions §4, sdk-core ADR-0012): `limit` given is one request
 for the page at `start` (default 0); `limit` omitted collects every page from `start`
 through core's `paginate_offset`, `PAGE_SIZE` (100, upstream's documented default) a
 request. `meta.total` is upstream's `total` on every list task, never `len(data)`.
@@ -409,10 +491,10 @@ Lookups (accounts, currencies, tax codes, fiscal periods, account and person cat
 titles, cost centers, locations, custom fields) are tasks too, named `list_<thing>`, so
 agents can form valid calls; they serve the organisation's own data live and are never
 packaged: a multi-tenant source packages no tenant data, nor a value set
-`docs/upstream/` fixes (the reference-data scaffolding is gone, Workflow rules;
-`/refresh-reference-data` says from where it comes back). A lookup whose whole list an
+`docs/upstream/` fixes (`PACKAGED_LISTS` is empty; `/refresh-reference-data` says how
+one would come). A lookup whose whole list an
 agent needs and the default result cap (200 rows or 64 KB) would cut gets a cap of its
-own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (ADR-0016):
+own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (sdk-core ADR-0016):
 `list_custom_fields` (500 rows or 128 KB; no filter but `type`, and a write needs a
 type's custom fields whole) and `get_report_data` (128 KB; a report is read whole, and
 its result, no list, is cut to a note and a preview); `list_cost_centers` and
@@ -447,101 +529,26 @@ and expects an unknown order's refusal.
 
 ### How to record a fixture
 
-Run `/record-fixture <endpoint> <case> <parameters>`. It runs
-`direnv exec ~/github/sdk uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]`,
-which sends one request to the demo organisation only, through a client that never
-retries (`RetryPolicy(max_attempts=1)`: a 5xx spends no retry), and builds the fixture in
-memory with core's `fixture_from_response` and `Scrub(secrets=[key, its basic-auth
-token], allow_binary=False)` (conventions §10): credentials scrubbed, the key and its
-token `REDACTED` as given. Core's verify, plain values only, refuses the exchange when
-the key or its token is still there as given or a body is not UTF-8 text (the recorder
-records no file). The rest is the recorder's own step, `TenantScrub`, on core's `Fixture`
-before the one write (ADR-0024, decision 4; from core's former `Scrub(host=...,
-rewrite=...)`): the demo host, in any case, IDNA or percent-encoded, becomes
-`demo.cashctrl.com` in the URL, the headers and both bodies; the key and its token become
-`REDACTED` in every percent-encoded form too; and `scrub_text` runs over the URL, the
-header values and both bodies: e-mail addresses to `user@example.com`, CashCtrl's API
-user tags (`API:` and the first four characters of a key, in `createdBy` and
-`lastUpdatedBy`) to `API:REDACTED` and the value of every token-like body field (`hash`,
-`token`, `secret`, `apiKey`, by name; `order/read.json` sends `hash`) and of the
-identifiers, `ssn` and every name ending in `iban` (ADR-0017, row 243; seen only `null`,
-in `person/list.json`, `location/list.json` and `order/document/read.json`) to
-`REDACTED`. Its verify then refuses, in its own words, a fixture still
-holding the demo host, the subdomain alone or the key or its token, plain or
-percent-encoded, raw or in a decoded string of a JSON body. A response in which the key
-was redacted is written but goes to review (exit status 1). The recorder's final check
-then refuses, before the one write to `tests/fixtures/<endpoint>/<case>.json`, a fixture
-whose text or decoded body strings still hold the subdomain alone, an e-mail address, an
-API user tag in any case and position, the key's first four characters alone (a possible
-key prefix) or any value but `null` or `REDACTED` under a token-like or identifier name,
-or what the demo-only rule above refuses. The write stays the recorder's: core's `record`
-would write once its own verify passes, before the recorder's step and check. A compound
-name such as `publicHash` is not scrubbed and goes to review. Grep the file for key
-patterns, e-mail addresses, API user tags, token-like fields and identifier values
-before committing (`/record-fixture`, the grep block below). Fixtures
-are never typed in by hand.
-
-Writes: `--method POST` is accepted for the eleven write paths the write tools call only
-(`journal/`, `person/` and `order/create|update|delete.json`, `order/update_status.json`,
-`order/payment/create.json`, `WRITE_PATHS`), any other POST or method refused before a
-request; a `create.json` only when one of its values carries `xippios-live` (the
-payment's excepted: its orders are the marker), and the two order writes only after `order/read.json` found every order their `ids` or `orderIds`
-name marked (`xippios-live` in `description`, or as `nr`), fail closed
-(`unmarked_orders`); the `key=value` pairs go as the form body, in their order, with the
-write tools' `Content-Type` (`application/x-www-form-urlencoded; charset=UTF-8`). The
-recorder's rewrite and final check cover the request body core records too (raw, each
-form field decoded, each JSON value's strings), a form field `ssn` or an `iban` inside
-`bankAccounts` included, so a write that sends one is not recorded. After the request it
-says that the demo organisation changed, names the `insertId` and asks for the matching
-delete, recorded or run; after a payment, that it stays behind (no delete documented). Record only a record marked `xippios-live`, its writes and its
-delete; confirm afterwards with one list per resource (`query=xippios-live`, counts only)
-that nothing is left.
-
-The write fixtures record marked records created, read, updated and deleted again
-(2026-10-24, 2026-10-27) and a purchase order's status and payments (2026-10-29).
-
-Still grep before committing:
-
-```bash
-grep -rniE 'api[_-]?key|token|secret' tests/fixtures
-grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' tests/fixtures | sort -u
-grep -rhoiE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u
-grep -rhoiE '(hash|token|secret|api[_-]?key)\\?": *\\?"[^"\\]*' tests/fixtures | sort -u
-grep -rhoiE --include='*.json' '\\?"(ssn|[a-z0-9_-]*iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
-grep -rhoiE --include='*.json' '(ssn=|iban=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
-```
-
-The last two count, without printing them, the values of `ssn` and of every name ending
-in `iban` that are neither `null` nor `REDACTED`, in the JSON bodies and in a write's
-form body; both print `0`.
-
-### Commands
-
-```bash
-direnv exec ~/github/sdk env -u CASHCTRL_ORGS XIPPIOS_LIVE_TESTS=1 uv run pytest -m live --tb=short   # demo only
-uv run xippios-cashctrl-mcp --org demo   # stdio, bound to demo; --http for streamable HTTP
-uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loopback only
-```
-
-The offline run sends the key's placeholder, with `CASHCTRL_DEMO_API_KEY` set to it
-because `pyproject.toml` names that variable under `xippios_placeholder_key_envs`; the
-package keeps no placeholder fixture of its own (`tests/conftest.py` keeps the demo-only
-environment, Organisations above).
-
-`.github/workflows/live.yml` runs the live tests nightly at 02:36 UTC, a time derived from
-the slug so that sources sharing a key never start together.
-Every `live` test runs, write tests included, so a live write test acts only on data kept
-for testing (the demo organisation, ADR-0024) and cleans up after itself. Only its
-`uv run pytest -m live --tb=short` step sees the demo organisation's pair, from the org
-secrets `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`: the template renders the
-scaffold's `CASHCTRL_API_KEY`, which nothing reads, so the workflow names the pair by
-hand, and both org secrets must give sdk-cashctrl access for the nightly run to pass.
-Every live run here takes `--tb=short`, for the reason `.claude/family.md` gives
-(Commands): a failed parse would print an upstream payload into the public log.
+`/record-fixture <endpoint> <case> <parameters>` walks it, and the docstring of
+`scripts/record_fixture.py` holds the recorder's policies in full; the demo-only rule
+above names what it scrubs and refuses. It sends one request to the demo organisation
+through a client that never retries, builds the fixture with core's
+`fixture_from_response` and `Scrub` (conventions §10), then runs its own step,
+`TenantScrub` (sdk-core ADR-0024, decision 4), which rewrites the demo host to
+`demo.cashctrl.com` and the key in every encoded form to `REDACTED`, and `scrub_text`.
+Its final check refuses, before the one write to `tests/fixtures/<wrapper>/<case>.json`,
+a fixture that still holds the subdomain, the key or its first four characters, an
+e-mail address, an API user tag, or a value but `null` or `REDACTED` under a token-like
+or identifier name; a compound name such as `publicHash` goes to review. After a write it
+names the `insertId` and asks for the matching delete. The write fixtures record marked
+records created, read, updated and deleted again (2026-10-24, 2026-10-27) and a purchase
+order's status and payments (2026-10-29). Before committing, run the grep block of
+`/record-fixture` (step 5); its last two greps print `0`. Fixtures are never typed in by
+hand.
 
 ### Never
 
-Besides `.claude/family.md`'s list:
+Besides the list under Never above:
 
 - Never hand-write a fixture, and never commit one without grepping for key patterns
   and for values under `ssn` and every name ending in `iban`.
@@ -549,9 +556,6 @@ Besides `.claude/family.md`'s list:
   but `demo`; never set `CASHCTRL_ORGS` with real names in a session or a test.
 - Never print, log or commit `CASHCTRL_DEMO_SUBDOMAIN` or any organisation's subdomain.
 - Never add a task, tool or helper that spans organisations.
-- Never run `copier update` past template v0.2.2: the v0.3.0 template deletes
-  `mcp_write.py`, `tasks_write.py` and `tests/test_tasks_write.py` and rewrites
-  `api_key_location: basic` to `query` without a conflict marker.
 - Never point fixtures, live tests or the seeder at an organisation with real data: the
   demo organisation holds synthetic books only, created and seeded as `docs/demo-org.md`
   describes.
