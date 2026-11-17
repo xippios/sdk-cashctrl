@@ -13,7 +13,7 @@ its sections by fragment (`#intro`, `#/account`). The script fetches the page on
 and writes one Markdown file per top-level entry of the table of contents, named
 after the entry: the five general sections, then one file per module holding all of
 the module's controllers. Each file starts with one line, the URL of its entry; the
-fetch date is recorded only in this file. Headings keep the page's levels: `##`
+fetch time is recorded only in this file. Headings keep the page's levels: `##`
 controller, `###` operation, `####` Parameters, Endpoint or Example; each paragraph is
 one line.
 
@@ -44,24 +44,25 @@ page and are not credentials of this project.
 The page the snapshot was made from:
 
 - 1247520 bytes, sha256 `2d5f1e4e3205de122e4fe09738932a6eee50cc3d51a0c0106b155bfabdaefff6`
-- HTTP 200, ETag `"1792306289900-gzip"`, Last-Modified not sent
+- HTTP 200, ETag `"1794633337004-gzip"`, Last-Modified not sent
 
-Fetched is the UTC date of the run.
+`Fetched` is the UTC time of the run in ISO 8601 with an explicit `Z`. A file whose
+note says so keeps a table that nests another as its HTML, as described above.
 
-| File | URL | Fetched |
-| --- | --- | --- |
-| introduction.md | https://app.cashctrl.com/static/help/en/api/index.html#intro | 2026-10-23 |
-| authentication.md | https://app.cashctrl.com/static/help/en/api/index.html#auth | 2026-10-23 |
-| error-handling.md | https://app.cashctrl.com/static/help/en/api/index.html#errors | 2026-10-23 |
-| language.md | https://app.cashctrl.com/static/help/en/api/index.html#lang | 2026-10-23 |
-| examples.md | https://app.cashctrl.com/static/help/en/api/index.html#examples | 2026-10-23 |
-| account.md | https://app.cashctrl.com/static/help/en/api/index.html#/account | 2026-10-23 |
-| common.md | https://app.cashctrl.com/static/help/en/api/index.html#/currency | 2026-10-23 |
-| file.md | https://app.cashctrl.com/static/help/en/api/index.html#/file | 2026-10-23 |
-| inventory.md | https://app.cashctrl.com/static/help/en/api/index.html#/inventory/article | 2026-10-23 |
-| journal.md | https://app.cashctrl.com/static/help/en/api/index.html#/journal | 2026-10-23 |
-| meta.md | https://app.cashctrl.com/static/help/en/api/index.html#/fiscalperiod | 2026-10-23 |
-| order.md | https://app.cashctrl.com/static/help/en/api/index.html#/order | 2026-10-23 |
-| person.md | https://app.cashctrl.com/static/help/en/api/index.html#/person | 2026-10-23 |
-| report.md | https://app.cashctrl.com/static/help/en/api/index.html#/report | 2026-10-23 |
-| salary.md | https://app.cashctrl.com/static/help/en/api/index.html#/salary/bookentry | 2026-10-23 |
+| File | URL | Fetched | Note |
+| --- | --- | --- | --- |
+| introduction.md | https://app.cashctrl.com/static/help/en/api/index.html#intro | 2026-11-17T17:18:17Z |  |
+| authentication.md | https://app.cashctrl.com/static/help/en/api/index.html#auth | 2026-11-17T17:18:17Z |  |
+| error-handling.md | https://app.cashctrl.com/static/help/en/api/index.html#errors | 2026-11-17T17:18:17Z |  |
+| language.md | https://app.cashctrl.com/static/help/en/api/index.html#lang | 2026-11-17T17:18:17Z |  |
+| examples.md | https://app.cashctrl.com/static/help/en/api/index.html#examples | 2026-11-17T17:18:17Z |  |
+| account.md | https://app.cashctrl.com/static/help/en/api/index.html#/account | 2026-11-17T17:18:17Z | nested tables kept as HTML |
+| common.md | https://app.cashctrl.com/static/help/en/api/index.html#/currency | 2026-11-17T17:18:17Z | nested tables kept as HTML |
+| file.md | https://app.cashctrl.com/static/help/en/api/index.html#/file | 2026-11-17T17:18:17Z | nested tables kept as HTML |
+| inventory.md | https://app.cashctrl.com/static/help/en/api/index.html#/inventory/article | 2026-11-17T17:18:17Z | nested tables kept as HTML |
+| journal.md | https://app.cashctrl.com/static/help/en/api/index.html#/journal | 2026-11-17T17:18:17Z | nested tables kept as HTML |
+| meta.md | https://app.cashctrl.com/static/help/en/api/index.html#/fiscalperiod | 2026-11-17T17:18:17Z | nested tables kept as HTML |
+| order.md | https://app.cashctrl.com/static/help/en/api/index.html#/order | 2026-11-17T17:18:17Z | nested tables kept as HTML |
+| person.md | https://app.cashctrl.com/static/help/en/api/index.html#/person | 2026-11-17T17:18:17Z | nested tables kept as HTML |
+| report.md | https://app.cashctrl.com/static/help/en/api/index.html#/report | 2026-11-17T17:18:17Z | nested tables kept as HTML |
+| salary.md | https://app.cashctrl.com/static/help/en/api/index.html#/salary/bookentry | 2026-11-17T17:18:17Z | nested tables kept as HTML |
