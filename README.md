@@ -337,6 +337,7 @@ subdomain): set the `httpx` logger to WARNING.
 | --- | --- | --- | --- |
 | none: the declared organisations | `list_organisations` | `cashctrl_list_organisations` | available; names only, no request |
 | `GET fiscalperiod/list.json` (List fiscal periods) | `list_fiscal_periods` | `cashctrl_list_fiscal_periods` | available |
+| `GET fiscalperiod/read.json` (Read fiscal period) | `get_fiscal_period` | `cashctrl_get_fiscal_period` | available; the current period without `id` |
 | `GET currency/list.json` (List currencies) | `list_currencies` | `cashctrl_list_currencies` | available |
 | `GET tax/list.json` (List tax codes) | `list_tax_codes` | `cashctrl_list_tax_codes` | available |
 | `GET account/list.json` (List accounts) | `list_accounts` | `cashctrl_list_accounts` | available; HTTP route is `POST` |
@@ -354,7 +355,7 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET person/category/list.json` (List categories) | `list_person_categories` | `cashctrl_list_person_categories` | available |
 | `GET person/title/list.json` (List titles) | `list_person_titles` | `cashctrl_list_person_titles` | available |
 | `GET account/category/list.json` (List categories) | `list_account_categories` | `cashctrl_list_account_categories` | available; flat, linked by `parent_id` |
-| `GET account/costcenter/list.json` (List cost centers) | `list_cost_centers` | `cashctrl_list_cost_centers` | available; HTTP route is `POST`; balances assumed of the current fiscal period |
+| `GET account/costcenter/list.json` (List cost centers) | `list_cost_centers` | `cashctrl_list_cost_centers` | available; HTTP route is `POST`; balances of `fiscal_period_id`, assumed of the current fiscal period without it |
 | `GET location/list.json` (List locations) | `list_locations` | `cashctrl_list_locations` | available; without `iban` and `qr_iban` |
 | `GET report/tree.json` (Get tree of reports) | `get_report_tree` | `cashctrl_get_report_tree` | available |
 | `GET report/element/data.json` (Read JSON data) | `get_report_data` | `cashctrl_get_report_data` | available; rows as upstream sends them; payroll and people reports refused |
@@ -393,7 +394,11 @@ The journal and order lists answer for the API user's current fiscal period unle
 `fiscal_period_id` is given; that period is server-side state that
 `fiscalperiod/switch.json` changes, and `meta.request` does not show which period
 answered, so pass `fiscal_period_id` (an id from `list_fiscal_periods`) for a
-reproducible answer. Without `type` (`SALES`, `PURCHASE`), `list_orders` returns both;
+reproducible answer. `list_accounts` and `list_cost_centers` take `fiscal_period_id` for
+their balances likewise. `get_fiscal_period` without an `id` reads that current period, and
+its `id` names the period an answer without `fiscal_period_id` came from. The read itself
+sends `is_current` false, the current period's too (observed on 2026-11-17);
+`list_fiscal_periods` marks the current one. Without `type` (`SALES`, `PURCHASE`), `list_orders` returns both;
 `list_order_categories` lists `SALES` (upstream's default) unless given `PURCHASE`.
 
 `list_order_book_entries` lists one order's book entries (`order_id`, sent as upstream's

@@ -36,6 +36,7 @@ from xippios.cashctrl.api.account_read import account_read
 from xippios.cashctrl.api.currency_list import currency_list
 from xippios.cashctrl.api.customfield_list import customfield_list, customfield_list_params
 from xippios.cashctrl.api.fiscalperiod_list import fiscalperiod_list
+from xippios.cashctrl.api.fiscalperiod_read import fiscalperiod_read
 from xippios.cashctrl.api.history_list import history_list, history_list_params
 from xippios.cashctrl.api.journal_create import journal_create, journal_fields
 from xippios.cashctrl.api.journal_delete import journal_delete
@@ -114,6 +115,7 @@ __all__ = [
     "encode_filter",
     "export_params",
     "fiscalperiod_list",
+    "fiscalperiod_read",
     "history_list",
     "history_list_params",
     "journal_create",

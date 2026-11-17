@@ -232,7 +232,7 @@ class ReadResponse[T](UpstreamModel):
 
 
 class FiscalPeriod(UpstreamModel):
-    """One fiscal period, an entry of ``fiscalperiod/list.json`` (``docs/upstream/meta.md``).
+    """One fiscal period, a ``fiscalperiod/list.json`` entry or its ``read.json`` (``meta.md``).
 
     ``name``, ``start``, ``end``, ``salary_start`` and ``salary_end`` are typed from the
     create and update tables. Typed from observation: ``short_name`` (only ``null`` seen),
@@ -243,7 +243,9 @@ class FiscalPeriod(UpstreamModel):
     bookkeeping fields. ``is_current`` marks the API user's current fiscal period, which
     upstream uses for balances when no ``fiscalPeriodId`` is given. On the synthetic demo
     organisation that is 2025, the period ``scripts/seed_demo.py`` created, not 2026, the
-    one the organisation was created with.
+    one the organisation was created with. The read sends the same fields, but
+    ``current`` and ``is_current`` false and ``last_entry_date`` null, the current
+    period's too (observed 2026-11-17); the list fills them.
     """
 
     id: int

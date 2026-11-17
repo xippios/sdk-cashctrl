@@ -277,9 +277,9 @@ def classify(response: httpx.Response) -> XippiosError | None:
       ``setting/read.json``, which takes no ``id``. Known gaps:
       ``order/category/read_status.json``, ``account/balance`` and
       ``account/costcenter/balance`` also read by ``id`` under other paths, so an unknown
-      id there stays a ``RequestRejected``. ``account``, ``currency`` and ``journal``
-      (``"This book entry does not exist."``) were observed; the other operations are
-      assumed to refuse alike.
+      id there stays a ``RequestRejected``. ``account``, ``currency``, ``journal``
+      (``"This book entry does not exist."``) and ``fiscalperiod`` (2026-11-17) were
+      observed; the other operations are assumed to refuse alike.
     - A ``<...>/read.pdf`` asked for records by non-empty ``ids`` (``order/document/read.pdf``,
       the one this package downloads) reads by id too: a refusal with a message and no
       field list there would raise ``NotFoundError`` (not observed: an unknown id answers

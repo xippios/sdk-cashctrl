@@ -192,6 +192,73 @@ async def test_list_fiscal_periods_as_a_tool(
     assert payload["meta"]["request"] == {"org": DEMO}
 
 
+# fiscalperiod/read.json, recorded on 2026-11-17: by id (2026), without an id (the current
+# period, 2025) and for an unknown id.
+
+
+def test_get_fiscal_period_replays_the_recorded_read(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    assert recorded_query(recorded(fixtures_dir, "fiscalperiod_read", "by_id")) == {"id": "1"}
+    route = replay_fixture("fiscalperiod_read", "by_id", match_params=["id"])
+    result = tasks.get_fiscal_period(DEMO, FP2026)
+    assert sent_query(route) == {"id": str(FP2026)}
+    assert (result.meta.source, result.meta.endpoint) == ("cashctrl", "fiscalperiod/read.json")
+    assert result.meta.request == {"org": DEMO, "id": FP2026}
+    assert (result.meta.tenant, result.meta.total) == (DEMO, None)
+    period = result.data
+    assert (period.id, period.name, period.created_by) == (FP2026, "2026", "SYSTEM")
+    assert (period.start, period.end) == (date(2026, 1, 1), date(2026, 12, 31))
+    assert (period.is_closed, period.closed_month_ids, len(period.open_month_ids)) == (
+        False,
+        [],
+        12,
+    )
+    assert period.is_current is False
+    assert period.last_entry_date is None, "the list sends 2026-09-30; the read sends none"
+
+
+def test_get_fiscal_period_without_an_id_reads_the_current_period(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    """The read names the current period by its id; its own ``is_current`` is ``False``."""
+    assert recorded_query(recorded(fixtures_dir, "fiscalperiod_read", "current")) == {}
+    route = replay_fixture("fiscalperiod_read", "current")
+    result = tasks.get_fiscal_period(DEMO)
+    assert sent_query(route) == {}, "no id: upstream reads the API user's current period"
+    assert result.meta.request == {"org": DEMO}
+    assert (result.data.id, result.data.name) == (FP2025, "2025")
+    listed = {
+        p["id"]: p for p in recorded_body(fixtures_dir, "fiscalperiod_list", "default")["data"]
+    }
+    assert listed[FP2025]["isCurrent"] is True, "the list marks it current"
+    assert (result.data.is_current, result.data.current) == (False, False), "observed 2026-11-17"
+
+
+def test_get_fiscal_period_raises_not_found_for_an_unknown_id(
+    replay_fixture: ReplayFixture,
+) -> None:
+    replay_fixture("fiscalperiod_read", "unknown_id", match_params=["id"])
+    with pytest.raises(NotFoundError, match="This fiscal period does not exist"):
+        tasks.get_fiscal_period(DEMO, 999999999)
+
+
+@pytest.mark.anyio
+async def test_get_fiscal_period_as_a_tool(replay_fixture: ReplayFixture) -> None:
+    replay_fixture("fiscalperiod_read", "by_id", match_params=["id"])
+    payload = await mcp_call(server, "cashctrl_get_fiscal_period", {"org": DEMO, "id": FP2026})
+    assert (payload["data"]["id"], payload["data"]["start"]) == (FP2026, "2026-01-01")
+    assert payload["meta"]["request"] == {"org": DEMO, "id": FP2026}
+
+
+@pytest.mark.anyio
+async def test_get_fiscal_period_as_a_tool_without_an_id(replay_fixture: ReplayFixture) -> None:
+    replay_fixture("fiscalperiod_read", "current")
+    payload = await mcp_call(server, "cashctrl_get_fiscal_period", {"org": DEMO})
+    assert (payload["data"]["id"], payload["data"]["name"]) == (FP2025, "2025")
+    assert payload["meta"]["request"] == {"org": DEMO}
+
+
 def test_list_currencies_replays_the_recorded_list(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
@@ -1827,6 +1894,7 @@ def test_list_cost_centers_sends_its_parameters_as_upstream_reads_them(
         query="Projekt",
         filter=[{"comparison": "eq", "field": "number", "value": "100"}],  # type: ignore[list-item]
         category_id=1,
+        fiscal_period_id=FP2025,
         only_active=True,
         only_notes=True,
         sort="name",
@@ -1837,12 +1905,45 @@ def test_list_cost_centers_sends_its_parameters_as_upstream_reads_them(
         "categoryId": "1",
         "dir": "DESC",
         "filter": '[{"comparison":"eq","field":"number","value":"100"}]',
+        "fiscalPeriodId": str(FP2025),
         "onlyActive": "true",
         "onlyNotes": "true",
         "query": "Projekt",
         "sort": "name",
     }
-    assert result.meta.request == {"org": DEMO, **sent, "categoryId": 1}
+    assert result.meta.request == {
+        "org": DEMO,
+        **sent,
+        "categoryId": 1,
+        "fiscalPeriodId": FP2025,
+    }
+
+
+def test_list_cost_centers_names_the_fiscal_period_of_its_balances(
+    replay_fixture: ReplayFixture, fixtures_dir: Path
+) -> None:
+    """The balances of 2026, which is not the current period; recorded on 2026-11-17 (#24)."""
+    recording = recorded(fixtures_dir, "account_costcenter_list", "fp2026")
+    assert recorded_query(recording) == {"fiscalPeriodId": str(FP2026)}
+    route = replay_fixture("account_costcenter_list", "fp2026", match_params=["fiscalPeriodId"])
+    result = tasks.list_cost_centers(DEMO, fiscal_period_id=FP2026)
+    assert sent_query(route) == recorded_query(recording)
+    assert result.meta.request == {"org": DEMO, "fiscalPeriodId": FP2026}
+    assert (result.meta.total, len(result.data)) == (1, 1)
+    (centre,) = result.data
+    assert (centre.id, centre.number) == (1, "100")
+    assert (centre.opening_amount, centre.end_amount) == (Decimal(0), Decimal(0))
+
+
+@pytest.mark.anyio
+async def test_list_cost_centers_as_a_tool_takes_the_fiscal_period(
+    replay_fixture: ReplayFixture,
+) -> None:
+    replay_fixture("account_costcenter_list", "fp2026", match_params=["fiscalPeriodId"])
+    arguments = {"org": DEMO, "fiscal_period_id": FP2026}
+    payload = await mcp_call(server, "cashctrl_list_cost_centers", arguments)
+    assert payload["meta"]["request"] == {"org": DEMO, "fiscalPeriodId": FP2026}
+    assert payload["data"][0]["end_amount"] == 0
 
 
 @pytest.mark.parametrize(
@@ -2691,6 +2792,7 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
     "cashctrl_list_tax_codes": ("tax_list/default", {}),
     "cashctrl_list_accounts": ("account_list/filter_number_eq", {"filter": [NUMBER_1020]}),
     "cashctrl_get_account": ("account_read/by_id", {}),
+    "cashctrl_get_fiscal_period": ("fiscalperiod_read/by_id", {}),
     "cashctrl_list_journal_entries": (
         "journal_list/fp2026_start_0_limit_5",
         {"fiscal_period_id": 1, "limit": 5},

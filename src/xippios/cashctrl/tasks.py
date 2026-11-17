@@ -120,6 +120,7 @@ __all__ = [
     "export_orders",
     "export_persons",
     "get_account",
+    "get_fiscal_period",
     "get_journal_entry",
     "get_order",
     "get_order_document",
@@ -431,6 +432,27 @@ async def list_fiscal_periods_async(org: str) -> Result[list[FiscalPeriod]]:
     response = await api.fiscalperiod_list(org)
     meta = _meta(org, "fiscalperiod/list.json", {}, total=response.total)
     return Result(data=response.data, meta=meta)
+
+
+async def get_fiscal_period_async(org: str, id: int | None = None) -> Result[FiscalPeriod]:
+    """Read one fiscal period of an organisation by its id, or the current one.
+
+    The period comes back with its ``name``, ``start`` and ``end`` as dates, whether it is
+    closed and the months still open or closed (``open_month_ids``, ``closed_month_ids``,
+    as ``YYYY-MM``). Without ``id`` upstream reads the API user's current fiscal period,
+    the one the lists and balances answer for when given no ``fiscal_period_id``: its
+    ``id`` names it. The read itself sends ``is_current`` false and no
+    ``last_entry_date``, the current period's too (observed 2026-11-17);
+    ``list_fiscal_periods`` has both. An id no fiscal period has raises
+    ``NotFoundError``.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        id: The fiscal period's ``id`` as ``list_fiscal_periods`` gives it, e.g. ``2``;
+            left out, the current fiscal period.
+    """
+    period = await api.fiscalperiod_read(org, id)
+    return Result(data=period, meta=_meta(org, "fiscalperiod/read.json", {"id": id}))
 
 
 async def list_currencies_async(org: str) -> Result[list[Currency]]:
@@ -1163,6 +1185,7 @@ async def list_cost_centers_async(
     query: str | None = None,
     filter: list[Filter] | None = None,
     category_id: int | None = None,
+    fiscal_period_id: int | None = None,
     only_active: bool = False,
     only_notes: bool = False,
     sort: str | None = None,
@@ -1174,9 +1197,10 @@ async def list_cost_centers_async(
     an allocation in ``create_journal_entry``, ``update_journal_entry`` and the items of
     ``create_order``), ``number`` (as text, ``"100"``), ``name`` (localised),
     ``category_id``, ``is_inactive``, ``notes``, its targets ``target_min`` and
-    ``target_max``, and its balances ``opening_amount`` and ``end_amount``, assumed to be
-    the API user's current fiscal period's (this task sends no ``fiscalPeriodId``,
-    upstream documents no default, and only ``0`` was observed). ``meta.total`` is
+    ``target_max``, and its balances ``opening_amount`` and ``end_amount`` for one
+    fiscal period: ``fiscal_period_id``, which ``meta.request`` names, or the API user's
+    current fiscal period when it is left out (assumed: upstream documents no default;
+    ``get_fiscal_period`` without an id names that period). ``meta.total`` is
     upstream's count. Upstream ignores
     values it does not understand, so ``dir`` and the filters' ``comparison`` are checked
     first and a wrong one is refused.
@@ -1189,6 +1213,8 @@ async def list_cost_centers_async(
             e.g. ``number``) and ``value`` (a text, or a list of texts of which any may
             match), e.g. ``[{"comparison": "eq", "field": "number", "value": "100"}]``.
         category_id: Only the cost centers of one cost center category, e.g. ``1``.
+        fiscal_period_id: The fiscal period whose balances are returned, an ``id`` from
+            ``list_fiscal_periods``, e.g. ``2``; the current fiscal period when left out.
         only_active: ``true`` to leave out inactive cost centers.
         only_notes: ``true`` to list only cost centers with notes.
         sort: The column to sort by, e.g. ``number`` (upstream's default) or ``name``.
@@ -1199,6 +1225,7 @@ async def list_cost_centers_async(
         "category_id": category_id,
         "dir": dir,
         "filter": filters,
+        "fiscal_period_id": fiscal_period_id,
         "only_active": only_active or None,
         "only_notes": only_notes or None,
         "query": query,
@@ -1984,6 +2011,7 @@ list_currencies = sync(list_currencies_async)
 list_tax_codes = sync(list_tax_codes_async)
 list_accounts = sync(list_accounts_async)
 get_account = sync(get_account_async)
+get_fiscal_period = sync(get_fiscal_period_async)
 list_journal_entries = sync(list_journal_entries_async)
 get_journal_entry = sync(get_journal_entry_async)
 list_persons = sync(list_persons_async)

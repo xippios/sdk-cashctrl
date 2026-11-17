@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-11-17T20:00:40.535949Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/fiscalperiod/read.json"
+  },
+  "response": {
+    "body": "{\"success\":true,\"data\":{\"id\":2,\"created\":\"2026-10-23 10:29:24.0\",\"createdBy\":\"API:REDACTED\",\"lastUpdated\":\"2026-10-23 10:29:24.0\",\"lastUpdatedBy\":\"API:REDACTED\",\"name\":\"2025\",\"start\":\"2025-01-01 00:00:00.0\",\"end\":\"2025-12-31 23:59:59.0\",\"salaryStart\":\"2025-01-01 00:00:00.0\",\"salaryEnd\":\"2025-12-31 23:59:59.0\",\"shortName\":null,\"lastEntryDate\":null,\"transient\":false,\"current\":false,\"salaryClosed\":false,\"closedMonthIds\":[],\"availableMonthIds\":[\"2025-01\",\"2025-02\",\"2025-03\",\"2025-04\",\"2025-05\",\"2025-06\",\"2025-07\",\"2025-08\",\"2025-09\",\"2025-10\",\"2025-11\",\"2025-12\"],\"closedSalaryMonthIds\":[],\"availableSalaryMonthIds\":[\"2025-01\",\"2025-02\",\"2025-03\",\"2025-04\",\"2025-05\",\"2025-06\",\"2025-07\",\"2025-08\",\"2025-09\",\"2025-10\",\"2025-11\",\"2025-12\"],\"openMonthIds\":[\"2025-01\",\"2025-02\",\"2025-03\",\"2025-04\",\"2025-05\",\"2025-06\",\"2025-07\",\"2025-08\",\"2025-09\",\"2025-10\",\"2025-11\",\"2025-12\"],\"openSalaryMonthIds\":[\"2025-01\",\"2025-02\",\"2025-03\",\"2025-04\",\"2025-05\",\"2025-06\",\"2025-07\",\"2025-08\",\"2025-09\",\"2025-10\",\"2025-11\",\"2025-12\"],\"closed\":false,\"isClosed\":false,\"isSalaryClosed\":false,\"isCurrent\":false,\"isTransient\":false}}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 17 Nov 2026 20:00:40 GMT"
+      ],
+      [
+        "etag",
+        "\"1794633337004-gzip\""
+      ],
+      [
+        "vary",
+        "Accept-Encoding"
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

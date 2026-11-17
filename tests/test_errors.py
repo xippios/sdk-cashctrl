@@ -94,6 +94,12 @@ def test_the_observed_unknown_journal_entry_is_not_found(fixtures_dir: Path) -> 
     assert str(error) == "CashCtrl: This book entry does not exist. (/journal/read.json)"
 
 
+def test_the_observed_unknown_fiscal_period_is_not_found(fixtures_dir: Path) -> None:
+    error = classify(recorded(fixtures_dir, "fiscalperiod_read", "unknown_id"))
+    assert isinstance(error, NotFoundError)
+    assert str(error) == ("CashCtrl: This fiscal period does not exist. (/fiscalperiod/read.json)")
+
+
 def test_the_observed_missing_id_is_a_rejection_with_a_message(fixtures_dir: Path) -> None:
     error = classify(recorded(fixtures_dir, "account_read", "missing_id"))
     assert isinstance(error, RequestRejected)
