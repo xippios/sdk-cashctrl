@@ -37,16 +37,17 @@ checklist, https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.m
    request of its own, before the release's, only when a record changed or `fetched`
    goes from a bare date to the full time; otherwise it gets none, and the release's pull
    request cites the run, "unchanged" meaning the records, not the files (conventions
-   §12).
+   §12). cashctrl packages none, so there is nothing to refresh until a documented value
+   set is needed.
 3. **Live evidence.** The release's pull request cites a green run of `live.yml` on the
    commit of `main` it starts from: the nightly run, or, where none ran after the last
    pull request before the release, one dispatch of `live.yml` on `main`. An adoption
    that landed late counts as such a pull request, since it changes what the live tests
    run through, and a task added since the last green run would otherwise reach its tag
    without a live test. Before a dispatch, where the live tests can run here
-   (`XIPPIOS_LIVE_TESTS=1`), run them first,
-   `uv run pytest -m live --tb=short --assert=plain`, so that a failure shows before the
-   dispatch spends a run.
+   (`XIPPIOS_LIVE_TESTS=1`), run them first, demo only, with the command `CLAUDE.md`
+   gives under Commands, `--assert=plain` beside `--tb=short`, so that a failure shows
+   before the dispatch spends a run.
 4. SemVer check: pre-1.0, a breaking change bumps the minor. An upstream API change that
    changed our public surface is a breaking change. Read the fragments under `changelog/`
    and what `## [Unreleased]` holds, and confirm that the version matches them; say so in

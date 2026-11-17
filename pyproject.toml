@@ -1,6 +1,6 @@
 [project]
 name = "xippios-cashctrl"
-version = "0.1.0"
+version = "0.3.0"
 description = "Typed client, MCP tools and HTTP routes for CashCtrl"
 readme = "README.md"
 license = "Apache-2.0"
@@ -28,6 +28,7 @@ testing = ["xippios-core[testing]~=0.3.0"]
 
 [project.scripts]
 xippios-cashctrl-mcp = "xippios.cashctrl.mcp:run"
+xippios-cashctrl-mcp-write = "xippios.cashctrl.mcp_write:run"
 
 [project.urls]
 Homepage = "https://github.com/xippios/sdk-cashctrl"
@@ -46,6 +47,9 @@ dev = [
   "respx>=0.22",
   "anyio>=4",
   "detect-secrets>=1.5",
+  # Pinned to scripts/refresh_upstream.py's PEP 723 block, for mypy --strict over it.
+  "beautifulsoup4==4.15.0",
+  "markdownify==1.2.3",
 ]
 
 [build-system]
@@ -103,4 +107,5 @@ testpaths = ["tests"]
 # record_property, in a live test say, warns under xunit2 when a run writes --junitxml.
 junit_family = "xunit1"
 # Core's plugin sets it to the placeholder key in every test not marked live (ADR-0013).
-xippios_placeholder_key_envs = ["CASHCTRL_API_KEY"]
+# The demo organisation's key: the scaffold's CASHCTRL_API_KEY is never read (ADR-0024).
+xippios_placeholder_key_envs = ["CASHCTRL_DEMO_API_KEY"]
