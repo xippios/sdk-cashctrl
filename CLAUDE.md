@@ -146,7 +146,7 @@ src/xippios/cashctrl/
                    (list_custom_fields, list_cost_centers, get_report_data, list_history)
   tasks_write.py   confirm-gated write tasks for the separate write server (Write tools below)
   mcp_write.py     xippios-cashctrl-mcp-write entry point
-  mcp.py           xippios-cashctrl-mcp entry point
+  mcp.py           xippios-cashctrl-mcp-read entry point
   http.py          FastAPI router
   params.py, enums.py, reference/  the packaged lists' scaffold: none is packaged
                    (/refresh-reference-data)
@@ -174,6 +174,7 @@ tests/
   test_key_resolution.py  keys resolved as in production: placeholder_api_key pins nothing
   test_errors.py   classify, RequestRejected and the recorded refusals
   test_org_lock.py the --org lock: bound tools, driven through core's mcp_call_text (in-process)
+  test_entry_points.py  the servers' entry points, -read and -write, and the text that names them
   test_record_fixture.py  the recorder never writes the demo host, subdomain or key
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
   test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
@@ -361,7 +362,7 @@ uv run pre-commit run --all-files
 python3 scripts/adr_index.py --check   # the index matches the records in docs/adr/
 direnv exec ~/github/sdk env -u CASHCTRL_ORGS XIPPIOS_LIVE_TESTS=1 uv run pytest -m live --tb=short --assert=plain   # demo only
 
-uv run xippios-cashctrl-mcp --org demo   # stdio, bound to demo; --http for streamable HTTP
+uv run xippios-cashctrl-mcp-read --org demo   # stdio, bound to demo; --http for streamable HTTP
 uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loopback only
 ```
 

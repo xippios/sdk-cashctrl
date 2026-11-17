@@ -85,12 +85,15 @@ there.
 
 ## MCP
 
+Two servers serve the tools: `xippios-cashctrl-mcp-read` the read tools, and
+`xippios-cashctrl-mcp-write` the write tools (Write tools below). The read server:
+
 ```json
 {
   "mcpServers": {
     "cashctrl": {
       "command": "uvx",
-      "args": ["--from", "xippios-cashctrl[mcp]", "xippios-cashctrl-mcp", "--org", "acme"],
+      "args": ["--from", "xippios-cashctrl[mcp]", "xippios-cashctrl-mcp-read", "--org", "acme"],
       "env": {
         "CASHCTRL_ORGS": "acme",
         "CASHCTRL_ACME_SUBDOMAIN": "acme",
