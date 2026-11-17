@@ -26,29 +26,17 @@ recorded. If the demo pair ever points at an organisation that is not that synth
 one, stop: never record from it. These policies stand all the same, and each refusal
 writes nothing and exits non-zero:
 
-- **GET, and POST for the eleven write paths only.** `--method POST` is accepted for
-  exactly the operations the write tools call: `journal/create.json`,
-  `journal/update.json`, `journal/delete.json`, `person/create.json`,
-  `person/update.json`, `person/delete.json`, `order/create.json`,
-  `order/update.json`, `order/delete.json`, `order/update_status.json`,
-  `order/payment/create.json`. Every other POST (`order/continue.json`,
-  `order/bookentry/create.json`, ...) and every other method is refused before a
-  request is sent, and so is a `create.json` none of whose pairs carries
-  `xippios-live`, `order/payment/create.json` excepted, whose orders are the marker.
-  `order/update_status.json` and `order/payment/create.json` carry no text to mark: the recorder first reads every order their `ids` or `orderIds` name
-  (`order/read.json`, one GET each) and refuses the write unless each is marked
-  (`xippios-live` in its description, or as its `nr`); an order it cannot read refuses
-  it too. A POST sends the `key=value` pairs
-  as the form body, in their order, as the write tools send theirs
-  (`application/x-www-form-urlencoded; charset=UTF-8`). A recorded write changes the
+- **GET, and POST for the write tools' paths only.** The docstring of
+  `scripts/record_fixture.py` lists the paths a POST may be recorded for
+  (`WRITE_PATHS`) and the marker each write must carry or find on its orders, and the
+  recorder refuses everything else before a request is sent; a GET goes only to a path
+  `docs/upstream/` documents as a GET. A POST sends the `key=value` pairs as the form
+  body, in their order, as the write tools send theirs. A recorded write changes the
   demo organisation: the recorder says so, names the `insertId` upstream answered, and
-  asks for the matching delete; after a payment it says that the payment stays behind,
-  since upstream documents no payment delete (an accepted residue, Johannes,
-  2026-10-28). Record only a record marked `xippios-live` (in its
-  title, company or description, and `nr` where it has one), its update and its
-  delete, in that order, so that every record created is deleted again; never touch a
-  seeded record. Afterwards confirm with one list per resource (`query=xippios-live`,
-  counts only) that nothing is left. Never work around this.
+  asks for the matching delete. Record only a marked record, as the docstring says, its
+  update and its delete, in that order, so that every record created is deleted again;
+  never touch a seeded record. Afterwards confirm with one list per resource
+  (`query=xippios-live`, counts only) that nothing is left. Never work around this.
 - **`.json` only.** An endpoint without the extension (`account/balance`,
   `account/costcenter/balance`, `fiscalperiod/result`, `setting/get`) answers a bare
   number or a document, and an export (`.pdf`, `.xlsx`, `.csv`, `.zip`) a file; both

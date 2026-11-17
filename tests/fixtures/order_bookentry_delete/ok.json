@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-11-17T18:14:27.608396Z",
+  "request": {
+    "body": "ids=146",
+    "body_base64": false,
+    "content_type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "method": "POST",
+    "url": "https://demo.cashctrl.com/api/v1/order/bookentry/delete.json"
+  },
+  "response": {
+    "body": "{\"success\":true,\"message\":\"1 book entry deleted\"}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 17 Nov 2026 18:14:27 GMT"
+      ],
+      [
+        "etag",
+        "\"1794633337004\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}
