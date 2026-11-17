@@ -26,38 +26,46 @@ described in ``docs/demo-org.md``: invented companies on placeholder streets,
 recorded. These policies stand all the same; every refusal writes nothing, says why,
 never shows a value, and exits with status 1:
 
-- GET for what the snapshot documents as a GET, and POST for the eleven write paths
+- GET for what the snapshot documents as a GET, and POST for the fourteen write paths
   only. A GET is sent only to a path whose Endpoint block in ``docs/upstream/``
   (``UPSTREAM``) reads ``GET`` and nothing else (``documented_methods``): a path the
-  snapshot documents as a POST (``account/create.json``,
-  ``order/bookentry/create.json``, ``fiscalperiod/switch.json``) or does not document
-  at all is refused before a request is sent, since whether upstream acts on a GET to
-  a POST path is unverified (https://github.com/xippios/sdk-cashctrl/issues/27); a
-  refreshed snapshot moves the refusal with it. ``--method POST`` is allowed for
-  exactly the operations this package's write tools call (``WRITE_PATHS``):
-  ``journal/create.json``, ``journal/update.json``, ``journal/delete.json``,
-  ``person/create.json``, ``person/update.json``, ``person/delete.json``,
-  ``order/create.json``, ``order/update.json``, ``order/delete.json``,
-  ``order/update_status.json`` and ``order/payment/create.json``. It sends the
+  snapshot documents as a POST (``account/create.json``, ``fiscalperiod/switch.json``)
+  or does not document at all is refused before a request is sent, since whether
+  upstream acts on a GET to a POST path is unverified
+  (https://github.com/xippios/sdk-cashctrl/issues/27); a refreshed snapshot moves the
+  refusal with it. ``--method POST`` is allowed for exactly the operations this
+  package's write tools call (``WRITE_PATHS``): ``journal/create.json``,
+  ``journal/update.json``, ``journal/delete.json``, ``person/create.json``,
+  ``person/update.json``, ``person/delete.json``, ``order/create.json``,
+  ``order/update.json``, ``order/delete.json``, ``order/update_status.json``,
+  ``order/payment/create.json``, ``order/bookentry/create.json``,
+  ``order/bookentry/update.json`` and ``order/bookentry/delete.json``. It sends the
   ``key=value`` pairs as a form body, as the write tools do (``api/_form.py``:
   ``application/x-www-form-urlencoded; charset=UTF-8``). Every other POST
-  (``order/continue.json``, ``account/create.json``, ``order/bookentry/create.json``,
-  a POST to a list) and every other method is refused before a request is sent, and so
-  are a GET to one of the write paths (a write is recorded as a POST or not at all) and
-  a ``create.json`` whose pairs do not carry the
-  marker ``xippios-live`` (``MARK``) in a value, ``order/payment/create.json`` excepted,
-  whose orders are the marker: a write records a marked record, a change to it or its
-  delete, and nothing else.
-  ``order/update_status.json`` and ``order/payment/create.json`` change orders and carry
-  no free text to mark (a payment has no text field): the recorder reads every order
+  (``order/continue.json``, ``account/create.json``, a POST to a list) and every other
+  method is refused before a request is sent, and so are a GET to one of the write
+  paths (a write is recorded as a POST or not at all) and a ``create.json`` whose pairs
+  do not carry the marker ``xippios-live`` (``MARK``) in a value, the order writes
+  excepted, whose orders are the marker: a write records a marked record, a change to
+  it or its delete, and nothing else.
+  ``order/update_status.json``, ``order/payment/create.json`` and
+  ``order/bookentry/create.json`` change orders (``ORDER_WRITES``): a payment carries no
+  text to mark, and a book entry carries its order's marker
+  (https://github.com/xippios/sdk-cashctrl/issues/44). The recorder reads every order
   their ``ids`` or ``orderIds`` name (``order/read.json``, one GET each, through the
   recording client) and refuses the write, before it is sent, unless each order is
   marked as the live tests mark theirs, ``MARK`` in its ``description`` or ``MARK`` as
   its ``nr``; an order that cannot be read refuses it too (``unmarked_orders``, Johannes,
-  2026-10-28). A recorded write changes the demo organisation: the recorder says so
-  after the request and asks for the matching delete, recorded or run, so that no created
-  record stays behind; upstream documents no delete of a payment, so after one it asks
-  for the orders' delete, which leaves the payment behind.
+  2026-10-28). ``order/bookentry/update.json`` and ``order/bookentry/delete.json`` name
+  book entries (``BOOK_ENTRY_WRITES``): each entry is read (``order/bookentry/read.json``),
+  its ``orderId`` taken, and that order read and checked the same way, two GETs per
+  entry, since the entry's read names its order but not the order's marker (observed on
+  2026-11-17); an entry that cannot be read or names no order refuses the write too. A
+  recorded write changes the demo organisation: the recorder says so after the request
+  and asks for the matching delete, recorded or run, so that no created record stays
+  behind: after a book entry, the entry's delete before its orders'; upstream documents
+  no delete of a payment, so after one it asks for the orders' delete, which leaves the
+  payment behind.
 - ``.json`` only. An endpoint without the extension answers a bare number or a document
   (``account/balance``, ``account/costcenter/balance``, ``fiscalperiod/result``,
   ``setting/get``) and an export (``.pdf``, ``.xlsx``, ``.csv``, ``.zip``) a file; both
@@ -176,16 +184,30 @@ WRITE_PATHS = frozenset(
         "order/delete.json",
         "order/update_status.json",
         "order/payment/create.json",
+        "order/bookentry/create.json",
+        "order/bookentry/update.json",
+        "order/bookentry/delete.json",
     }
 )
 """The endpoints a POST may be recorded for: exactly those the write tools call."""
 MARK = "xippios-live"
 """The marker a recorded create must carry in one of its values (title, company, ...)."""
-ORDER_WRITES = {"order/update_status.json": "ids", "order/payment/create.json": "orderIds"}
+ORDER_WRITES = {
+    "order/update_status.json": "ids",
+    "order/payment/create.json": "orderIds",
+    "order/bookentry/create.json": "orderIds",
+}
 """The writes that change existing orders, by the field that names them, comma-separated.
 
-Neither carries a text to mark, so every order they name must be marked
-(``unmarked_orders``) before the write is sent.
+A status and a payment carry no text to mark, and a book entry carries its order's
+marker, so every order they name must be marked (``unmarked_orders``) before the write is
+sent.
+"""
+BOOK_ENTRY_WRITES = {"order/bookentry/update.json": "id", "order/bookentry/delete.json": "ids"}
+"""The writes that change an order's book entries, by the field that names the entries.
+
+An update names one entry, a delete one or more, comma-separated. Each entry is read for
+its order, and that order must be marked (``unmarked_orders``).
 """
 _CASE = re.compile(r"[a-z0-9][a-z0-9_]*")
 
@@ -284,7 +306,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         default="GET",
         help=(
             "HTTP method: GET for a path docs/upstream/ documents as a GET, or POST for one "
-            "of the eleven write paths the write tools call"
+            "of the fourteen write paths the write tools call"
         ),
     )
     parser.add_argument(
@@ -313,8 +335,9 @@ def fixture_endpoint(endpoint: str) -> str:
 def unmarked(method: str, endpoint: str, params: dict[str, str]) -> str | None:
     """Why a create must not be sent: none of its values carries ``MARK``; else ``None``.
 
-    ``order/payment/create.json`` has no text to mark: the orders it pays are checked
-    instead (``unmarked_orders``).
+    ``order/payment/create.json`` has no text to mark, and ``order/bookentry/create.json``
+    carries its order's marker: the orders they name are checked instead
+    (``unmarked_orders``).
     """
     creates = (
         is_write(method) and endpoint.endswith("/create.json") and endpoint not in ORDER_WRITES
@@ -364,7 +387,7 @@ def refusal(method: str, endpoint: str) -> str | None:
         return f"{endpoint} is a write: it is recorded with --method POST or not at all"
     if is_write(method) and endpoint not in WRITE_PATHS:
         return (
-            f"a POST is recorded only for one of the eleven write paths the write tools "
+            f"a POST is recorded only for one of the fourteen write paths the write tools "
             f"call ({', '.join(sorted(WRITE_PATHS))}), not {endpoint}"
         )
     if not endpoint.endswith(".json"):
@@ -427,53 +450,92 @@ def marked_order(order: object) -> bool:
     return (isinstance(description, str) and MARK in description) or order.get("nr") == MARK
 
 
+async def _read_record(
+    client: AsyncClient, path: str, record_id: int
+) -> tuple[dict[str, Any] | None, int]:
+    """``(record, status)`` of one ``read.json`` by ``id``; the record ``None`` unless read.
+
+    Read means HTTP 200 with ``"success": true`` and a ``data`` object for this id. The
+    answer is returned to be checked and is never printed or kept.
+    """
+    response = await client.request(
+        "GET", path, params={"id": str(record_id)}, raise_on_error=False
+    )
+    try:
+        answer = response.json()
+    except ValueError:
+        answer = None
+    record = answer.get("data") if isinstance(answer, dict) else None
+    readable = (
+        response.status_code == 200
+        and isinstance(answer, dict)
+        and answer.get("success") is True
+        and isinstance(record, dict)
+        and record.get("id") == record_id
+    )
+    return (record if readable else None), response.status_code
+
+
+async def _unmarked_order(client: AsyncClient, order_id: int, named: str) -> str | None:
+    """Why the order ``order_id`` does not admit a write, ``named`` as the reason says it."""
+    order, status = await _read_record(client, "/order/read.json", order_id)
+    if order is None:
+        return f"{named} could not be read (HTTP {status}), so its marker is unknown"
+    if not marked_order(order):
+        return f"{named} carries no marker (its description holds no {MARK}, its nr is not {MARK})"
+    return None
+
+
 async def unmarked_orders_async(
     client: AsyncClient, method: str, endpoint: str, params: dict[str, str]
 ) -> str | None:
-    """Why an order write must not be sent: an order it names is not marked; else ``None``.
+    """Why an order write must not be sent: an order it acts on is not marked; else ``None``.
 
-    For ``ORDER_WRITES`` only: every id of its ids field is read with ``order/read.json``,
-    one GET each, through ``client``, and the write is refused unless each answer is
-    HTTP 200 with ``"success": true`` and the order marked (``marked_order``). Fails
-    closed: no ids, an id that is not a whole number, an order that cannot be read or
-    answers for another id refuses it. The answers are read for the marker and never
-    printed or kept.
+    For ``ORDER_WRITES``: every id of its ids field is read with ``order/read.json``,
+    one GET each, through ``client``. For ``BOOK_ENTRY_WRITES``: every entry its field
+    names is read with ``order/bookentry/read.json``, and the order its ``orderId``
+    names with ``order/read.json``, two GETs per entry. The write is refused unless each
+    answer is HTTP 200 with ``"success": true`` for the id asked and each order is
+    marked (``marked_order``). Fails closed: no ids, an id that is not a whole number,
+    an update naming more than one entry, a record that cannot be read or answers for
+    another id, and an entry whose ``orderId`` is no whole number refuse it. The answers
+    are read for the marker and never printed or kept.
     """
-    field = ORDER_WRITES.get(endpoint) if is_write(method) else None
+    if not is_write(method):
+        return None
+    refused = f"{endpoint} is recorded only for orders marked {MARK}: "
+    field = ORDER_WRITES.get(endpoint)
+    if field is not None:
+        ids = order_ids(params.get(field, ""))
+        if ids is None:
+            return f"{refused}{field} must name the orders, comma-separated ids such as 20,21"
+        for order_id in ids:
+            reason = await _unmarked_order(client, order_id, f"order {order_id}")
+            if reason is not None:
+                return refused + reason
+        return None
+    field = BOOK_ENTRY_WRITES.get(endpoint)
     if field is None:
         return None
-    ids = order_ids(params.get(field, ""))
-    if ids is None:
-        return (
-            f"{endpoint} is recorded only for orders marked {MARK}: {field} must name the "
-            "orders, comma-separated ids such as 20,21"
-        )
-    for order_id in ids:
-        response = await client.request(
-            "GET", "/order/read.json", params={"id": str(order_id)}, raise_on_error=False
-        )
-        try:
-            answer = response.json()
-        except ValueError:
-            answer = None
-        order = answer.get("data") if isinstance(answer, dict) else None
-        readable = (
-            response.status_code == 200
-            and isinstance(answer, dict)
-            and answer.get("success") is True
-            and isinstance(order, dict)
-            and order.get("id") == order_id
-        )
-        if not readable:
+    entries = order_ids(params.get(field, ""))
+    if field == "id" and (entries is None or len(entries) != 1):
+        return f"{refused}id must name one book entry, its id such as 31"
+    if entries is None:
+        return f"{refused}{field} must name the book entries, comma-separated ids such as 31,32"
+    for entry_id in entries:
+        entry, status = await _read_record(client, "/order/bookentry/read.json", entry_id)
+        if entry is None:
             return (
-                f"{endpoint} is recorded only for orders marked {MARK}: order {order_id} "
-                f"could not be read (HTTP {response.status_code}), so its marker is unknown"
+                f"{refused}book entry {entry_id} could not be read (HTTP {status}), so its "
+                "order is unknown"
             )
-        if not marked_order(order):
-            return (
-                f"{endpoint} is recorded only for orders marked {MARK}: order {order_id} "
-                f"carries no marker (its description holds no {MARK}, its nr is not {MARK})"
-            )
+        its_order = entry.get("orderId")
+        if not isinstance(its_order, int) or isinstance(its_order, bool) or its_order < 1:
+            return f"{refused}book entry {entry_id} names no order"
+        named = f"order {its_order} of book entry {entry_id}"
+        reason = await _unmarked_order(client, its_order, named)
+        if reason is not None:
+            return refused + reason
     return None
 
 
@@ -1004,6 +1066,8 @@ def changed_reminder(endpoint: str, response: httpx.Response) -> str:
         due = "order/delete.json for the marked orders it named"
         if endpoint == "order/payment/create.json":
             due += " (upstream documents no delete of a payment, which stays behind)"
+        if endpoint == "order/bookentry/create.json":
+            due = f"order/bookentry/delete.json for the entry it booked, then {due}"
     else:
         due = "the matching delete.json"
     return (
