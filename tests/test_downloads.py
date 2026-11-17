@@ -1,6 +1,8 @@
-"""The file tasks: an order's document and the list exports, tested with synthetic bytes.
+"""The file tasks: an order's document, the list exports and the reports, on synthetic bytes.
 
-G5 (5), (6) and (7) of 2026-10-28. A file cannot be recorded: the recorder refuses an
+G5 (5), (6) and (7) of 2026-10-28, and the reports' PDF and Excel files of
+https://github.com/xippios/sdk-cashctrl/issues/45, each refused by type on the recorded
+report tree before its download. A file cannot be recorded: the recorder refuses an
 endpoint without ``.json`` and a body that is not UTF-8 text, so no file wrapper has a
 fixture directory. As core's own download tests do, each test mounts a small made-up body
 with respx under the content type upstream is assumed to send (``BODIES``) and checks the
@@ -13,7 +15,8 @@ import inspect
 import json
 import re
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -27,7 +30,7 @@ from xippios.core import (
     UpstreamError,
     ValidationError,
 )
-from xippios.core.testing import sent_query, sent_urls
+from xippios.core.testing import fixture_path, load_fixture, sent_query, sent_urls
 
 from xippios.cashctrl import api, tasks
 from xippios.cashctrl._client import DEMO, SOURCE
@@ -55,7 +58,9 @@ EXPORTS: dict[str, tuple[Callable[..., typing.Any], Callable[..., typing.Any], s
     "export_orders": (tasks.export_orders, tasks.list_orders, "order"),
 }
 """Each export, the list task it mirrors and their module."""
-FILE_TASKS = frozenset({"download_order_document", *EXPORTS})
+REPORT_TASKS = ("download_report", "download_report_collection", "download_annual_report")
+"""The report module's file tasks (https://github.com/xippios/sdk-cashctrl/issues/45)."""
+FILE_TASKS = frozenset({"download_order_document", *EXPORTS, *REPORT_TASKS})
 NUMBER_1020 = Filter(comparison="eq", field="number", value="1020")
 
 
@@ -96,8 +101,19 @@ async def test_the_file_tasks_are_no_tools_and_no_routes() -> None:
 FILE_WRAPPERS = {
     name: getattr(api, name)
     for name in api.__all__
-    if re.fullmatch(r"[a-z]+_list_(csv|xlsx|pdf)|order_document_read_pdf", name)
+    if re.fullmatch(
+        r"[a-z]+_list_(csv|xlsx|pdf)|order_document_read_pdf|report_[a-z]+_download_[a-z_]+",
+        name,
+    )
 }
+REPORT_WRAPPERS = {
+    "report_element_download_pdf",
+    "report_element_download_xlsx",
+    "report_collection_download_pdf",
+    "report_collection_download_xlsx",
+    "report_collection_download_annualreport_pdf",
+}
+"""The PDF and Excel files of ``docs/upstream/report.md``, the annual report's among them."""
 
 
 @pytest.mark.parametrize("wrapper", FILE_WRAPPERS.values(), ids=FILE_WRAPPERS.keys())
@@ -115,7 +131,7 @@ def test_a_file_wrapper_is_named_after_its_path(wrapper: Callable[..., typing.An
 
 def test_there_is_a_wrapper_for_every_format_of_every_export() -> None:
     expected = {f"{module}_list_{ext}" for *_, module in EXPORTS.values() for ext in BODIES}
-    assert set(FILE_WRAPPERS) == expected | {"order_document_read_pdf"}
+    assert set(FILE_WRAPPERS) == expected | {"order_document_read_pdf"} | REPORT_WRAPPERS
 
 
 # The order document (G5 (5) of 2026-10-28; Johannes, 2026-10-28: ids, one PDF a call).
@@ -534,3 +550,422 @@ async def test_the_async_twins_are_the_tasks(respx_mock: respx.MockRouter, tmp_p
     result = await tasks.export_orders_async(DEMO, "pdf", tmp_path / "o.pdf", type="PURCHASE")
     assert sent_query(route) == {"type": "PURCHASE"}
     assert result.data.bytes == len(BODIES["pdf"][0])
+
+
+# The report files (https://github.com/xippios/sdk-cashctrl/issues/45): an element's or a
+# collection's PDF or Excel file and the annual report's PDF, each refused by the type rule
+# of get_report_data on the tree upstream lists right before the download.
+
+FP2025 = 2
+"""The demo organisation's fiscal period 2025."""
+REPORT_MEDIA = {"pdf": "application/pdf;charset=UTF-8", "xlsx": f"{XLSX};charset=UTF-8"}
+"""The content types upstream sent for a report's PDF and Excel file (observed 2026-11-17)."""
+TREE = f"{BASE}/report/tree.json"
+RULE = (
+    "payroll and people reports, every type that starts with SALARY_ or contains PERSON, "
+    "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART (personal data, ADR-0017)"
+)
+PAYROLL_TYPES = (
+    "SALARY_BOOK_ENTRIES, SALARY_LIST, SALARY_TYPES, SALARY_TYPE_RECAP, SETTLEMENT, "
+    "WITHHOLDING_TAX_SETTLEMENT"
+)
+"""The refused types of the recorded tree's collection 8, ``Lohnbericht``, sorted."""
+
+
+def tree_nodes(nodes: list[dict[str, typing.Any]]) -> Iterator[dict[str, typing.Any]]:
+    """Every node of a tree body, depth first."""
+    for node in nodes:
+        yield node
+        yield from tree_nodes(node.get("data") or [])
+
+
+def tree_body(
+    fixtures_dir: Path, changes: Mapping[str, Mapping[str, typing.Any]] | None = None
+) -> dict[str, typing.Any]:
+    """``report_tree/default``'s body, the nodes ``changes`` names by tree key changed.
+
+    Recorded on 2026-10-27: collection 1, ``Jahresbericht``, the one marked system, holds
+    the balance sheet (element 1) and the profit and loss (2); collection 3 the revenue
+    and expense by person; collection 8, ``Lohnbericht``, the payroll reports.
+    """
+    fixture = load_fixture(fixture_path(fixtures_dir, "report_tree", "default"))
+    body: dict[str, typing.Any] = json.loads(fixture.response.body)
+    for node in tree_nodes(body["data"]):
+        node.update((changes or {}).get(node["id"], {}))
+    return body
+
+
+def mount_tree(
+    router: respx.MockRouter,
+    fixtures_dir: Path,
+    changes: Mapping[str, Mapping[str, typing.Any]] | None = None,
+) -> respx.Route:
+    """Answer ``report/tree.json`` with the recorded tree, as ``tree_body`` changes it."""
+    return router.get(TREE).respond(200, json=tree_body(fixtures_dir, changes))
+
+
+def mount_report(
+    router: respx.MockRouter, endpoint: str, format: str, filename: str | None = None
+) -> respx.Route:
+    """Answer ``GET <endpoint>`` with ``format``'s synthetic body under upstream's type."""
+    headers = {"Content-Type": REPORT_MEDIA[format]}
+    if filename is not None:
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return router.get(f"{BASE}/{endpoint}").respond(200, content=BODIES[format][0], headers=headers)
+
+
+def test_the_report_files_are_pdf_and_excel() -> None:
+    assert tasks.REPORT_FORMATS == ("pdf", "xlsx")
+
+
+@pytest.mark.parametrize("format", ["pdf", "xlsx"])
+def test_download_report_writes_the_file_where_the_caller_says(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path, format: str
+) -> None:
+    tree = mount_tree(respx_mock, fixtures_dir)
+    endpoint = f"report/element/download.{format}"
+    route = mount_report(respx_mock, endpoint, format, f"Balance 2025.{format}")
+    dest = tmp_path / f"balance.{format}"
+    result = tasks.download_report(DEMO, 1, format, dest, fiscal_period=FP2025)
+    assert (tree.call_count, route.call_count) == (1, 1), "the tree first, then the file"
+    assert sent_query(route) == {"elementId": "1", "fiscalPeriod": str(FP2025)}
+    assert dest.read_bytes() == BODIES[format][0]
+    assert result.data.path == dest
+    assert result.data.bytes == len(BODIES[format][0])
+    assert result.data.filename == f"Balance 2025.{format}", "upstream's name, not dest's"
+    assert result.data.content_type == REPORT_MEDIA[format]
+    assert result.meta.endpoint == endpoint
+    assert result.meta.request == {"org": DEMO, "elementId": 1, "fiscalPeriod": FP2025}
+    assert (result.meta.tenant, result.meta.total) == (DEMO, None)
+    assert result.meta.retrieved_at == result.data.retrieved_at
+    assert files(tmp_path) == [dest.name], "no temporary file left"
+
+
+def test_a_report_file_takes_and_sends_the_parameters_of_get_report_data(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path
+) -> None:
+    """``download.pdf`` and ``download.xlsx`` document the parameters of ``data.json``."""
+    arguments: dict[str, typing.Any] = {
+        "start_date": date(2025, 1, 1),
+        "end_date": date(2025, 6, 30),
+        "language": "de",
+        "sort": "text",
+    }
+    mount_tree(respx_mock, fixtures_dir)
+    data = respx_mock.get(f"{BASE}/report/element/data.json").respond(
+        200, json={"total": 0, "data": []}
+    )
+    tasks.get_report_data(DEMO, 1, **arguments)
+    route = mount_report(respx_mock, "report/element/download.xlsx", "xlsx")
+    result = tasks.download_report(DEMO, 1, "xlsx", tmp_path / "half.xlsx", **arguments)
+    assert sent_query(route) == sent_query(data)
+    assert result.meta.request["startDate"] == "2025-01-01"
+    downloaded = set(inspect.signature(tasks.download_report).parameters) - {"format", "dest"}
+    assert downloaded == set(inspect.signature(tasks.get_report_data).parameters)
+    collection = set(inspect.signature(tasks.download_report_collection).parameters)
+    assert collection == downloaded - {"element_id"} | {"collection_id", "format", "dest"}
+
+
+@pytest.mark.parametrize("format", ["pdf", "xlsx"])
+def test_download_report_collection_writes_the_file_where_the_caller_says(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path, format: str
+) -> None:
+    """Collection 1 holds the balance sheet and the profit and loss: both pass."""
+    tree = mount_tree(respx_mock, fixtures_dir)
+    endpoint = f"report/collection/download.{format}"
+    route = mount_report(respx_mock, endpoint, format, f"Annual report 2025.{format}")
+    dest = tmp_path / f"annual.{format}"
+    result = tasks.download_report_collection(DEMO, 1, format, dest, fiscal_period=FP2025)
+    assert (tree.call_count, route.call_count) == (1, 1)
+    assert sent_query(route) == {"collectionId": "1", "fiscalPeriod": str(FP2025)}
+    assert dest.read_bytes() == BODIES[format][0]
+    assert result.data.filename == f"Annual report 2025.{format}"
+    assert result.meta.endpoint == endpoint
+    assert result.meta.request == {"org": DEMO, "collectionId": 1, "fiscalPeriod": FP2025}
+    assert result.meta.retrieved_at == result.data.retrieved_at
+    assert files(tmp_path) == [dest.name]
+
+
+@pytest.mark.parametrize("fiscal_period_id", [FP2025, None])
+def test_download_annual_report_writes_the_pdf_where_the_caller_says(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path, fiscal_period_id: int | None
+) -> None:
+    tree = mount_tree(respx_mock, fixtures_dir)
+    endpoint = "report/collection/download_annualreport.pdf"
+    route = mount_report(respx_mock, endpoint, "pdf", "Annual report 2025.pdf")
+    dest = tmp_path / "annual.pdf"
+    result = tasks.download_annual_report(DEMO, dest, fiscal_period_id=fiscal_period_id)
+    assert (tree.call_count, route.call_count) == (1, 1)
+    sent = {} if fiscal_period_id is None else {"fiscalPeriodId": fiscal_period_id}
+    assert sent_query(route) == {name: str(value) for name, value in sent.items()}
+    assert dest.read_bytes() == BODIES["pdf"][0]
+    assert result.meta.endpoint == endpoint
+    assert result.meta.request == {"org": DEMO, **sent}
+    assert files(tmp_path) == [dest.name]
+
+
+@pytest.mark.parametrize(
+    ("element_id", "report_type"),
+    [
+        (24, "SALARY_LIST"),
+        (28, "SETTLEMENT"),
+        (35, "WITHHOLDING_TAX_SETTLEMENT"),
+        (5, "REVENUE_BY_PERSON"),
+        (6, "EXPENSE_BY_PERSON_CHART"),
+    ],
+)
+@pytest.mark.parametrize("format", ["pdf", "xlsx"])
+def test_a_payroll_or_people_report_is_refused_before_its_download(
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+    tmp_path: Path,
+    element_id: int,
+    report_type: str,
+    format: str,
+) -> None:
+    tree = mount_tree(respx_mock, fixtures_dir)
+    route = mount_report(respx_mock, f"report/element/download.{format}", format)
+    with pytest.raises(InvalidRequestError) as refused:
+        tasks.download_report(DEMO, element_id, format, tmp_path / "x", fiscal_period=FP2025)
+    assert refused.value.message == (
+        f"report element {element_id} is of type {report_type}: download_report refuses {RULE}"
+    )
+    assert (tree.call_count, route.call_count) == (1, 0)
+    assert files(tmp_path) == []
+
+
+def test_the_debtor_report_passes_as_get_report_data_reads_it(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path
+) -> None:
+    """``OPEN_DEBTORS`` names business partners as ``list_persons`` does (0.3.0, row 225)."""
+    mount_tree(respx_mock, fixtures_dir)
+    route = mount_report(respx_mock, "report/element/download.pdf", "pdf")
+    tasks.download_report(DEMO, 12, "pdf", tmp_path / "debtors.pdf", fiscal_period=FP2025)
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("collection_id", "types"),
+    [
+        (8, PAYROLL_TYPES),
+        (
+            3,
+            "EXPENSE_BY_PERSON, EXPENSE_BY_PERSON_CHART, REVENUE_BY_PERSON, "
+            "REVENUE_BY_PERSON_CHART",
+        ),
+    ],
+)
+def test_a_collection_that_holds_a_refused_report_is_refused_before_its_download(
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+    tmp_path: Path,
+    collection_id: int,
+    types: str,
+) -> None:
+    """Its file holds every report in it, so one refused report refuses the collection."""
+    tree = mount_tree(respx_mock, fixtures_dir)
+    route = mount_report(respx_mock, "report/collection/download.pdf", "pdf")
+    with pytest.raises(InvalidRequestError) as refused:
+        tasks.download_report_collection(DEMO, collection_id, "pdf", tmp_path / "x.pdf")
+    assert refused.value.message == (
+        f"report collection {collection_id} holds reports of the types {types}: "
+        f"download_report_collection refuses {RULE}"
+    )
+    assert (tree.call_count, route.call_count) == (1, 0)
+    assert files(tmp_path) == []
+
+
+def test_every_download_reads_the_tree_as_upstream_lists_it_then(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path
+) -> None:
+    """A collection gains a payroll report between two downloads: the second is refused.
+
+    The tree each download reads is the one ``get_report_data`` keeps, so its refusal of
+    the changed element needs no request of its own.
+    """
+    tree = respx_mock.get(TREE).mock(
+        side_effect=[
+            httpx.Response(200, json=tree_body(fixtures_dir)),
+            httpx.Response(
+                200, json=tree_body(fixtures_dir, {"element-2": {"type": "SALARY_LIST"}})
+            ),
+        ]
+    )
+    route = mount_report(respx_mock, "report/collection/download.pdf", "pdf")
+    tasks.download_report_collection(DEMO, 1, "pdf", tmp_path / "first.pdf", fiscal_period=FP2025)
+    with pytest.raises(
+        InvalidRequestError, match="report collection 1 holds reports of the types SALARY_LIST: "
+    ):
+        tasks.download_report_collection(
+            DEMO, 1, "pdf", tmp_path / "second.pdf", fiscal_period=FP2025
+        )
+    assert (tree.call_count, route.call_count) == (2, 1)
+    with pytest.raises(
+        InvalidRequestError, match="report element 2 is of type SALARY_LIST: get_report_data"
+    ):
+        tasks.get_report_data(DEMO, 2, fiscal_period=FP2025)
+    assert tree.call_count == 2
+    assert files(tmp_path) == ["first.pdf"]
+
+
+def test_the_annual_report_is_refused_when_its_collection_holds_a_refused_report(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path
+) -> None:
+    """The annual report is the system collection's PDF: the same file (observed 2026-11-17)."""
+    tree = mount_tree(respx_mock, fixtures_dir, {"element-2": {"type": "SALARY_LIST"}})
+    route = mount_report(respx_mock, "report/collection/download_annualreport.pdf", "pdf")
+    with pytest.raises(InvalidRequestError) as refused:
+        tasks.download_annual_report(DEMO, tmp_path / "annual.pdf", fiscal_period_id=FP2025)
+    assert refused.value.message == (
+        "the annual report, report collection 1, holds reports of the types SALARY_LIST: "
+        f"download_annual_report refuses {RULE}"
+    )
+    assert (tree.call_count, route.call_count) == (1, 0)
+    assert files(tmp_path) == []
+
+
+def test_the_annual_report_is_refused_when_no_collection_is_marked_system(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path
+) -> None:
+    """Fail closed: without its collection, what the annual report holds cannot be checked."""
+    unmarked = {"collection-1": {"system": False, "isSystem": False}}
+    tree = mount_tree(respx_mock, fixtures_dir, unmarked)
+    route = mount_report(respx_mock, "report/collection/download_annualreport.pdf", "pdf")
+    with pytest.raises(InvalidRequestError) as refused:
+        tasks.download_annual_report(DEMO, tmp_path / "annual.pdf")
+    assert refused.value.message == (
+        "the report tree marks no collection as the system collection the annual report "
+        f"prints, so its reports cannot be checked: download_annual_report refuses {RULE}"
+    )
+    assert (tree.call_count, route.call_count) == (1, 0)
+
+
+@pytest.mark.parametrize(
+    ("task", "endpoint"),
+    [
+        ("download_report", "report/element/download.pdf"),
+        ("download_report_collection", "report/collection/download.pdf"),
+    ],
+)
+def test_a_report_the_tree_does_not_list_is_not_found_and_dest_stays(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path, task: str, endpoint: str
+) -> None:
+    """Asked of upstream as given, as by ``get_report_data``: a 404 (observed 2026-11-17)."""
+    tree = mount_tree(respx_mock, fixtures_dir)
+    route = respx_mock.get(f"{BASE}/{endpoint}").respond(404, text="CashCtrl - 404 Not Found")
+    dest = tmp_path / "missing.pdf"
+    dest.write_bytes(b"the caller's earlier file")
+    with pytest.raises(NotFoundError) as info:
+        getattr(tasks, task)(DEMO, 999999, "pdf", dest, fiscal_period=FP2025)
+    assert str(info.value) == f"CashCtrl: no record has an id asked, HTTP 404 (/{endpoint})"
+    assert (tree.call_count, route.call_count) == (1, 1)
+    assert dest.read_bytes() == b"the caller's earlier file"
+    assert files(tmp_path) == ["missing.pdf"]
+
+
+def test_a_report_files_refusal_sent_as_http_200_is_raised_and_removed(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path
+) -> None:
+    mount_tree(respx_mock, fixtures_dir)
+    body = b'{"success":false,"errorMessage":"Not allowed.","data":null}'
+    mount(respx_mock, "report/collection/download.xlsx", body, JSON_UTF8)
+    with pytest.raises(RequestRejected) as info:
+        tasks.download_report_collection(DEMO, 1, "xlsx", tmp_path / "annual.xlsx")
+    assert info.value.upstream_message == "Not allowed."
+    assert files(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("task", "arguments", "message"),
+    [
+        ("download_report", {"format": "csv"}, "format must be pdf or xlsx, not 'csv'"),
+        ("download_report", {"format": "PDF"}, "format must be pdf or xlsx, not 'PDF'"),
+        ("download_report", {"element_id": "1"}, "element_id must be a whole number, not '1'"),
+        (
+            "download_report",
+            {"fiscal_period": FP2025, "start_date": date(2025, 1, 1)},
+            "give fiscal_period or start_date and end_date, not both",
+        ),
+        (
+            "download_report",
+            {"start_date": "2025-01-01"},
+            "start_date must be a date (YYYY-MM-DD), not str",
+        ),
+        ("download_report", {"sort": 3}, "sort must be a string, not int"),
+        (
+            "download_report_collection",
+            {"collection_id": True},
+            "collection_id must be a whole number, not True",
+        ),
+        ("download_report_collection", {"format": "xls"}, "format must be pdf or xlsx, not 'xls'"),
+        (
+            "download_annual_report",
+            {"fiscal_period_id": "2"},
+            "fiscal_period_id must be a whole number, not '2'",
+        ),
+    ],
+)
+def test_a_report_file_refuses_its_arguments_before_anything_is_sent(
+    respx_mock: respx.MockRouter,
+    tmp_path: Path,
+    task: str,
+    arguments: dict[str, typing.Any],
+    message: str,
+) -> None:
+    ids = {
+        "download_report": {"element_id": 1, "format": "pdf"},
+        "download_report_collection": {"collection_id": 1, "format": "pdf"},
+        "download_annual_report": {},
+    }[task]
+    with pytest.raises(InvalidRequestError, match=re.escape(message)):
+        getattr(tasks, task)(DEMO, dest=tmp_path / "x", **{**ids, **arguments})
+    assert not respx_mock.calls, "not even the tree"
+    assert files(tmp_path) == []
+
+
+def test_a_report_file_names_every_problem_at_once(
+    respx_mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    arguments: dict[str, typing.Any] = {"element_id": 1.5, "format": "docx", "language": 2}
+    with pytest.raises(InvalidRequestError) as info:
+        tasks.download_report(DEMO, dest=tmp_path / "x", **arguments)
+    assert str(info.value).count(";") == 2
+    assert "format must be pdf or xlsx, not 'docx'" in str(info.value)
+    assert not respx_mock.calls
+
+
+@pytest.mark.parametrize("task", REPORT_TASKS)
+def test_a_report_files_dest_is_checked_before_the_tree_is_read(
+    respx_mock: respx.MockRouter, tmp_path: Path, task: str
+) -> None:
+    ids = {} if task == "download_annual_report" else {"format": "pdf"}
+    first = [] if task == "download_annual_report" else [1]
+    with pytest.raises(InvalidRequestError, match="dest is a directory"):
+        getattr(tasks, task)(DEMO, *first, dest=tmp_path, **ids)
+    with pytest.raises(InvalidRequestError, match="dest's directory does not exist"):
+        getattr(tasks, task)(DEMO, *first, dest=tmp_path / "missing" / "x.pdf", **ids)
+    assert not respx_mock.calls
+    assert files(tmp_path) == []
+
+
+@pytest.mark.parametrize("task", REPORT_TASKS)
+def test_a_report_files_docstring_states_the_refusal_and_what_the_file_holds(task: str) -> None:
+    doc = " ".join((inspect.getdoc(getattr(tasks, task)) or "").split())
+    assert "payroll and people reports" in doc
+    assert "no key is dropped from a file" in doc
+    assert "(``BULK_TASKS``)" in doc
+
+
+@pytest.mark.anyio
+async def test_the_report_files_async_twins_are_the_tasks(
+    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path
+) -> None:
+    mount_tree(respx_mock, fixtures_dir)
+    element = mount_report(respx_mock, "report/element/download.pdf", "pdf")
+    collection = mount_report(respx_mock, "report/collection/download.xlsx", "xlsx")
+    annual = mount_report(respx_mock, "report/collection/download_annualreport.pdf", "pdf")
+    await tasks.download_report_async(DEMO, 1, "pdf", tmp_path / "e.pdf")
+    await tasks.download_report_collection_async(DEMO, 1, "xlsx", tmp_path / "c.xlsx")
+    await tasks.download_annual_report_async(DEMO, tmp_path / "a.pdf", fiscal_period_id=FP2025)
+    assert (element.call_count, collection.call_count, annual.call_count) == (1, 1, 1)
+    assert sent_query(annual) == {"fiscalPeriodId": str(FP2025)}
