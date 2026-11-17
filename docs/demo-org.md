@@ -52,7 +52,8 @@ register. `tests/test_seed_demo.py` checks the rule against the data and this do
    and may create currencies, fiscal periods, persons, journal entries and orders. After
    seeding, the role may be reduced to read-only; the write tools' live tests and write
    fixtures need it to create, update and delete persons, journal entries and orders,
-   and to set an order's status and create an order's payment.
+   to set an order's status and create an order's payment, and to book, change and delete
+   an order's book entries.
 5. Put the two variables into the `.envrc` at the root of the sdk-cashctrl clone, which
    `.gitignore` lists, and run `direnv allow` there: `CASHCTRL_DEMO_SUBDOMAIN` (the one
    label before `.cashctrl.com`) and `CASHCTRL_DEMO_API_KEY`. `direnv exec .` loads

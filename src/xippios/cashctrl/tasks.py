@@ -2252,7 +2252,7 @@ async def download_annual_report_async(
         names = ", ".join(str(node.collection_id) for node in system)
         subject = f"the annual report, report collection {names}, holds reports of the types"
         raise _report_refusal(f"{subject} {refused}", "download_annual_report")
-    downloaded = await api.report_collection_download_annualreport_pdf(
+    downloaded = await api.report_collection_download_annualreport(
         org, dest, fiscal_period_id=fiscal_period_id
     )
     sent = {} if fiscal_period_id is None else {"fiscalPeriodId": fiscal_period_id}
