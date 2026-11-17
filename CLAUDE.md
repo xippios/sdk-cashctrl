@@ -93,10 +93,11 @@ any amount; it still scrubs e-mail addresses, API user tags, token-like body fie
 fixture), and refuses any method but GET and POST, a POST to anything but the fourteen
 write paths, a GET to a path `docs/upstream/` does not document as a GET, a create
 without the marker `xippios-live`, an order write naming an unmarked order or a book
-entry's update or delete whose order is unmarked, and any endpoint but `.json`. Writes against demo create a record marked
-`xippios-live`, update it and delete it again, nothing else but a payment of a deleted
-order (see Write tools). The demo subdomain is treated like a key: never in a file, a
-commit, a log line or a report. The repository is public.
+entry's update or delete whose order is unmarked, and any endpoint but `.json`. Writes
+against demo create a record marked `xippios-live`, update it and delete it again,
+nothing else but a payment of a deleted order (see Write tools). The demo subdomain is
+treated like a key: never in a file, a commit, a log line or a report. The repository is
+public.
 
 ## Rate limit (sdk-core ADR-0010)
 
@@ -242,8 +243,8 @@ one more:
    (`_journal_values`, `_person_values`, `_order_values`, `_book_entry_values`),
    applies the arguments given (not `None`), and sends all of them. An order's items go
    back under the keys the items table documents (`_order_items`, in their `pos`), the
-   computed ones left out;
-   upstream stores the items an update sends anew, with new ids (observed 2026-10-27).
+   computed ones left out; upstream stores the items an update sends anew, with new ids
+   (observed 2026-10-27).
    A mandatory parameter neither the record nor the call gives raises
    `InvalidRequestError` before any write; so does a stored list whose shape was never
    observed (attachments, allocations, bank accounts, children, service periods,
@@ -261,10 +262,10 @@ one more:
    `orderBookEntryId`, `salaryBookEntryId`) is refused, by `delete_journal_entry` as
    well, which reads the entry first, confirmed or not; an order is not refused for
    being booked, since upstream changes an order's automatic book entries through its
-   items (`docs/upstream/order.md`, Book entry), and a book entry the items booked
-   (`type` `GENERATED`) is refused by its update and delete, which read it first. A
-   confirmed call reads again and recomputes, so its payload can differ from the
-   preview's if the record changed. Never send a partial record.
+   items (`docs/upstream/order.md`, Book entry), and a book entry's update and delete
+   read it first and write only one of `type` `MANUAL`, booked by hand (the items' are
+   `GENERATED`). A confirmed call reads again and recomputes, so its payload can differ
+   from the preview's if the record changed. Never send a partial record.
 4. **Custom fields** are `customField<ID>` to text (`api/_form.py`'s `CUSTOM_FIELD`),
    rendered as `<values><customField1>...</customField1></values>`, values escaped; an
    update merges the given values into the stored XML (`merge_custom`) and refuses XML
@@ -545,9 +546,9 @@ e-mail address, an API user tag, or a value but `null` or `REDACTED` under a tok
 or identifier name; a compound name such as `publicHash` goes to review. After a write it
 names the `insertId` and asks for the matching delete. The write fixtures record marked
 records created, read, updated and deleted again (2026-10-24, 2026-10-27), a purchase
-order's status and payments (2026-10-29) and a marked order's book entry (2026-11-17). Before committing, run the grep block of
-`/record-fixture` (step 5); its last two greps print `0`. Fixtures are never typed in by
-hand.
+order's status and payments (2026-10-29) and a marked order's book entry (2026-11-17).
+Before committing, run the grep block of `/record-fixture` (step 5); its last two greps
+print `0`. Fixtures are never typed in by hand.
 
 ### Never
 

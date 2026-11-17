@@ -46,9 +46,10 @@ into ``False``, and refuses anything else. The decisions taken for these tools o
    ``delete_order_book_entry`` book, change and delete the manual book entries of
    orders, such as a payment received for an invoice. A create's preview sends no
    request. The update and the delete read the entry (``order/bookentry/read.json``),
-   confirmed or not, and refuse one booked from the order's items (``type``
-   ``GENERATED``), which upstream documents cannot be changed directly; the update then
-   sends the whole entry (item 2).
+   confirmed or not, and write only one booked by hand (``type`` ``MANUAL``): one booked
+   from the order's items (``GENERATED``) upstream documents cannot be changed
+   directly, and a write to any other type, or none, was never observed. The update
+   then sends the whole entry (item 2).
 
 ``meta.endpoint`` is the write operation (``journal/create.json``) and ``meta.tenant``
 the organisation. ``meta.request`` is ``org`` plus the form fields as sent when the
@@ -2218,6 +2219,8 @@ BOOK_ENTRY_UPDATE: dict[str, str] = {
 }
 """Every parameter ``order/bookentry/update.json`` documents but ``id``: task to upstream name."""
 
+MANUAL = "MANUAL"
+"""The ``type`` of a book entry booked by hand (observed on 2026-11-17)."""
 GENERATED = "GENERATED"
 """The ``type`` of a book entry an order's items booked (observed on 2026-10-27)."""
 
@@ -2244,21 +2247,30 @@ def _book_entry_values(entry: OrderBookEntry) -> tuple[dict[str, Any], dict[str,
     return values, stored
 
 
-def _generated(entry: OrderBookEntry, write: str) -> InvalidRequestError | None:
-    """A refusal for an entry the order's items booked, ``write`` ``update`` or ``delete``.
+def _not_manual(entry: OrderBookEntry, write: str) -> InvalidRequestError | None:
+    """A refusal for an entry not booked by hand, ``write`` ``update`` or ``delete``.
 
-    ``docs/upstream/order.md``, Book entry: "Automatically created book entries cannot be
-    manipulated directly, only by changing items"; how upstream answers such a write was
-    never observed, so the check is made here.
+    Only ``MANUAL`` is written. ``docs/upstream/order.md``, Book entry: "Automatically
+    created book entries cannot be manipulated directly, only by changing items", and an
+    entry the items booked reads ``GENERATED``. How upstream answers a write to either,
+    or to an entry of another type or none, was never observed, so the check is made
+    here and fails closed.
     """
-    if entry.type != GENERATED:
+    if entry.type == MANUAL:
         return None
-    return InvalidRequestError(
-        f"book entry {entry.id} was booked from its order's items (type {GENERATED}); "
-        f"upstream documents that such entries cannot be {write}d directly, only by "
-        "changing the order's items with update_order. Nothing was sent",
-        source=SOURCE,
-    )
+    if entry.type == GENERATED:
+        reason = (
+            f"was booked from its order's items (type {GENERATED}); upstream documents "
+            f"that such entries cannot be {write}d directly, only by changing the order's "
+            "items with update_order"
+        )
+    else:
+        shown = "no type" if entry.type is None else f"type {entry.type}"
+        reason = (
+            f"has {shown}, not {MANUAL}, the type of an entry booked by hand; how upstream "
+            f"answers a write to it was never observed, so it is not {write}d here"
+        )
+    return InvalidRequestError(f"book entry {entry.id} {reason}. Nothing was sent", source=SOURCE)
 
 
 async def update_order_book_entry_async(
@@ -2288,8 +2300,9 @@ async def update_order_book_entry_async(
     would be sent, the entry as it is (``before``) and the ``changes``, at the cost of
     that one read. ``confirm=true`` reads the entry again and recomputes the payload, so
     it can differ from the preview if the entry changed in between. Refused before
-    anything is written: an entry the order's items booked (``type`` ``GENERATED``),
-    which changes only through the order's items (``update_order``); an entry without
+    anything is written: an entry not booked by hand (``type`` other than ``MANUAL``),
+    such as one the order's items booked (``GENERATED``), which changes only through
+    the order's items (``update_order``); an entry without
     ``account_id``, unless the call gives it; an entry holding allocations, which the
     update cannot send. The entry's id comes from ``list_order_book_entries``, the other
     ids from the lists ``create_order_book_entry`` names.
@@ -2329,9 +2342,9 @@ async def update_order_book_entry_async(
     cleared = _clear_names(clear, BOOK_ENTRY_UPDATE, given, None, problems)
     _refuse(problems)
     entry = await api.order_bookentry_read(org, id)
-    generated = _generated(entry, "update")
-    if generated is not None:
-        raise generated
+    refused = _not_manual(entry, "update")
+    if refused is not None:
+        raise refused
     values, stored = _book_entry_values(entry)
     blocked = _blocked(stored, [])
     if blocked:
@@ -2360,9 +2373,10 @@ async def delete_order_book_entry_async(
     """Delete one book entry booked by hand on an order; without confirm=true it only shows it.
 
     The entry is read first (``order/bookentry/read.json``), with ``confirm`` as well, and
-    one the order's items booked (``type`` ``GENERATED``) is refused with
-    ``InvalidRequestError`` before anything is deleted: such an entry goes only with the
-    order's items (``update_order``). Without ``confirm`` nothing is deleted: the preview
+    one not booked by hand (``type`` other than ``MANUAL``) is refused with
+    ``InvalidRequestError`` before anything is deleted: one the order's items booked
+    (``GENERATED``) goes only with the order's items (``update_order``), and a delete of
+    another type was never observed. Without ``confirm`` nothing is deleted: the preview
     (``performed`` false) shows the entry that would be deleted (``before``) and the
     ``payload``, ``ids`` with this one id. ``confirm=true`` deletes it after that read.
     An unknown id raises ``NotFoundError`` at the read. The entry's id comes from
@@ -2377,9 +2391,9 @@ async def delete_order_book_entry_async(
     fields = api.delete_fields([id])
     endpoint = "order/bookentry/delete.json"
     entry = await api.order_bookentry_read(org, id)
-    generated = _generated(entry, "delete")
-    if generated is not None:
-        raise generated
+    refused = _not_manual(entry, "delete")
+    if refused is not None:
+        raise refused
     if confirm is not True:
         return _preview(org, endpoint, fields, before=entry)
     answer = await api.order_bookentry_delete(org, [id])

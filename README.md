@@ -196,15 +196,15 @@ write server only: never by the read server, never as an HTTP route.
   optional (keys the tables do not document); an insurance whose read shows no
   insurance numbers or an employee whose read shows no `user_id` (the read leaves empty
   fields out, and these were never seen come back); a journal entry an order or a
-  salary run booked; and a book entry an order's items booked, or one holding
-  allocations, which its `update.json` cannot send. A confirmed update reads the record
+  salary run booked; and a book entry not booked by hand (`type` other than
+  `MANUAL`), or one holding allocations, which its `update.json` cannot send. A confirmed update reads the record
   again and recomputes the
   payload, so it can differ from the preview if the record changed in between.
 - **Deletes** take one id; the preview shows the record that would go.
   `delete_journal_entry` reads the entry with `confirm=true` as well and refuses, with
   `InvalidRequestError` before anything is deleted, an entry an order or a salary run
   booked; an unknown id is `NotFoundError` there. `delete_order_book_entry` reads the
-  entry likewise and refuses one the order's items booked. A person or an order that no
+  entry likewise and refuses one not booked by hand. A person or an order that no
   longer exists, or an entry deleted between that read and the delete, is refused by
   upstream (`RequestRejected`).
 - **Statuses and payments.** `update_order_status` sets the status `status_id` on the
@@ -223,9 +223,10 @@ write server only: never by the read server, never as an HTTP route.
   (a bank or cash account) and the account of the orders' category (its debtors or
   creditors account); without `amount` CashCtrl books the orders' open amount.
   `update_order_book_entry` and `delete_order_book_entry` change and delete such an
-  entry by its id from `cashctrl_list_order_book_entries`. The entries an order's items
-  book (`type` `GENERATED`) change only with the items (`update_order`): both refuse
-  them before anything is sent. Deleting an order deletes its book entries with it
+  entry by its id from `cashctrl_list_order_book_entries`. Both write only an entry
+  booked by hand (`type` `MANUAL`) and refuse any other before anything is sent: the
+  entries an order's items book (`GENERATED`) change only with the items
+  (`update_order`). Deleting an order deletes its book entries with it
   (observed on the demo organisation, 2026-11-17).
 - **Custom fields**: `custom` maps upstream's names (`customField1`, `customField<ID>`,
   the ids from `cashctrl_list_custom_fields`) to text, sent as
@@ -365,7 +366,7 @@ subdomain): set the `httpx` logger to WARNING.
 | `POST order/create.json`, `update.json`, `delete.json` | `create_order`, `update_order`, `delete_order` | `cashctrl_create_order`, ... | available on the write server only |
 | `POST order/update_status.json` (Update status) | `update_order_status` | `cashctrl_update_order_status` | available on the write server only |
 | `POST order/payment/create.json` (Create payment) | `create_order_payment` | `cashctrl_create_order_payment` | available on the write server only; no book entry, no delete documented |
-| `POST order/bookentry/create.json`, `update.json`, `delete.json` | `create_order_book_entry`, `update_order_book_entry`, `delete_order_book_entry` | `cashctrl_create_order_book_entry`, ... | available on the write server only; the entries booked by hand, those of the items refused |
+| `POST order/bookentry/create.json`, `update.json`, `delete.json` | `create_order_book_entry`, `update_order_book_entry`, `delete_order_book_entry` | `cashctrl_create_order_book_entry`, ... | available on the write server only; the entries booked by hand (`MANUAL`) only |
 
 `lang` (`de`, `fr`, `it`, `en`), which upstream takes on every request and which matters
 mostly for error messages and exports, is not exposed yet. `list_accounts` checks `dir`
