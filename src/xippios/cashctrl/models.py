@@ -15,7 +15,7 @@ upstream concept, and nothing is renamed or computed.
 
 These read models stay faithful, documented personal identifiers included: ``ssn`` and
 ``iban`` (``Person``, ``PersonDetail``, and ``JournalEntryDetail.associates``), a
-location's ``iban`` and ``qrIban`` (``Location``, row 123), and an order document's
+location's ``iban`` and ``qrIban`` (``Location``), and an order document's
 ``orgIban``, ``orgQrIban`` and ``recipientIban`` (``OrderDocument``). The projections
 tasks return leave those out (``PersonProjection``, ``PersonDetailProjection``,
 ``JournalEntryDetailProjection``, ``LocationProjection``, ``OrderDocumentProjection``),
@@ -26,7 +26,7 @@ shows one as ``REDACTED``, and fixtures never carry their values (ADR-0017).
 ``created_by`` and ``last_updated_by`` are ``AuditUser`` on every model that has them:
 CashCtrl writes an API user there as ``API:`` and the first four characters of its key,
 which every model masks to ``API:REDACTED``, the value the fixture recorder writes, so
-a live answer and a fixture have one shape (G5 (2) of 2026-10-28, queue row 129).
+a live answer and a fixture have one shape.
 ``SYSTEM`` and a user's name pass as sent. ``HistoryEntry.message`` is upstream's text
 as sent: no recorded message carries a tag.
 
@@ -154,9 +154,9 @@ def is_identifier_key(name: str) -> bool:
     """Whether a payload key names a personal identifier this package keeps out (ADR-0017).
 
     ``ssn`` by its whole name and every name that ends in ``iban`` (``iban``, ``qrIban``,
-    ``orgIban``, ``recipientIban``, ``bank.iban``), in any letter case (queue rows 123,
-    242 and 243): ``get_report_data`` drops such keys from report rows, and the fixture
-    recorder rewrites and refuses their values by the same rule.
+    ``orgIban``, ``recipientIban``, ``bank.iban``), in any letter case: ``get_report_data``
+    drops such keys from report rows, and the fixture recorder rewrites and refuses their
+    values by the same rule.
     """
     lowered = name.lower()
     return lowered == "ssn" or lowered.endswith("iban")
@@ -185,8 +185,7 @@ def _mask_api_user(value: object) -> object:
 
 AuditUser = Annotated[str | None, BeforeValidator(_mask_api_user)]
 """``created_by`` and ``last_updated_by`` of every model: who wrote the record, an API user's
-tag masked (G5 (2) of 2026-10-28, queue row 129), so a live answer has a fixture's shape
-and no key prefix reaches a result."""
+tag masked, so a live answer has a fixture's shape and no key prefix reaches a result."""
 
 Comparison = Literal["eq", "like", "gt", "lt"]
 """The values of ``comparison`` in a ``filter`` item: "Possible values: eq, like, gt, lt"."""
@@ -1293,8 +1292,8 @@ class OrderDocument(_OrderDocumentFields):
 
     This read model stays faithful; ``get_order_document`` returns
     ``OrderDocumentProjection``, which leaves out the three bank account numbers
-    (ADR-0017). The recorder rewrites every name ending in ``iban``, these three included
-    (queue row 243); the recorded answer holds ``null`` for all three.
+    (ADR-0017). The recorder rewrites every name ending in ``iban``, these three included;
+    the recorded answer holds ``null`` for all three.
     """
 
     org_iban: JsonValue = Field(default=None, validation_alias="orgIban")
@@ -1807,7 +1806,7 @@ class HistoryEntry(UpstreamModel):
     2026-10-27, not in a fixture, since the recording that showed it was overwritten),
     the record it concerns (``order_id``, ``person_id`` the order's partner,
     ``statement_id`` only seen ``null``) and ``message``, upstream's text of the change,
-    kept as sent (G5 (12) of 2026-10-28): it names the record (``Rechnung 'EK-2026-001'
+    kept as sent: it names the record (``Rechnung 'EK-2026-001'
     created.``) and may name a person; no recorded message carries an API user tag, so
     it is not masked.
     """
@@ -1872,9 +1871,9 @@ class ReportData(UpstreamModel):
     ``docs/upstream/report.md``, "Read JSON data": "Returns the JSON data of a single
     element by ID for the given time period." The documentation gives no schema, and
     the rows differ by report type (``report/element/create.json`` lists 41), so ``data``
-    and ``properties`` are kept as upstream sends them (``JsonValue``; decided by
-    Johannes on 2026-10-27, ADR-0003): rows under upstream's camelCase names
-    (``endAmount``), amounts as JSON numbers, not ``Decimal``.
+    and ``properties`` are kept as upstream sends them (``JsonValue``, ADR-0003): rows
+    under upstream's camelCase names (``endAmount``), amounts as JSON numbers, not
+    ``Decimal``.
 
     Observed on 2026-10-27 for the balance sheet (``BALANCE``) of fiscal period 2025:
     ``{"total": 2, "data": [...], "properties": {"columns": [...]}}``. ``total`` counts

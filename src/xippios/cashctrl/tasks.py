@@ -43,11 +43,11 @@ in ``BULK_TASKS``: Python only, no tool and no route (ADR-0019 decision 4). Each
 one file to the path its caller gives and returns core's ``Downloaded``; ``meta.endpoint``
 is the file's operation (``journal/list.csv``) and ``meta.retrieved_at`` the time the
 file was complete. A refusal sent as HTTP 200 is raised, never written
-(``api/_download.py``, queue row 142). A file may hold what a projection leaves out, at
+(``api/_download.py``). A file may hold what a projection leaves out, at
 its caller's request or as upstream renders it: the person export names
 ``PERSON_COLUMNS`` unless its caller names columns, ``ssn`` or ``iban`` among them
 deliberately, and an invoice's QR-bill may carry the organisation's IBAN or QR-IBAN
-(ADR-0017; Johannes, 2026-10-28).
+(ADR-0017).
 """
 
 import os
@@ -156,7 +156,7 @@ BULK_TASKS: frozenset[str] = frozenset(
     }
 )
 """The file tasks: each streams a file to the path its caller gives and returns
-``Result[Downloaded]``, so no tool or route serves it (G5 (5) and (6) of 2026-10-28)."""
+``Result[Downloaded]``, so no tool or route serves it (ADR-0019)."""
 
 MCP_CAPS: Mapping[str, ResultCap] = {
     "get_report_data": ResultCap(
@@ -190,7 +190,7 @@ whole: ``get_report_data``'s result is no list, so the cap replaces one over its
 with a note and a preview. The demo organisation's balance sheet of 2025, 25 rows with
 its totals, is about 17 KB, some 650 bytes a row, so 64 KB holds a report of about 100
 rows and 128 KB one of about 200; the note names the period parameters (a raised bound
-for a tool that is no reference list: row 127). ``list_cost_centers`` keeps the default
+for a tool that is no reference list). ``list_cost_centers`` keeps the default
 bound and names its filters, and so does ``list_history``, whose whole log may hold far
 more than the bound: a cut is resumed at ``start`` (ADR-0016, amended 2026-10-27), or
 narrowed to one record's history.
@@ -214,7 +214,7 @@ PERSON_COLUMNS: tuple[str, ...] = tuple(
 
 ``PersonProjection``'s fields, what ``list_persons`` returns, under upstream's names
 (``firstName``), in its order: the personal identifiers ``ssn`` and ``iban`` stay out of
-the file unless the caller names them (ADR-0017; Johannes, 2026-10-28).
+the file unless the caller names them (ADR-0017).
 """
 PAGE_SIZE = 100
 """Records per request when a list task collects every page.
@@ -1265,8 +1265,8 @@ _REPORT_TYPES: weakref.WeakKeyDictionary[AsyncClient, dict[int, str | None]] = (
 Keyed on the organisation's client (``client_for(org)``), not on its name: the entry lives
 as long as the client does. ``TENANTS.reset()`` drops every client, and a changed
 subdomain or key builds a new one, so the next ``get_report_data`` reads the tree again;
-an organisation never sees another's types. Read once per organisation and process
-(G5 (1) of 2026-10-28); ``get_report_tree`` refreshes it with every tree it returns.
+an organisation never sees another's types. Read once per organisation and process;
+``get_report_tree`` refreshes it with every tree it returns.
 """
 _REPORT_TYPES_LOCK = threading.Lock()
 _SALARY_PREFIX = "SALARY_"
@@ -1282,9 +1282,8 @@ _REFUSED_REPORT_RULE = (
 def _is_refused_report_type(report_type: str) -> bool:
     """Whether ``get_report_data`` refuses a report of ``report_type``, in any letter case.
 
-    The rule of G5 (1) of 2026-10-28 (queue row 123), by pattern, extended to the
-    documented types the demo tree does not show (queue row 225): a type that starts
-    with ``SALARY_`` or contains ``PERSON``, or is ``SETTLEMENT``,
+    By pattern, so that the documented types the demo tree does not show are refused
+    as well: a type that starts with ``SALARY_`` or contains ``PERSON``, or is ``SETTLEMENT``,
     ``WITHHOLDING_TAX_SETTLEMENT``, ``PEOPLE`` or ``ORG_CHART``. Of the 41 types
     ``report/element/create.json`` documents that is 15; ``WITHHOLDING_TAX_RATES``, rates
     and no persons, passes.
@@ -1332,8 +1331,8 @@ async def _report_type(org: str, element_id: int) -> str | None:
 def _without_identifiers(value: JsonValue) -> JsonValue:
     """``value`` without a key ``models.is_identifier_key`` names, at any depth.
 
-    ``ssn`` and every name ending in ``iban``, in any letter case (ADR-0017, queue rows
-    123 and 243), the rule the fixture recorder applies.
+    ``ssn`` and every name ending in ``iban``, in any letter case (ADR-0017), the rule the
+    fixture recorder applies.
     """
     if isinstance(value, dict):
         return {
@@ -1488,7 +1487,7 @@ async def get_report_data_async(
     return Result(data=report, meta=meta)
 
 
-# The file tasks (G5 (5) and (6) of 2026-10-28; ADR-0019 decision 4), named in BULK_TASKS:
+# The file tasks (ADR-0019 decision 4), named in BULK_TASKS:
 # Python only. Each streams one file to the path its caller gives, through a file wrapper
 # and api/_download.py, and returns core's Downloaded; nothing is read into a result.
 

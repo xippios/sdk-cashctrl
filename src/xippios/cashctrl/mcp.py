@@ -2,7 +2,7 @@
 
 Every task in ``tasks.__all__`` is a read-only tool, but those ``tasks.BULK_TASKS``
 names, which core skips: the server is passed ``tasks.__all__`` whole (ADR-0019). No
-logic lives here (ADR-0001). Entry point: ``xippios-cashctrl-mcp``; ``--org <name>``
+logic lives here (ADR-0001). Entry point: ``xippios-cashctrl-mcp-read``; ``--org <name>``
 binds it to one organisation (``_cli``, ``_org_lock``).
 """
 

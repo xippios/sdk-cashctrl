@@ -55,11 +55,11 @@ never shows a value, and exits with status 1:
   their ``ids`` or ``orderIds`` name (``order/read.json``, one GET each, through the
   recording client) and refuses the write, before it is sent, unless each order is
   marked as the live tests mark theirs, ``MARK`` in its ``description`` or ``MARK`` as
-  its ``nr``; an order that cannot be read refuses it too (``unmarked_orders``, Johannes,
-  2026-10-28). ``order/bookentry/update.json`` and ``order/bookentry/delete.json`` name
-  book entries (``BOOK_ENTRY_WRITES``): each entry is read (``order/bookentry/read.json``),
-  its ``orderId`` taken, and that order read and checked the same way, two GETs per
-  entry, since the entry's read names its order but not the order's marker (observed on
+  its ``nr``; an order that cannot be read refuses it too (``unmarked_orders``).
+  ``order/bookentry/update.json`` and ``order/bookentry/delete.json`` name book entries
+  (``BOOK_ENTRY_WRITES``): each entry is read (``order/bookentry/read.json``), its
+  ``orderId`` taken, and that order read and checked the same way, two GETs per entry,
+  since the entry's read names its order but not the order's marker (observed on
   2026-11-17); an entry that cannot be read or names no order refuses the write too. A
   recorded write changes the demo organisation: the recorder says so after the request
   and asks for the matching delete, recorded or run, so that no created record stays
@@ -86,7 +86,7 @@ never shows a value, and exits with status 1:
 - No token-like fields and no personal identifiers. A body field named ``hash``,
   ``token``, ``secret``, ``apiKey`` (``api_key``, ``api-key``) or ``ssn``, or whose name
   ends in ``iban`` (``iban``, ``qrIban``, ``qr_iban``, ``orgIban``, ``orgQrIban``,
-  ``recipientIban``; queue row 243), the identifiers this package keeps out of its
+  ``recipientIban``), the identifiers this package keeps out of its
   projections (ADR-0017), in any case, has its text value replaced by ``REDACTED``.
   ``order/read.json`` sends ``hash``, an undocumented 32-character text that may be the
   token of a public link to the order document (observed on 2026-10-23, not verified);
@@ -239,7 +239,7 @@ def secret_name(name: str) -> bool:
 
     A token-like name whole (``TOKEN_NAME``), and a personal identifier by the package's
     one rule, ``models.is_identifier_key``: ``ssn`` whole and every name that ends in
-    ``iban``, in any case (ADR-0017, queue rows 242 and 243). ``ssn`` and ``iban`` are the
+    ``iban``, in any case (ADR-0017). ``ssn`` and ``iban`` are the
     documented personal identifiers this package keeps out of its projections;
     ``qrIban`` (``qr_iban``, ``qr-iban``) is the QR-IBAN of the organisation's own bank
     account that ``location/list.json`` sends next to its ``iban``, and
@@ -1081,7 +1081,7 @@ def recording_client(*, wrong_key: bool = False) -> AsyncClient:
 
     ``client_for("demo")``'s configuration (base URL, pace, ``classify``) with
     ``RetryPolicy(max_attempts=1)``, so a 5xx or a timeout is recorded as it came and
-    spends no further request on a retry (queue row 138 item 3); core's ``record`` takes
+    spends no further request on a retry; core's ``record`` takes
     no ``retry=``, so the client carries it. The key is read from
     ``CASHCTRL_DEMO_API_KEY`` on the request, as the package's own client reads it, or is
     ``WRONG_KEY`` with ``wrong_key``.

@@ -7,8 +7,7 @@ on the HTTP router (conventions §8). List the sync names in ``__all__``.
 False`` its last. The gate is ``confirm is True``: from Python, anything but ``True``
 (``"false"``, ``1``, ``[0]``) previews; over MCP the tool schema turns ``"true"``,
 ``"yes"``, ``"1"`` and ``1`` into ``True`` and ``"false"``, ``"no"``, ``"0"`` and ``0``
-into ``False``, and refuses anything else. The decisions taken for these tools on
-2026-10-23 (the wave 2 interview):
+into ``False``, and refuses anything else. The decisions taken for these tools:
 
 1. **Preview.** While ``confirm`` is false a task writes nothing and returns a
    ``WritePreview``: the exact form ``payload`` upstream would receive (upstream names,
@@ -37,7 +36,7 @@ into ``False``, and refuses anything else. The decisions taken for these tools o
 6. **Deletes** preview the record they would delete. A journal delete reads the entry,
    confirmed or not, and refuses one an order or a salary run booked (2026-10-24).
 7. Core's form bodies (``data=``) carry the fields (``api/_form.py``).
-8. **Order statuses and payments** (G5 (8) of 2026-10-28): ``update_order_status`` and
+8. **Order statuses and payments**: ``update_order_status`` and
    ``create_order_payment`` send the fields they are given, nothing read first, so a
    preview sends no request. A payment creates no book entry, and upstream documents
    no way to delete it.
@@ -377,8 +376,7 @@ def _cleared(cleared: Sequence[str]) -> dict[str, Any]:
 
     ``None`` and an empty list are left out of the form, which upstream reads as empty
     ("omitted parameters are treated as empty values"). A flag has no empty value:
-    clearing it means ``false``, so it is sent as ``false`` (decided by Johannes on
-    2026-10-24, after the wave 2 review).
+    clearing it means ``false``, so it is sent as ``false``.
     """
     return {name: False if name in _FLAGS else None for name in cleared}
 
