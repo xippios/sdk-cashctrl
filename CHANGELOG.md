@@ -4,6 +4,79 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/) (pre-1.0: breaking changes bump the minor).
 
+## [0.4.0] - 2026-11-18
+
+### Added
+
+- Reports download as PDF and Excel files, Python only like the other file tasks:
+  `download_report` writes one report, such as the balance sheet, `download_report_collection`
+  a collection of them as one document, and `download_annual_report` the annual report's
+  PDF. A file that holds a payroll or people report is refused before its download, by the
+  rule of `get_report_data` on the report tree read right then.
+  (https://github.com/xippios/sdk-cashctrl/issues/45)
+- `list_cost_centers` takes `fiscal_period_id`, the fiscal period of the balances
+  `opening_amount` and `end_amount`, and sends it as `fiscalPeriodId`, so `meta.request`
+  names the period that answered. Left out, the balances are assumed to be the current
+  period's, as before.
+  (https://github.com/xippios/sdk-cashctrl/issues/24)
+- `get_fiscal_period` (`fiscalperiod/read.json`, the tool `cashctrl_get_fiscal_period`)
+  reads one fiscal period by its `id`, or without one the API user's current period, the
+  one the lists and balances answer for when given no `fiscal_period_id`. Its
+  `is_current` comes back false even for the current period, as upstream sends it, and
+  `list_fiscal_periods` marks the current one.
+  (https://github.com/xippios/sdk-cashctrl/issues/53)
+- The write server books, changes and deletes the book entries of orders, such as a
+  payment received for an invoice: `create_order_book_entry`, `update_order_book_entry`
+  and `delete_order_book_entry`, confirm-gated as every write tool is. The update reads
+  the entry and sends it whole, and the update and the delete write only an entry booked
+  by hand, refusing one that the order's items booked. `docs/demo-org.md` names them among
+  the demo role's write needs.
+  (https://github.com/xippios/sdk-cashctrl/issues/43,
+  https://github.com/xippios/sdk-cashctrl/issues/68)
+
+### Changed
+
+- The fixture recorder records the three book entry writes on marked orders only: a
+  create on orders marked `xippios-live`, and an update or a delete on an entry whose
+  order is marked, which it reads before the write is sent.
+  (https://github.com/xippios/sdk-cashctrl/issues/44)
+- The upstream documentation snapshot is refreshed as of 2026-11-17. The page is the one of
+  2026-10-23 byte for byte, so no operation, parameter or semantics changed upstream, and
+  `docs/upstream/FETCHED.md` now gives the fetch as a UTC time with `Z` and notes the files
+  that keep nested tables as HTML. (https://github.com/xippios/sdk-cashctrl/issues/51)
+- Adopts sdk-template v0.3.4, from v0.2.2, with conventions 1.27 and no new core minor: the
+  floor stays `xippios-core~=0.3.0`, the write server, the organisation registry and the
+  `--org` lock are unchanged, and the wheel ships the template's empty reference-data
+  scaffold, `xippios/cashctrl/params.py`, `enums.py` and `reference/README.md`, which
+  packages no list. The README lists the package's documents under `## Documents` and
+  links its license by URL, and `CLAUDE.md` holds the rules that `.claude/family.md`
+  carried, which leaves with `/adopt-release`, and cites sdk-core's decision records as
+  `sdk-core ADR-NNNN`. Changelog entries are fragments under `changelog/`, the package's
+  own decisions go into `docs/adr/` with the index that `scripts/adr_index.py` writes, and
+  a pull request runs the organization's checks from `organization.yml`, where
+  `gates.yml` was.
+  (https://github.com/xippios/sdk-template/releases/tag/v0.3.4,
+  https://github.com/xippios/sdk-cashctrl/issues/37,
+  https://github.com/xippios/sdk-cashctrl/issues/38)
+
+### Fixed
+
+- The fixture recorder sends a GET only to a path that the snapshot in `docs/upstream/`
+  documents as a GET: a GET to a path documented as a POST, such as `account/create.json`
+  or `order/bookentry/create.json`, or to a path the snapshot does not name, is refused
+  before a request is sent, as a GET to the eleven write paths already was. The method
+  comes from each operation's Endpoint block, so a refreshed snapshot moves the refusal
+  with it. (https://github.com/xippios/sdk-cashctrl/issues/27)
+
+### Breaking
+
+- The read server starts as `xippios-cashctrl-mcp-read`, beside `xippios-cashctrl-mcp-write`,
+  and `xippios-cashctrl-mcp` is gone, with no alias. An MCP configuration that starts the
+  read server names `xippios-cashctrl-mcp-read`. The server's name, its tools and its
+  options are unchanged.
+  (https://github.com/xippios/sdk-core/blob/main/docs/adr/0026-the-host-xippios-mcp.md,
+  https://github.com/xippios/sdk-cashctrl/issues/29)
+
 ## [0.3.0] - 2026-10-29
 
 The third release. It ships on xippios-core 0.3.0 (`xippios-core~=0.3.0` from PyPI, its
