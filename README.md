@@ -138,8 +138,9 @@ behind a gateway that authenticates.
 
 ## Write tools
 
-Eleven tools create, change and delete journal entries, persons and orders, set the
-status of orders and create the payment of orders. They are tasks in
+Fourteen tools create, change and delete journal entries, persons and orders, set the
+status of orders, create the payment of orders and book, change and delete the book
+entries of orders. They are tasks in
 `xippios.cashctrl.tasks_write` (re-exported from `xippios.cashctrl`), served by the
 write server only: never by the read server, never as an HTTP route.
 
@@ -156,6 +157,9 @@ write server only: never by the read server, never as an HTTP route.
 | `POST order/delete.json` (Delete orders) | `delete_order` | `cashctrl_delete_order` |
 | `POST order/update_status.json` (Update status) | `update_order_status` | `cashctrl_update_order_status` |
 | `POST order/payment/create.json` (Create payment) | `create_order_payment` | `cashctrl_create_order_payment` |
+| `POST order/bookentry/create.json` (Create book entry) | `create_order_book_entry` | `cashctrl_create_order_book_entry` |
+| `POST order/bookentry/update.json` (Update book entry) | `update_order_book_entry` | `cashctrl_update_order_book_entry` |
+| `POST order/bookentry/delete.json` (Delete book entries) | `delete_order_book_entry` | `cashctrl_delete_order_book_entry` |
 
 - **The confirm gate.** Every write tool takes `confirm`, last, `false` by default.
   Without it nothing is written: the result is a preview, `performed: false`, with
@@ -173,8 +177,9 @@ write server only: never by the read server, never as an HTTP route.
   In Python the result is `Result[WritePreview[<record>] | WriteResult]`; narrow it
   with `isinstance` or `if result.data.performed:`.
 - **Updates send the whole record.** CashCtrl empties every parameter an update leaves
-  out. `update_journal_entry`, `update_person` and `update_order` therefore read the
-  record, apply the parameters given, and send every parameter `update.json` documents,
+  out. `update_journal_entry`, `update_person`, `update_order` and
+  `update_order_book_entry` therefore read the record, apply the parameters given, and
+  send every parameter `update.json` documents,
   the rest taken from the record. A parameter left out keeps its value: an order's
   items, too, are sent back as stored, each under the keys the items table documents
   (`account_id`, `name`, `unit_price`, `quantity`, `tax_id`, ...), and `items` given
@@ -190,15 +195,18 @@ write server only: never by the read server, never as an HTTP route.
   `titleId`, a contact with a `purpose` or an order item with attachments or marked
   optional (keys the tables do not document); an insurance whose read shows no
   insurance numbers or an employee whose read shows no `user_id` (the read leaves empty
-  fields out, and these were never seen come back); and a journal entry an order or a
-  salary run booked. A confirmed update reads the record again and recomputes the
+  fields out, and these were never seen come back); a journal entry an order or a
+  salary run booked; and a book entry an order's items booked, or one holding
+  allocations, which its `update.json` cannot send. A confirmed update reads the record
+  again and recomputes the
   payload, so it can differ from the preview if the record changed in between.
 - **Deletes** take one id; the preview shows the record that would go.
   `delete_journal_entry` reads the entry with `confirm=true` as well and refuses, with
   `InvalidRequestError` before anything is deleted, an entry an order or a salary run
-  booked; an unknown id is `NotFoundError` there. A person or an order that no longer
-  exists, or an entry deleted between that read and the delete, is refused by upstream
-  (`RequestRejected`).
+  booked; an unknown id is `NotFoundError` there. `delete_order_book_entry` reads the
+  entry likewise and refuses one the order's items booked. A person or an order that no
+  longer exists, or an entry deleted between that read and the delete, is refused by
+  upstream (`RequestRejected`).
 - **Statuses and payments.** `update_order_status` sets the status `status_id` on the
   orders `ids` names; `create_order_payment` creates the payment of the orders
   `order_ids` names, dated `date`, for `amount` per order or, without it, every open
@@ -210,6 +218,15 @@ write server only: never by the read server, never as an HTTP route.
   the recipient's bank accounts and the sender's BIC and refuses a date in the past;
   `CASH_PDF` needed none of them (observed on the demo organisation, 2026-10-29). A status id comes from the
   `status` of the orders' category in `cashctrl_list_order_categories`.
+- **Book entries.** `create_order_book_entry` books an entry against the orders
+  `order_ids` names, such as a payment received for an invoice, between `account_id`
+  (a bank or cash account) and the account of the orders' category (its debtors or
+  creditors account); without `amount` CashCtrl books the orders' open amount.
+  `update_order_book_entry` and `delete_order_book_entry` change and delete such an
+  entry by its id from `cashctrl_list_order_book_entries`. The entries an order's items
+  book (`type` `GENERATED`) change only with the items (`update_order`): both refuse
+  them before anything is sent. Deleting an order deletes its book entries with it
+  (observed on the demo organisation, 2026-11-17).
 - **Custom fields**: `custom` maps upstream's names (`customField1`, `customField<ID>`,
   the ids from `cashctrl_list_custom_fields`) to text, sent as
   `<values><customField1>...</customField1></values>`, values escaped. An update keeps
@@ -224,9 +241,10 @@ write server only: never by the read server, never as an HTTP route.
   person's `category_id` from `cashctrl_list_person_categories`, its `title_id` from
   `cashctrl_list_person_titles` and an employee's `location_id` from
   `cashctrl_list_locations`, an allocation's `to_cost_center_id` from
-  `cashctrl_list_cost_centers`; the record to update or delete from
-  `cashctrl_list_journal_entries`, `cashctrl_list_persons` or `cashctrl_list_orders`
-  (the `id`, not the `nr`). A journal `associate_id` is a person's id; create a new
+  `cashctrl_list_cost_centers`, a book entry's `template_id` from the `book_templates`
+  of `cashctrl_list_order_categories`; the record to update or delete from
+  `cashctrl_list_journal_entries`, `cashctrl_list_persons`, `cashctrl_list_orders` or
+  `cashctrl_list_order_book_entries` (the `id`, not the `nr`). A journal `associate_id` is a person's id; create a new
   person with `cashctrl_create_person` first (upstream would create one from a name,
   which the tools do not send).
 - CashCtrl checks every write and refuses with the fields it objects to, e.g.
@@ -347,6 +365,7 @@ subdomain): set the `httpx` logger to WARNING.
 | `POST order/create.json`, `update.json`, `delete.json` | `create_order`, `update_order`, `delete_order` | `cashctrl_create_order`, ... | available on the write server only |
 | `POST order/update_status.json` (Update status) | `update_order_status` | `cashctrl_update_order_status` | available on the write server only |
 | `POST order/payment/create.json` (Create payment) | `create_order_payment` | `cashctrl_create_order_payment` | available on the write server only; no book entry, no delete documented |
+| `POST order/bookentry/create.json`, `update.json`, `delete.json` | `create_order_book_entry`, `update_order_book_entry`, `delete_order_book_entry` | `cashctrl_create_order_book_entry`, ... | available on the write server only; the entries booked by hand, those of the items refused |
 
 `lang` (`de`, `fr`, `it`, `en`), which upstream takes on every request and which matters
 mostly for error messages and exports, is not exposed yet. `list_accounts` checks `dir`

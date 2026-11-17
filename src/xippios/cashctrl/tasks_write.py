@@ -1,4 +1,4 @@
-"""Write tasks for CashCtrl: journal entries, persons and orders, order statuses and payments.
+"""Write tasks for CashCtrl: journal entries, persons, orders, statuses, payments and book entries.
 
 Served only by ``xippios-cashctrl-mcp-write``, never by the read-only server and never
 on the HTTP router (conventions §8). List the sync names in ``__all__``.
@@ -20,11 +20,12 @@ into ``False``, and refuses anything else. The decisions taken for these tools o
 2. **Updates fail closed.** Upstream treats every parameter an ``update.json`` leaves
    out as empty. ``update_journal_entry``, ``update_person`` and ``update_order``
    therefore read the record (``read.json``), apply the caller's changes, and send
-   every parameter the ``update.json`` table documents, derived from the record. A
-   mandatory parameter that neither the record nor the call gives, or a stored list it
-   cannot carry over (a shape never observed, such as attachments or allocations),
-   stops it with ``InvalidRequestError`` before anything is written; none sends a
-   partial record. ``update_order_status`` reads nothing (item 8).
+   every parameter the ``update.json`` table documents, derived from the record, as
+   ``update_order_book_entry`` does (item 9). A mandatory parameter that neither the
+   record nor the call gives, or a stored list it cannot carry over (a shape never
+   observed, such as attachments or allocations), stops it with
+   ``InvalidRequestError`` before anything is written; none sends a partial record.
+   ``update_order_status`` reads nothing (item 8).
 3. **Custom fields.** Every create and update task takes ``custom``, a mapping from
    upstream's custom field names (``customField<ID>``) to text, sent as the XML upstream
    documents, every value escaped. An update keeps every stored custom value it is not
@@ -40,6 +41,14 @@ into ``False``, and refuses anything else. The decisions taken for these tools o
    ``create_order_payment`` send the fields they are given, nothing read first, so a
    preview sends no request. A payment creates no book entry, and upstream documents
    no way to delete it.
+9. **Order book entries** (https://github.com/xippios/sdk-cashctrl/issues/43,
+   2026-11-17): ``create_order_book_entry``, ``update_order_book_entry`` and
+   ``delete_order_book_entry`` book, change and delete the manual book entries of
+   orders, such as a payment received for an invoice. A create's preview sends no
+   request. The update and the delete read the entry (``order/bookentry/read.json``),
+   confirmed or not, and refuse one booked from the order's items (``type``
+   ``GENERATED``), which upstream documents cannot be changed directly; the update then
+   sends the whole entry (item 2).
 
 ``meta.endpoint`` is the write operation (``journal/create.json``) and ``meta.tenant``
 the organisation. ``meta.request`` is ``org`` plus the form fields as sent when the
@@ -79,6 +88,7 @@ from xippios.cashctrl.models import (
     JournalItemInput,
     Language,
     NotifyType,
+    OrderBookEntry,
     OrderDetail,
     OrderItemInput,
     PaymentType,
@@ -97,13 +107,16 @@ from xippios.cashctrl.tasks import _journal_entry_detail, _meta, _person_detail
 __all__ = [
     "create_journal_entry",
     "create_order",
+    "create_order_book_entry",
     "create_order_payment",
     "create_person",
     "delete_journal_entry",
     "delete_order",
+    "delete_order_book_entry",
     "delete_person",
     "update_journal_entry",
     "update_order",
+    "update_order_book_entry",
     "update_order_status",
     "update_person",
 ]
@@ -114,6 +127,8 @@ PersonOutcome = WritePreview[PersonDetailProjection] | WriteResult
 """A person write's result: a preview (``performed`` false) or what was written (true)."""
 OrderOutcome = WritePreview[OrderDetail] | WriteResult
 """An order write's result: a preview (``performed`` false) or what was written (true)."""
+BookEntryOutcome = WritePreview[OrderBookEntry] | WriteResult
+"""A book entry write's result: a preview (``performed`` false) or what was written (true)."""
 
 NOTIFY_TYPES: tuple[str, ...] = get_args(NotifyType)
 RECURRENCES: tuple[str, ...] = get_args(Recurrence)
@@ -346,7 +361,8 @@ def _changes(
     parameter as ``""``, ``[]`` or ``{}``, by its kind, and a cleared flag as ``false``,
     the value the payload sends for it.
     """
-    changes: dict[str, str] = encode(**given, custom=api.custom_xml(custom) if custom else None)
+    extra = {"custom": api.custom_xml(custom) if custom else None} if "custom" in documented else {}
+    changes: dict[str, str] = encode(**given, **extra)
     for name, value in given.items():
         if isinstance(value, list | tuple | Mapping) and not value:
             changes[documented[name]] = "{}" if isinstance(value, Mapping) else "[]"
@@ -2114,6 +2130,262 @@ async def create_order_payment_async(
     return _performed(org, endpoint, fields, answer)
 
 
+# Order book entries ------------------------------------------------------------------
+
+
+async def create_order_book_entry_async(
+    org: str,
+    account_id: int,
+    order_ids: list[int],
+    *,
+    amount: Decimal | None = None,
+    currency_id: int | None = None,
+    currency_rate: Decimal | None = None,
+    date: date | None = None,
+    description: str | None = None,
+    reference: str | None = None,
+    tax_id: int | None = None,
+    template_id: int | None = None,
+    confirm: bool = False,
+) -> Result[BookEntryOutcome]:
+    """Book an entry against orders, such as a payment received; without confirm=true a preview.
+
+    Without ``confirm`` nothing is written and no request is sent: the result is a
+    preview, ``performed`` false, whose ``payload`` holds the exact form fields CashCtrl
+    would receive. ``confirm=true`` books the entry (``order/bookentry/create.json``);
+    the result is ``performed`` true with ``insert_id``, the new entry's id. A book entry
+    is booked by hand against an order, as a payment of an invoice is, between
+    ``account_id`` (a bank or cash account) and the account of the order's category
+    (typically its debtors or creditors account); the entries an order's items book are
+    upstream's own. Without ``amount`` upstream books the order's open amount, without
+    ``currency_id`` in the default currency. ``list_order_book_entries`` lists an order's
+    entries. Ids: ``account_id`` from ``list_accounts`` (the ``id``, not the account
+    number), the orders from ``list_orders``, ``tax_id`` from ``list_tax_codes``,
+    ``currency_id`` from ``list_currencies`` and ``template_id`` from the
+    ``book_templates`` of the orders' category in ``list_order_categories``. Upstream
+    checks the entry and refuses it naming the fields.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        account_id: The contra account, a bank or cash account, an ``id`` from
+            ``list_accounts``, e.g. ``3`` (1020, the bank).
+        order_ids: The orders the entry is booked against, their ``id`` from
+            ``list_orders``, e.g. ``[21]``; not their numbers ``nr``.
+        amount: The amount, e.g. ``100.00``; the orders' open amount when left out.
+        currency_id: A currency, an ``id`` from ``list_currencies``; the default currency
+            when left out.
+        currency_rate: The exchange rate into the default currency, e.g. ``0.92``.
+        date: The date of the entry, e.g. ``2026-10-24``.
+        description: A description, at most 200 characters, e.g. ``"Zahlung"``.
+        reference: A reference or receipt, at most 100 characters, e.g. ``"ZA-1"``.
+        tax_id: A tax code, an ``id`` from ``list_tax_codes``, e.g. ``9``.
+        template_id: A book template of the orders' category, an ``id`` from its
+            ``book_templates`` in ``list_order_categories``, e.g. ``8`` (Payment).
+        confirm: ``true`` books the entry; ``false`` (the default) only previews it.
+    """
+    problems: list[str] = []
+    orders = _ids("order_ids", order_ids, problems)
+    _refuse(problems)
+    fields = api.order_bookentry_fields(
+        account_id=account_id,
+        order_ids=orders,
+        amount=amount,
+        currency_id=currency_id,
+        currency_rate=currency_rate,
+        date=date,
+        description=description,
+        reference=reference,
+        tax_id=tax_id,
+        template_id=template_id,
+    )
+    endpoint = "order/bookentry/create.json"
+    if confirm is not True:
+        return _preview(org, endpoint, fields)
+    answer = await api.order_bookentry_create(org, fields)
+    return _performed(org, endpoint, fields, answer)
+
+
+BOOK_ENTRY_UPDATE: dict[str, str] = {
+    "account_id": "accountId",
+    "amount": "amount",
+    "currency_id": "currencyId",
+    "currency_rate": "currencyRate",
+    "date": "date",
+    "description": "description",
+    "reference": "reference",
+    "tax_id": "taxId",
+    "template_id": "templateId",
+}
+"""Every parameter ``order/bookentry/update.json`` documents but ``id``: task to upstream name."""
+
+GENERATED = "GENERATED"
+"""The ``type`` of a book entry an order's items booked (observed on 2026-10-27)."""
+
+
+def _book_entry_values(entry: OrderBookEntry) -> tuple[dict[str, Any], dict[str, str | None]]:
+    """Every ``update.json`` parameter of ``entry`` by task name, and what it cannot carry.
+
+    ``allocations`` is no parameter of ``update.json``, and was only ever seen empty: an
+    entry holding allocations cannot be sent back as stored, and upstream would empty
+    what it is not sent.
+    """
+    values: dict[str, Any] = {
+        "account_id": entry.account_id,
+        "amount": entry.amount,
+        "currency_id": entry.currency_id,
+        "currency_rate": entry.currency_rate,
+        "date": entry.date,
+        "description": entry.description,
+        "reference": entry.reference,
+        "tax_id": entry.tax_id,
+        "template_id": entry.template_id,
+    }
+    stored = {"allocations": _never_seen("allocations", entry.allocations)}
+    return values, stored
+
+
+def _generated(entry: OrderBookEntry, write: str) -> InvalidRequestError | None:
+    """A refusal for an entry the order's items booked, ``write`` ``update`` or ``delete``.
+
+    ``docs/upstream/order.md``, Book entry: "Automatically created book entries cannot be
+    manipulated directly, only by changing items"; how upstream answers such a write was
+    never observed, so the check is made here.
+    """
+    if entry.type != GENERATED:
+        return None
+    return InvalidRequestError(
+        f"book entry {entry.id} was booked from its order's items (type {GENERATED}); "
+        f"upstream documents that such entries cannot be {write}d directly, only by "
+        "changing the order's items with update_order. Nothing was sent",
+        source=SOURCE,
+    )
+
+
+async def update_order_book_entry_async(
+    org: str,
+    id: int,
+    *,
+    account_id: int | None = None,
+    amount: Decimal | None = None,
+    currency_id: int | None = None,
+    currency_rate: Decimal | None = None,
+    date: date | None = None,
+    description: str | None = None,
+    reference: str | None = None,
+    tax_id: int | None = None,
+    template_id: int | None = None,
+    clear: list[str] | None = None,
+    confirm: bool = False,
+) -> Result[BookEntryOutcome]:
+    """Change a book entry booked by hand on an order; without confirm=true a preview.
+
+    The entry is read first (``order/bookentry/read.json``), the parameters given are
+    applied, and every parameter ``order/bookentry/update.json`` documents is sent, taken
+    from the entry where not given: upstream empties every parameter an update leaves
+    out. A parameter left out here keeps its stored value; one named in ``clear`` is sent
+    empty, so ``clear=["amount"]`` books the order's open amount. Without ``confirm``
+    nothing is written: the preview (``performed`` false) shows the ``payload`` that
+    would be sent, the entry as it is (``before``) and the ``changes``, at the cost of
+    that one read. ``confirm=true`` reads the entry again and recomputes the payload, so
+    it can differ from the preview if the entry changed in between. Refused before
+    anything is written: an entry the order's items booked (``type`` ``GENERATED``),
+    which changes only through the order's items (``update_order``); an entry without
+    ``account_id``, unless the call gives it; an entry holding allocations, which the
+    update cannot send. The entry's id comes from ``list_order_book_entries``, the other
+    ids from the lists ``create_order_book_entry`` names.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        id: The entry's ``id`` from ``list_order_book_entries``, e.g. ``31``.
+        account_id: The contra account, a bank or cash account, an ``id`` from
+            ``list_accounts``, e.g. ``3`` (1020, the bank).
+        amount: The amount, e.g. ``100.00``.
+        currency_id: A currency, an ``id`` from ``list_currencies``.
+        currency_rate: The exchange rate into the default currency, e.g. ``0.92``.
+        date: The date of the entry, e.g. ``2026-10-24``.
+        description: A description, at most 200 characters, e.g. ``"Zahlung"``.
+        reference: A reference or receipt, at most 100 characters, e.g. ``"ZA-1"``.
+        tax_id: A tax code, an ``id`` from ``list_tax_codes``, e.g. ``9``.
+        template_id: A book template of the order's category, an ``id`` from its
+            ``book_templates`` in ``list_order_categories``, e.g. ``8`` (Payment).
+        clear: Parameters to send empty, by these names, e.g. ``["reference"]``;
+            ``["amount"]`` books the order's open amount. A parameter cannot be both
+            given and cleared.
+        confirm: ``true`` writes the change; ``false`` (the default) only previews it.
+    """
+    _check_id(id)
+    problems: list[str] = []
+    given = _given(
+        account_id=account_id,
+        amount=amount,
+        currency_id=currency_id,
+        currency_rate=currency_rate,
+        date=date,
+        description=description,
+        reference=reference,
+        tax_id=tax_id,
+        template_id=template_id,
+    )
+    cleared = _clear_names(clear, BOOK_ENTRY_UPDATE, given, None, problems)
+    _refuse(problems)
+    entry = await api.order_bookentry_read(org, id)
+    generated = _generated(entry, "update")
+    if generated is not None:
+        raise generated
+    values, stored = _book_entry_values(entry)
+    blocked = _blocked(stored, [])
+    if blocked:
+        raise InvalidRequestError(
+            f"the book entry holds {'; '.join(blocked.values())}, which update.json cannot "
+            "send, and upstream would empty them; change the entry in CashCtrl. Nothing was "
+            "sent",
+            source=SOURCE,
+        )
+    merged = {**values, **given}
+    merged.update(_cleared(cleared))
+    if merged["account_id"] is None:
+        raise _missing("book entry", ["accountId"], "pass account_id, an id from list_accounts")
+    fields = api.order_bookentry_fields(id=entry.id, **merged)
+    changes = _changes(api.order_bookentry_fields, BOOK_ENTRY_UPDATE, given, cleared, None)
+    endpoint = "order/bookentry/update.json"
+    if confirm is not True:
+        return _preview(org, endpoint, fields, before=entry, changes=changes)
+    answer = await api.order_bookentry_update(org, fields)
+    return _performed(org, endpoint, fields, answer)
+
+
+async def delete_order_book_entry_async(
+    org: str, id: int, *, confirm: bool = False
+) -> Result[BookEntryOutcome]:
+    """Delete one book entry booked by hand on an order; without confirm=true it only shows it.
+
+    The entry is read first (``order/bookentry/read.json``), with ``confirm`` as well, and
+    one the order's items booked (``type`` ``GENERATED``) is refused with
+    ``InvalidRequestError`` before anything is deleted: such an entry goes only with the
+    order's items (``update_order``). Without ``confirm`` nothing is deleted: the preview
+    (``performed`` false) shows the entry that would be deleted (``before``) and the
+    ``payload``, ``ids`` with this one id. ``confirm=true`` deletes it after that read.
+    An unknown id raises ``NotFoundError`` at the read. The entry's id comes from
+    ``list_order_book_entries``.
+
+    Args:
+        org: A declared organisation name, e.g. ``demo``.
+        id: The entry's ``id`` from ``list_order_book_entries``, e.g. ``31``.
+        confirm: ``true`` deletes the entry; ``false`` (the default) only shows it.
+    """
+    _check_id(id)
+    fields = api.delete_fields([id])
+    endpoint = "order/bookentry/delete.json"
+    entry = await api.order_bookentry_read(org, id)
+    generated = _generated(entry, "delete")
+    if generated is not None:
+        raise generated
+    if confirm is not True:
+        return _preview(org, endpoint, fields, before=entry)
+    answer = await api.order_bookentry_delete(org, [id])
+    return _performed(org, endpoint, fields, answer)
+
+
 create_journal_entry = sync(create_journal_entry_async)
 update_journal_entry = sync(update_journal_entry_async)
 delete_journal_entry = sync(delete_journal_entry_async)
@@ -2125,3 +2397,6 @@ update_order = sync(update_order_async)
 delete_order = sync(delete_order_async)
 update_order_status = sync(update_order_status_async)
 create_order_payment = sync(create_order_payment_async)
+create_order_book_entry = sync(create_order_book_entry_async)
+update_order_book_entry = sync(update_order_book_entry_async)
+delete_order_book_entry = sync(delete_order_book_entry_async)

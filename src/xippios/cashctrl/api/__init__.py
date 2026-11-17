@@ -9,9 +9,10 @@ snapshot in ``docs/upstream/``.
 
 A write wrapper (``*_create``, ``*_update``, ``*_delete``, ``order_update_status``,
 ``order_payment_create``) posts form fields through ``_form.post_form``;
-``journal_fields``, ``person_fields``, ``order_fields``, ``order_update_status_fields``
-and ``order_payment_create_fields`` encode them from the parameters as upstream names
-them, so a task can preview exactly what it would send (``tasks_write``).
+``journal_fields``, ``person_fields``, ``order_fields``, ``order_update_status_fields``,
+``order_payment_create_fields`` and ``order_bookentry_fields`` encode them from the
+parameters as upstream names them, so a task can preview exactly what it would send
+(``tasks_write``).
 
 A file wrapper (``*_list_csv``, ``*_list_xlsx``, ``*_list_pdf``, ``order_document_read_pdf``)
 streams the file to a path through ``_download.download`` and returns core's
@@ -45,7 +46,14 @@ from xippios.cashctrl.api.journal_list_xlsx import journal_list_xlsx
 from xippios.cashctrl.api.journal_read import journal_read
 from xippios.cashctrl.api.journal_update import journal_update
 from xippios.cashctrl.api.location_list import location_list
+from xippios.cashctrl.api.order_bookentry_create import (
+    order_bookentry_create,
+    order_bookentry_fields,
+)
+from xippios.cashctrl.api.order_bookentry_delete import order_bookentry_delete
 from xippios.cashctrl.api.order_bookentry_list import order_bookentry_list
+from xippios.cashctrl.api.order_bookentry_read import order_bookentry_read
+from xippios.cashctrl.api.order_bookentry_update import order_bookentry_update
 from xippios.cashctrl.api.order_category_list import (
     order_category_list,
     order_category_list_params,
@@ -120,7 +128,12 @@ __all__ = [
     "journal_update",
     "location_list",
     "merge_custom",
+    "order_bookentry_create",
+    "order_bookentry_delete",
+    "order_bookentry_fields",
     "order_bookentry_list",
+    "order_bookentry_read",
+    "order_bookentry_update",
     "order_category_list",
     "order_category_list_params",
     "order_create",
