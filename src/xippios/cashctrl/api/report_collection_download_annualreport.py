@@ -18,10 +18,10 @@ from xippios.core import Downloaded
 from xippios.cashctrl.api._download import download
 from xippios.cashctrl.api._params import present
 
-__all__ = ["report_collection_download_annualreport_pdf"]
+__all__ = ["report_collection_download_annualreport"]
 
 
-async def report_collection_download_annualreport_pdf(
+async def report_collection_download_annualreport(
     org: str, dest: str | os.PathLike[str], *, fiscal_period_id: int | None = None
 ) -> Downloaded:
     """Call ``report/collection/download_annualreport.pdf`` for ``org``; write it to ``dest``.

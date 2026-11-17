@@ -90,8 +90,8 @@ from xippios.cashctrl.api.person_list_xlsx import person_list_xlsx
 from xippios.cashctrl.api.person_read import person_read
 from xippios.cashctrl.api.person_title_list import person_title_list
 from xippios.cashctrl.api.person_update import person_update
-from xippios.cashctrl.api.report_collection_download_annualreport_pdf import (
-    report_collection_download_annualreport_pdf,
+from xippios.cashctrl.api.report_collection_download_annualreport import (
+    report_collection_download_annualreport,
 )
 from xippios.cashctrl.api.report_collection_download_pdf import (
     report_collection_download_pdf,
@@ -178,7 +178,7 @@ __all__ = [
     "person_read",
     "person_title_list",
     "person_update",
-    "report_collection_download_annualreport_pdf",
+    "report_collection_download_annualreport",
     "report_collection_download_pdf",
     "report_collection_download_xlsx",
     "report_collection_params",

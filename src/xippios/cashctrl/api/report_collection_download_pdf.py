@@ -10,7 +10,7 @@ encodes them for the PDF and the Excel file alike. The file is written by
 Observed on 2026-11-17: collection 1 of the demo organisation, ``Jahresbericht``, came as
 ``application/pdf;charset=UTF-8`` named ``Annual report 2025.pdf``, the annual report's
 file but for its creation time and document id
-(``report_collection_download_annualreport_pdf``).
+(``report_collection_download_annualreport``).
 """
 
 import os
