@@ -91,8 +91,9 @@ synthetic: invented books seeded by `scripts/seed_demo.py` and described in
 any amount; it still scrubs e-mail addresses, API user tags, token-like body fields,
 `ssn` and every name ending in `iban`, in the request body as well (How to record a
 fixture), and refuses any method but GET and POST, a POST to anything but the eleven
-write paths, a create without the marker `xippios-live` or an order write naming an
-unmarked order, and any endpoint but `.json`. Writes against demo create a record marked
+write paths, a GET to a path `docs/upstream/` does not document as a GET, a create
+without the marker `xippios-live` or an order write naming an unmarked order, and any
+endpoint but `.json`. Writes against demo create a record marked
 `xippios-live`, update it and delete it again, nothing else but a payment of a deleted
 order (see Write tools). The demo subdomain is treated like a key: never in a file, a
 commit, a log line or a report. The repository is public.
