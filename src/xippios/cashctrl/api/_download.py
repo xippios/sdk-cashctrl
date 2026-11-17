@@ -8,8 +8,8 @@ is the operation's parameters under upstream's names, as for a ``.json`` read.
 memory and never cached, and the limiter, ``classify`` and the retry rule apply as they
 do to ``get``.
 
-Core writes a 2xx body unread, so ``classify`` sees its status and headers only (queue
-row 142), and CashCtrl refuses with HTTP 200 and ``"success": false``: a refused download
+Core writes a 2xx body unread, so ``classify`` sees its status and headers only, and
+CashCtrl refuses with HTTP 200 and ``"success": false``: a refused download
 would be written as the file. ``download`` therefore streams to a temporary file beside
 ``dest`` and reads the answer's ``Content-Type`` before the file becomes ``dest``. JSON
 (``application/json``, with or without a charset; every ``.json`` answer recorded since

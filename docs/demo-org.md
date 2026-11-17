@@ -53,9 +53,11 @@ register. `tests/test_seed_demo.py` checks the rule against the data and this do
    seeding, the role may be reduced to read-only; the write tools' live tests and write
    fixtures need it to create, update and delete persons, journal entries and orders,
    and to set an order's status and create an order's payment.
-5. Put the two variables into `~/github/sdk/.envrc` and run `direnv allow`:
-   `CASHCTRL_DEMO_SUBDOMAIN` (the one label before `.cashctrl.com`) and
-   `CASHCTRL_DEMO_API_KEY`. The subdomain is treated like the key: never in a file of
+5. Put the two variables into the `.envrc` at the root of the sdk-cashctrl clone, which
+   `.gitignore` lists, and run `direnv allow` there: `CASHCTRL_DEMO_SUBDOMAIN` (the one
+   label before `.cashctrl.com`) and `CASHCTRL_DEMO_API_KEY`. `direnv exec .` loads
+   them for a command run from the clone or a directory under it, a worktree among
+   them. The subdomain is treated like the key: never in a file of
    this repository, a commit, a log line or a report. `demo` is reserved and is **never**
    an entry of `CASHCTRL_ORGS`.
 
@@ -72,7 +74,7 @@ Then the run, with the demo pair from direnv and `CASHCTRL_ORGS` removed from th
 environment (the script never reads it, and nothing else should see it either):
 
 ```bash
-direnv exec ~/github/sdk env -u CASHCTRL_ORGS uv run scripts/seed_demo.py --apply --yes
+direnv exec . env -u CASHCTRL_ORGS uv run scripts/seed_demo.py --apply --yes
 ```
 
 Before the first write, `--apply --yes` refuses with exit status 1, a message that shows
@@ -139,7 +141,7 @@ User-Agent is the family's, `xippios-cashctrl/<version> (+https://github.com/xip
 If upstream refuses the form-encoded writes, or garbles the umlaut, rerun by hand with
 
 ```bash
-direnv exec ~/github/sdk env -u CASHCTRL_ORGS uv run scripts/seed_demo.py --apply --yes --multipart
+direnv exec . env -u CASHCTRL_ORGS uv run scripts/seed_demo.py --apply --yes --multipart
 ```
 
 which sends the same fields as `multipart/form-data`, as the curl examples do. The script
@@ -167,12 +169,12 @@ The books above hold no custom field and no cost centre, so `list_custom_fields`
 `list_cost_centers` would answer empty lists, and their models could only be typed from
 the documentation's create tables. `--discovery` is the script's second mode, for an
 organisation the first mode seeded (whose `--apply --yes` now refuses it as not empty):
-it creates exactly one record of each, decided by Johannes on 2026-10-28 (G5 (3)). The
+it creates exactly one record of each. The
 first mode still creates neither. Its plan, offline, then the run:
 
 ```bash
 uv run scripts/seed_demo.py --discovery            # same as --discovery --plan
-direnv exec ~/github/sdk env -u CASHCTRL_ORGS uv run scripts/seed_demo.py --discovery --apply --yes
+direnv exec . env -u CASHCTRL_ORGS uv run scripts/seed_demo.py --discovery --apply --yes
 ```
 
 | Record | Endpoint | Parameters sent |
@@ -478,7 +480,7 @@ as the seeded purchase orders do), sets it to another status of the category (Re
 (`order/payment/create.json`, `CASH_PDF`, every open amount) and deletes the order; it
 then checks that no journal entry of the order is left. Upstream documents no payment
 delete, so every run may leave the payment of a deleted order behind: no book entry, no
-amount moved, the order gone, accepted as residue (Johannes, 2026-10-28). After the
+amount moved, the order gone, accepted as residue. After the
 delete the test probes `order/payment/download` once with the payment's parameters and
 records whether upstream still serves the payment's file or refuses it (the junit
 property `payment_download`). A status with an `actionId` is avoided: it triggers an

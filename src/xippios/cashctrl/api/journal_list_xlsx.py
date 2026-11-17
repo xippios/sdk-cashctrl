@@ -5,7 +5,7 @@ the entries list."). Its documented parameters are those of ``journal/list.json`
 ``journal_list_params`` encodes, and ``columns`` ("The columns to include in the list,
 comma-separated. Check the list.json for available column names."), all optional, which
 ``export_params`` adds. The file is written by ``_download.download``, which raises a
-refusal sent as HTTP 200 instead of writing it (queue row 142).
+refusal sent as HTTP 200 instead of writing it.
 """
 
 import os

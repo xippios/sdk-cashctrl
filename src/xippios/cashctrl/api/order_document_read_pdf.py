@@ -5,7 +5,7 @@ documents in one PDF file."), one parameter, ``ids`` (mandatory, CSV, "The IDs o
 multiple orders, comma-separated."). The document is the order as upstream renders it
 for its recipient; an invoice's carries the QR-bill, with the organisation's IBAN or
 QR-IBAN and the recipient's address. The file is written by ``_download.download``,
-which raises a refusal sent as HTTP 200 instead of writing it (queue row 142). An id no
+which raises a refusal sent as HTTP 200 instead of writing it. An id no
 order has is answered with HTTP 404 (observed on 2026-10-29), which ``_client.classify``
 raises as ``NotFoundError`` for a ``read.pdf`` asked by ``ids``.
 """

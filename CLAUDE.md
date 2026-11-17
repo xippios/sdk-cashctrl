@@ -116,8 +116,8 @@ Decisions 1, 2, 3 and 5 of sdk-core ADR-0010 are adopted; decision 4 is delibera
    `x-cashctrl-requests-left` (299 on every answer observed on 2026-10-23, a 401
    included) with an unknown window and scope, so it is not read.
 4. **No firing into a spent quota** is deliberately not applied: no `QuotaPolicy` is
-   installed (decided by Johannes on 2026-10-25). Core's `QuotaPolicy` (sdk-core ADR-0015) keeps
-   a long-window quota, and CashCtrl documents none, nor a window for
+   installed. Core's `QuotaPolicy` (sdk-core ADR-0015) keeps a long-window quota, and
+   CashCtrl documents none, nor a window for
    `x-cashctrl-requests-left`; its 429 asks only for delays, a pace refusal. With no
    window to give it, a policy would take its default of an hour and turn one 429
    without `Retry-After` into an hour of refusals once a call's retries are spent.
@@ -209,9 +209,7 @@ instead, named after the service, and this Layout says so (conventions §2).
 journal entries, persons, orders and an order's book entries, `update_order_status` and
 `create_order_payment`, served by `xippios-cashctrl-mcp-write` only: never by the read
 server, never on the HTTP router (`assert_write_tools` in `tests/test_tasks_write.py`).
-Johannes decided the first nine in the interviews of 2026-10-23/24 and 2026-10-27, two
-in G5 (8) of 2026-10-28 and the book entries' three on 2026-11-17 (#43); the recipe for
-one more:
+The recipe for one more:
 
 1. **Layer 1.** `api/<module>_create.py` (and `_update`, `_delete`): a `<module>_fields`
    builder takes every parameter the create table documents, snake_cased, and returns
@@ -301,8 +299,7 @@ one more:
 7. **Statuses and payments**: `update_order_status` and
    `create_order_payment` send the fields given, nothing read: a preview sends no
    request. A payment (pain.001 or PDF) books nothing and has no documented delete: the
-   live test deletes the paid order and leaves the payment, accepted residue (Johannes,
-   2026-10-28).
+   live test deletes the paid order and leaves the payment, an accepted residue.
 
 ## Personal identifiers (sdk-core ADR-0017)
 
@@ -311,10 +308,9 @@ of the employee") and the `iban` of each of a person's `bankAccounts` (the list 
 `iban` of its own). The rule is `ssn` and `iban` wherever it appears: a person's
 `bankAccounts[].iban` and the organisation's locations' `iban` and `qrIban` alike, kept
 out of every projection a task returns and dropped from the raw report rows
-`get_report_data` returns. Johannes decided the two identifiers on
-2026-10-25; the session decided on 2026-10-27 that `iban` covers the organisation's own
-bank account numbers too, as sdk-core ADR-0017's "bank account number", and gap row 123 queues the
-question against sdk-core for Johannes to confirm or overturn. The recorder rewrites any
+`get_report_data` returns. `iban` covers the organisation's own bank account numbers too,
+as sdk-core ADR-0017's "bank account number", since conventions §3 leaves to the source
+what it judges equivalent to a personal identifier. The recorder rewrites any
 value under `iban` in a body to `REDACTED`, so a projection that kept one could never be
 replay-tested with a real value.
 
@@ -333,22 +329,21 @@ replay-tested with a real value.
   `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
   as empty.
 - Fixtures never carry their values: the recorder rewrites the value of `ssn` and of
-  every name ending in `iban` (`qrIban`, `orgIban`, ...; row 243) to `REDACTED`, in any
+  every name ending in `iban` (`qrIban`, `orgIban`, ...) to `REDACTED`, in any
   letter case, and its final check refuses a value that survives the rewrite (How to
   record a fixture); the recorded location holds `null` for `iban` and `qrIban`.
-- `get_report_data` refuses payroll and people reports before their data is requested
-  (G5 (1) of 2026-10-28, rows 123 and 225): a type that starts with `SALARY_` or
-  contains `PERSON`, or is `SETTLEMENT`, `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or
-  `ORG_CHART`. The answer never names its type, so `_report_type` reads
-  `report/tree.json` once per organisation into a `WeakKeyDictionary` keyed on its
+- `get_report_data` refuses payroll and people reports before their data is requested:
+  a type that starts with `SALARY_` or contains `PERSON`, or is `SETTLEMENT`,
+  `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or `ORG_CHART`. The answer never names its
+  type, so `_report_type` reads `report/tree.json` once per organisation into a `WeakKeyDictionary` keyed on its
   client, which `TENANTS.reset()` or a changed variable drops; `get_report_tree`
   refreshes it; an element the kept tree lacks reads it once more, one still missing is
   asked of upstream. Other reports come back as sent, every key `ssn` or ending in `iban`
-  dropped at any depth, in any case (`_report`; row 243; sdk-core ADR-0003, amendment 2026-10-26).
+  dropped at any depth, in any case (`_report`; sdk-core ADR-0003, amendment 2026-10-26).
 - A task that fetches them deliberately may return them and says so in its docstring.
   Two files may carry them, at the caller's path, never in a result or a tool
-  (`BULK_TASKS`; Johannes, 2026-10-28): `export_persons` names `PERSON_COLUMNS` unless
-  its caller names columns, `ssn` or `iban` among them; `download_order_document`'s PDF
+  (`BULK_TASKS`): `export_persons` names `PERSON_COLUMNS` unless its caller names
+  columns, `ssn` or `iban` among them; `download_order_document`'s PDF
   may carry the organisation's IBAN or QR-IBAN and the recipient's address (QR-bill).
 
 ## Commands
@@ -360,7 +355,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run mypy
 uv run pre-commit run --all-files
 python3 scripts/adr_index.py --check   # the index matches the records in docs/adr/
-direnv exec ~/github/sdk env -u CASHCTRL_ORGS XIPPIOS_LIVE_TESTS=1 uv run pytest -m live --tb=short --assert=plain   # demo only
+direnv exec . env -u CASHCTRL_ORGS XIPPIOS_LIVE_TESTS=1 uv run pytest -m live --tb=short --assert=plain   # demo only
 
 uv run xippios-cashctrl-mcp-read --org demo   # stdio, bound to demo; --http for streamable HTTP
 uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loopback only
@@ -373,6 +368,11 @@ network `network`. It sends the key's placeholder, with `CASHCTRL_DEMO_API_KEY` 
 because `pyproject.toml` names that variable under `xippios_placeholder_key_envs`; the
 package keeps no placeholder fixture of its own (`tests/conftest.py` keeps the demo-only
 environment, Organisations above).
+
+A keyed command, the live tests, the recorder and the seeder, runs under `direnv exec .`
+from the clone or a directory under it, a worktree among them: direnv loads the demo
+organisation's pair from the clone's own `.envrc`, which `.gitignore` lists and nobody
+reads or prints (Never below).
 
 `.github/workflows/live.yml` runs the live tests nightly at 02:36 UTC, a time derived from
 the slug so that sources sharing a key never start together, and on demand; a pull request
@@ -462,7 +462,7 @@ above its status table); steps 2 to 4 and 6 read here:
    Upstream's camelCase spellings are accepted with `Field(validation_alias=...)`, never
    `Field(alias=...)`: the adapters serialise by alias, and results stay snake_case.
    `created_by` and `last_updated_by` are `AuditUser`, which masks CashCtrl's API user
-   tag to `API:REDACTED`, the fixtures' value (G5 (2) of 2026-10-28, row 129).
+   tag to `API:REDACTED`, the fixtures' value.
 3. `api/<operation>.py`: one async wrapper that takes `org` first, calls
    `_client.client_for(org)` and returns models through `xippios.core.parse`.
 4. `tasks.py`: an async task, `org` its first parameter, that composes wrappers and
@@ -508,7 +508,7 @@ note also names `limit`, and core's cut ends with where to resume). Every other 
 takes filters or pages, or is short. Where the documentation gives no schema and the
 shape differs by kind, as the rows of `report/element/data.json` differ by report type,
 the task returns upstream's JSON as sent (`JsonValue`, camelCase keys included) and says
-so in its docstring (decided by Johannes on 2026-10-27); `AS_SENT` in
+so in its docstring; `AS_SENT` in
 `tests/test_tasks.py` names those fields for the snake_case check. A task-shaped
 function that returns a subset of an upstream record builds its model with
 `UpstreamModel.project`; nothing is renamed or computed, parsing a value
@@ -521,11 +521,11 @@ for an unknown id on a `read.json` by `id`; a 404 is an unknown endpoint
 (`UpstreamError`), on a `read.pdf` by `ids` an unknown id (`NotFoundError`, observed
 2026-10-29). Observed shapes say so, with the date, in its docstring.
 
-Files (G5 (5) to (7) of 2026-10-28): the wrappers `<module>_list_csv|xlsx|pdf` and
-`order_document_read_pdf` (D95) call `api/_download.py`'s `download`, which streams
+Files: the wrappers `<module>_list_csv|xlsx|pdf` and
+`order_document_read_pdf` (conventions §2) call `api/_download.py`'s `download`, which streams
 through core's `download` into a temporary file beside `dest` and renames it there: a
 file lands where the caller says, and nothing is read into a result, held in memory or
-cached. Core writes a 2xx body unread (row 142), so `download` reads `Content-Type`
+cached. Core writes a 2xx body unread, so `download` reads `Content-Type`
 first: JSON is a refusal sent as HTTP 200, whose head goes through `classify`; the file
 is removed and `dest` left as it was. The recorder never records a binary body or a
 file endpoint, so a file wrapper has no fixture directory: `tests/test_downloads.py`

@@ -11,10 +11,10 @@ own environment and always records with `client_for("demo")`'s configuration. Ne
 record from a productive organisation, never adapt the script or a one-off snippet to do
 so, and never set `CASHCTRL_ORGS` with real names to record. The repository is public.
 
-A fixture rides in the PR of the task it tests: the definition of done,
-https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, lists its
-checks, and the reviewer judges them against
-https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md.
+A fixture rides in the change of the task it tests, which meets sdk-core's definition
+of done, https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, and
+its review checklist, https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md:
+steps 4 to 6 are what they check in a fixture.
 
 The demo subdomain is treated exactly like a key: never in a file, a commit, a log line or
 a report. Never print `CASHCTRL_DEMO_SUBDOMAIN` or any variable ending in `_API_KEY`.
@@ -56,7 +56,7 @@ writes nothing and exits non-zero:
 - **No token-like fields and no personal identifiers.** The text value of every body
   field named `hash`, `token`, `secret` or `apiKey` (`api_key`, `api-key`), and of every
   field named `ssn` or whose name ends in `iban` (`iban`, `qrIban`, `qr_iban`, `orgIban`,
-  `orgQrIban`, `recipientIban`; queue row 243), the identifiers this package keeps out
+  `orgQrIban`, `recipientIban`), the identifiers this package keeps out
   of its projections (ADR-0017), in any case and at any depth, becomes `REDACTED`.
   `order/read.json` sends `hash`, an undocumented 32-character text that may be the
   token of a public link to the order document (observed on 2026-10-23, not verified);
@@ -69,8 +69,9 @@ writes nothing and exits non-zero:
   compound name (`publicHash`) is not scrubbed; `hash` is a key-like word, so the file is
   written for review.
 
-1. The demo pair comes from direnv in `~/github/sdk`. Confirm it without printing it:
-   `direnv exec ~/github/sdk sh -c '[ -n "$CASHCTRL_DEMO_SUBDOMAIN" ] && [ -n "$CASHCTRL_DEMO_API_KEY" ] && echo ok'`.
+1. The demo pair comes from the clone's own `.envrc` through direnv, `direnv exec .`
+   from the clone or a directory under it, a worktree among them. Confirm it without
+   printing it: `direnv exec . sh -c '[ -n "$CASHCTRL_DEMO_SUBDOMAIN" ] && [ -n "$CASHCTRL_DEMO_API_KEY" ] && echo ok'`.
 2. Find the request path and parameters in `docs/upstream/` and in the wrapper under
    `src/xippios/cashctrl/api/`. Parameters are named as upstream names them
    (`fiscalPeriodId`).
@@ -86,8 +87,8 @@ writes nothing and exits non-zero:
 3. Record, from the repository root:
 
    ```bash
-   direnv exec ~/github/sdk uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]
-   direnv exec ~/github/sdk uv run scripts/record_fixture.py <path>/create.json ok --method POST [key=value ...]
+   direnv exec . uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]
+   direnv exec . uv run scripts/record_fixture.py <path>/create.json ok --method POST [key=value ...]
    ```
 
    It builds the fixture in memory with core's `fixture_from_response` and
@@ -108,7 +109,7 @@ writes nothing and exits non-zero:
    the real one, to record a 401.
    Error cases (an unknown id, a refusal) are worth recording; the recorder keeps them
    instead of raising. The recorder's client never retries, so a 5xx is recorded as it
-   came and spends no request on a retry (queue row 138 item 3); core's `record` takes no
+   came and spends no request on a retry; core's `record` takes no
    `retry=`, so the client carries it: `recording_client` builds
    `AsyncClient(dataclasses.replace(client_for("demo").config, retry=RetryPolicy(max_attempts=1)), auth=...)`,
    for `--wrong-key` as well, and `tests/test_record_fixture.py` checks it offline.
@@ -129,7 +130,7 @@ writes nothing and exits non-zero:
    ```bash
    grep -rniE 'api[_-]?key|token|secret|authorization|password' tests/fixtures
    grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' tests/fixtures | sort -u
-   direnv exec ~/github/sdk sh -c 'git grep -n --untracked -i -- "$CASHCTRL_DEMO_SUBDOMAIN" >/dev/null && echo LEAK || echo clean'
+   direnv exec . sh -c 'git grep -n --untracked -i -- "$CASHCTRL_DEMO_SUBDOMAIN" >/dev/null && echo LEAK || echo clean'
    grep -rhoiE '(hash|token|secret|api[_-]?key)\\?": *\\?"[^"\\]*' tests/fixtures | sort -u
    grep -rhoiE --include='*.json' '\\?"(ssn|[a-z0-9_-]*iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
    grep -rhoiE --include='*.json' '(ssn=|iban=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'

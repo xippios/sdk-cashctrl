@@ -9,7 +9,7 @@ manual journal entries in 2025 and 2026; four sales invoices and two purchase or
 this script, from the repository root of the sdk-cashctrl checkout::
 
     uv run scripts/seed_demo.py                 # --plan: the plan, no network at all
-    direnv exec ~/github/sdk env -u CASHCTRL_ORGS uv run scripts/seed_demo.py --apply --yes
+    direnv exec . env -u CASHCTRL_ORGS uv run scripts/seed_demo.py --apply --yes
 
 The script reads ``CASHCTRL_DEMO_SUBDOMAIN`` and ``CASHCTRL_DEMO_API_KEY`` and nothing
 else, never ``CASHCTRL_ORGS``, and prints neither value: upstream text it shows (error
@@ -59,7 +59,7 @@ centre (``account/costcenter/create.json``, ``COST_CENTRE``), so that
 ``customfield/list.json`` and ``account/costcenter/list.json`` answer a record each::
 
     uv run scripts/seed_demo.py --discovery     # its plan, no network at all
-    direnv exec ~/github/sdk env -u CASHCTRL_ORGS \
+    direnv exec . env -u CASHCTRL_ORGS \
         uv run scripts/seed_demo.py --discovery --apply --yes
 
 It keeps guards 1 and 2 and replaces 3 and 4 with its own: ``customfield/list.json``

@@ -6,7 +6,7 @@ that holds it is sdk-core's ``cb8ecdf379c04522e5f1dcd91ea5e8bdfa1fb3ff``,
 ``src/xippios/core/tenants.py``. Private to this package: ``_client.py`` declares
 ``TENANTS`` with it and ``tasks.py`` builds ``list_organisations`` with ``list_task``;
 nothing outside the package imports it. One change since the copy: ``client_for``
-closes the client a changed variable replaces (queue row 24 b).
+closes the client a changed variable replaces.
 
 CashCtrl serves every organisation from its own subdomain, and an API user belongs to one
 organisation. The organisations are declared in the environment, the contract of
@@ -291,10 +291,10 @@ class Tenants:
         The client is cached under the current values of the tenant's field variables
         (as a digest, never the values), so a changed value builds a new client on the
         next call, and the one it replaces is closed through its ``aclose()``, which
-        closes the connection pool it holds on the event loop that awaits it (queue row
-        24 b). Called inside a running event loop, as every endpoint wrapper calls it,
-        the close is scheduled as a task on that loop and runs once the caller next
-        yields; called outside any loop, it runs on core's background loop through
+        closes the connection pool it holds on the event loop that awaits it. Called
+        inside a running event loop, as every endpoint wrapper calls it, the close is
+        scheduled as a task on that loop and runs once the caller next yields; called
+        outside any loop, it runs on core's background loop through
         ``xippios.core.sync``, the loop every sync facade uses, before this returns. A
         pool the replaced client holds on yet another loop is not reached and goes with
         the client. A request still in flight on the replaced client on the same loop is

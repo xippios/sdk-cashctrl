@@ -6,7 +6,7 @@ the account list."). Its documented parameters are those of ``account/list.json`
 comma-separated. Check the list.json for available column names."), all optional, which
 ``export_params`` adds. It documents no ``start`` or ``limit``, as the list: one file
 holds every match. The file is written by ``_download.download``, which raises a refusal
-sent as HTTP 200 instead of writing it (queue row 142).
+sent as HTTP 200 instead of writing it.
 """
 
 import os

@@ -284,7 +284,7 @@ def classify(response: httpx.Response) -> XippiosError | None:
       the one this package downloads) reads by id too: a refusal with a message and no
       field list there would raise ``NotFoundError`` (not observed: an unknown id answers
       a 404, above). A download's 200 reaches ``classify`` unread; ``api/_download.py``
-      hands it a JSON answer's head (queue row 142).
+      hands it a JSON answer's head.
 
     Everything else falls through (``None``): a 200 that is not a JSON object with
     ``"success": false`` (data, malformed JSON), a download's 200, whose body core leaves
