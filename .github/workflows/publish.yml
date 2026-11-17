@@ -1,4 +1,3 @@
-# cashctrl's own from template v0.2.2 on (D35): never re-rendered, changed by hand.
 # The release train (conventions §12, ADR-0018 amendment b): the release PR merges on
 # main → this workflow tags vX.Y.Z from pyproject.toml on the merge commit → environment
 # `pypi` → Johannes approves the run → trusted publishing uploads. No session and no human

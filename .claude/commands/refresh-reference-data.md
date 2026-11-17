@@ -1,4 +1,4 @@
-Note: cashctrl packages no reference data and has no `scripts/refresh_reference.py`, so this command does not apply here until a documented value set is needed; then the script comes back from the `render_enums` port this repository deleted (below).
+Note: cashctrl packages no reference data, and `scripts/refresh_reference.py` is the template's skeleton, so this command does not apply here until a documented value set is needed; then the script becomes the generator below.
 
 Refresh the packaged reference data for CashCtrl: $ARGUMENTS
 
@@ -6,10 +6,9 @@ CashCtrl has two kinds of lists, and only one of them may ship inside the packag
 multi-tenant source (ADR-0014) packages no tenant data, only lists that are the same for
 every tenant, if any.
 
-The PR meets the definition of done,
-https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, and the
-reviewer judges it against
-https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md.
+The change meets sdk-core's definition of done,
+https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, and its review
+checklist, https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md.
 
 - **Tenant data is never packaged.** Accounts, currencies, tax codes, fiscal periods,
   cost centres, units, person categories and every other list an organisation keeps for
@@ -24,19 +23,18 @@ https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md.
   generated with provenance from the snapshot, never typed in by hand and never fetched
   from an organisation.
 
-None is packaged yet, so `scripts/refresh_reference.py`, `params.py`, `enums.py` and
-`reference/` are gone (the note above). When a task needs a value set, bring them back
-from the `render_enums` port deleted here: `git show dfb65ce:<path>` (dfb65ce on main,
-the merge of #13), or `git show <commit>^:<path>` with `<commit>`, the commit that
-deleted it, from `git log --diff-filter=D -1 -- scripts/refresh_reference.py`. Not from
-template v0.2.2's scaffold: its script imports `render_str_enums` and
-`render_int_enums`, which core 0.3.0 removed. Make the script the generator of step 3;
-its `--render-only` regenerates `enums.py` from the packaged `reference/*.json` alone,
+None is packaged yet: `params.py` names no list in `PACKAGED_LISTS`, `enums.py` and
+`reference/` hold none, and `scripts/refresh_reference.py` is the template's skeleton,
+which fetches its lists through `api/` and so fits no value set the snapshot fixes. When
+a task needs one, make the script the generator of step 3, a script of the package's own
+shape that its docstring describes; `copier update` never overwrites it. The
+`render_enums` port this repository deleted is one to start from:
+`git show dfb65ce:scripts/refresh_reference.py` (dfb65ce on main, the merge of #13). Its
+`--render-only` regenerates `enums.py` from the packaged `reference/*.json` alone,
 without a request or a key, through its one `render_enums` call, as an adoption does
-after a core release changes `render_enums` (`/adopt-release`). Then:
+after a core release changes `render_enums` (conventions §15, item 6). Then:
 
-1. Work on a branch `chore/reference-<thing>`. Make sure `docs/upstream/` is current
-   (`/refresh-upstream` first if it is not).
+1. Make sure `docs/upstream/` is current (`/refresh-upstream` first if it is not).
 2. Find the parameter and its "Possible values" in `docs/upstream/`: snapshot file,
    operation, parameter. Values come from there, verbatim, nowhere else.
 3. Make the script a generator over the snapshot: a `LISTS` mapping from the set's
@@ -64,6 +62,9 @@ after a core release changes `render_enums` (`/adopt-release`). Then:
    task's name (ADR-0016).
 7. Update what pins the old lists: counts and dates in docstrings and in tests. A test
    that reads them from the packaged file needs no change.
-8. Run the checks and open the PR, its body as the definition of done says, with the
-   diff summarised: values added or gone (a value that disappeared may break callers).
-   Do not merge.
+8. A changelog fragment under `changelog/`, as `changelog/README.md` lays it out, says
+   which lists changed.
+9. Run the checks,
+   `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest && uv run pre-commit run --all-files`,
+   and summarise the diff in the pull request: values added or gone (a value that
+   disappeared may break callers).

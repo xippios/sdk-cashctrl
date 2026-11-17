@@ -1,18 +1,9 @@
 # Nightly live smoke tests (conventions §10): every test marked `live` against the real
 # upstream, on a schedule and on demand, never on a pull request.
-# The write tests run too: they act only on data kept for testing and clean up after
-# themselves.
-# First rendered by the template; cashctrl's own and hand-maintained from v0.2.2 on (D35,
-# row 118). The secret it names is the source's key variable, and its start time derives
-# from the slug. Edited by hand for the organisation model (ADR-0024): the live tests
-# reach the reserved demo organisation only, declared by CASHCTRL_DEMO_SUBDOMAIN and
-# CASHCTRL_DEMO_API_KEY, so those two org secrets replace the rendered CASHCTRL_API_KEY,
-# which nothing reads; CASHCTRL_ORGS is never set.
-# --tb=short is the template's own from v0.3.0, no longer an addition by hand: pytest's
-# long traceback prints each frame's arguments, an upstream payload among them, into this
-# public log.
-# From template v0.2.2 on this file is cashctrl's own and is never re-rendered (D35), so
-# its pins are bumped by hand (conventions §13).
+# Rendered by the template (the one workflow that is): the secrets it names are the key
+# variables of the answers api_key_env and source_dependencies (ADR-0021), then the other
+# variables its live tests read, from the answer live_secrets, and its start time derives
+# from the slug.
 name: Live
 
 on:
@@ -40,11 +31,14 @@ jobs:
           enable-cache: true
       - run: uv sync --all-extras --frozen
       # --tb=short: a failing test's frame arguments, a raw upstream payload among them,
-      # stay out of a log that is public (conventions §10).
-      - run: uv run pytest -m live --tb=short
-        # The demo organisation's pair, from the org secrets, for this step only: checkout,
-        # setup-uv and uv sync never see it.
+      # stay out of a log that is public (conventions §10). --assert=plain: a failed
+      # assertion prints the line and AssertionError alone, never the values it compared,
+      # a record of the upstream among them, here or in the summary of -ra.
+      - run: uv run pytest -m live --tb=short --assert=plain
+        # The key variables, then those live_secrets names, each from the secret of the
+        # same name, for this step only: checkout, setup-uv and uv sync never see them.
         env:
           XIPPIOS_LIVE_TESTS: "1"
+          CASHCTRL_API_KEY: ${{ secrets.CASHCTRL_API_KEY }}
           CASHCTRL_DEMO_SUBDOMAIN: ${{ secrets.CASHCTRL_DEMO_SUBDOMAIN }}
           CASHCTRL_DEMO_API_KEY: ${{ secrets.CASHCTRL_DEMO_API_KEY }}
