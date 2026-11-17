@@ -443,9 +443,8 @@ semantics or the shape of the public API.
 ## CashCtrl specifics
 
 The sections above and the commands under `.claude/commands/` hold here as well. The
-subsections below hold cashctrl's own lines: where the two differ (`org` first and
-`client_for(org)` where a command names `_client.client`, the demo-only recorder where it
-names `record_sync`, the live command), this section is cashctrl's form.
+subsections below hold cashctrl's own lines, and where a command and this section differ,
+this section is cashctrl's form.
 
 ### How to add an endpoint
 
