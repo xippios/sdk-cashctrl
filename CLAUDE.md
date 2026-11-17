@@ -90,10 +90,10 @@ synthetic: invented books seeded by `scripts/seed_demo.py` and described in
 `docs/demo-org.md`, never a copy of real books. So the recorder records any module and
 any amount; it still scrubs e-mail addresses, API user tags, token-like body fields,
 `ssn` and every name ending in `iban`, in the request body as well (How to record a
-fixture), and refuses any method but GET and POST, a POST to anything but the eleven
+fixture), and refuses any method but GET and POST, a POST to anything but the fourteen
 write paths, a GET to a path `docs/upstream/` does not document as a GET, a create
-without the marker `xippios-live` or an order write naming an unmarked order, and any
-endpoint but `.json`. Writes against demo create a record marked
+without the marker `xippios-live`, an order write naming an unmarked order or a book
+entry's update or delete whose order is unmarked, and any endpoint but `.json`. Writes against demo create a record marked
 `xippios-live`, update it and delete it again, nothing else but a payment of a deleted
 order (see Write tools). The demo subdomain is treated like a key: never in a file, a
 commit, a log line or a report. The repository is public.
@@ -203,12 +203,13 @@ instead, named after the service, and this Layout says so (conventions §2).
 
 ## Write tools
 
-`tasks_write.py` holds eleven write tasks, `create_*`, `update_*` and `delete_*` for
-journal entries, persons and orders, `update_order_status` and `create_order_payment`,
-served by `xippios-cashctrl-mcp-write` only: never by the read server, never on the HTTP
-router (`assert_write_tools` in `tests/test_tasks_write.py`). Johannes decided the first
-nine in the interviews of 2026-10-23/24 and 2026-10-27, the last two in G5 (8) of
-2026-10-28; the recipe for one more:
+`tasks_write.py` holds fourteen write tasks, `create_*`, `update_*` and `delete_*` for
+journal entries, persons, orders and an order's book entries, `update_order_status` and
+`create_order_payment`, served by `xippios-cashctrl-mcp-write` only: never by the read
+server, never on the HTTP router (`assert_write_tools` in `tests/test_tasks_write.py`).
+Johannes decided the first nine in the interviews of 2026-10-23/24 and 2026-10-27, two
+in G5 (8) of 2026-10-28 and the book entries' three on 2026-11-17 (#43); the recipe for
+one more:
 
 1. **Layer 1.** `api/<module>_create.py` (and `_update`, `_delete`): a `<module>_fields`
    builder takes every parameter the create table documents, snake_cased, and returns
@@ -238,9 +239,10 @@ nine in the interviews of 2026-10-23/24 and 2026-10-27, the last two in G5 (8) o
    read, never a write.
 3. **Updates read, merge, send.** Upstream empties every parameter an update omits.
    An `update.json` task reads the record, maps every parameter it documents from it
-   (`_journal_values`, `_person_values`, `_order_values`), applies the arguments given
-   (not `None`), and sends all of them. An order's items go back under the keys the
-   items table documents (`_order_items`, in their `pos`), the computed ones left out;
+   (`_journal_values`, `_person_values`, `_order_values`, `_book_entry_values`),
+   applies the arguments given (not `None`), and sends all of them. An order's items go
+   back under the keys the items table documents (`_order_items`, in their `pos`), the
+   computed ones left out;
    upstream stores the items an update sends anew, with new ids (observed 2026-10-27).
    A mandatory parameter neither the record nor the call gives raises
    `InvalidRequestError` before any write; so does a stored list whose shape was never
@@ -259,9 +261,10 @@ nine in the interviews of 2026-10-23/24 and 2026-10-27, the last two in G5 (8) o
    `orderBookEntryId`, `salaryBookEntryId`) is refused, by `delete_journal_entry` as
    well, which reads the entry first, confirmed or not; an order is not refused for
    being booked, since upstream changes an order's automatic book entries through its
-   items (`docs/upstream/order.md`, Book entry). A confirmed call reads again and
-   recomputes, so its payload can differ from the preview's if the record changed. Never
-   send a partial record.
+   items (`docs/upstream/order.md`, Book entry), and a book entry the items booked
+   (`type` `GENERATED`) is refused by its update and delete, which read it first. A
+   confirmed call reads again and recomputes, so its payload can differ from the
+   preview's if the record changed. Never send a partial record.
 4. **Custom fields** are `customField<ID>` to text (`api/_form.py`'s `CUSTOM_FIELD`),
    rendered as `<values><customField1>...</customField1></values>`, values escaped; an
    update merges the given values into the stored XML (`merge_custom`) and refuses XML
@@ -541,8 +544,8 @@ a fixture that still holds the subdomain, the key or its first four characters, 
 e-mail address, an API user tag, or a value but `null` or `REDACTED` under a token-like
 or identifier name; a compound name such as `publicHash` goes to review. After a write it
 names the `insertId` and asks for the matching delete. The write fixtures record marked
-records created, read, updated and deleted again (2026-10-24, 2026-10-27) and a purchase
-order's status and payments (2026-10-29). Before committing, run the grep block of
+records created, read, updated and deleted again (2026-10-24, 2026-10-27), a purchase
+order's status and payments (2026-10-29) and a marked order's book entry (2026-11-17). Before committing, run the grep block of
 `/record-fixture` (step 5); its last two greps print `0`. Fixtures are never typed in by
 hand.
 
