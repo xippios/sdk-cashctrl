@@ -111,20 +111,40 @@ REPORT_WRAPPERS = {
     "report_element_download_xlsx",
     "report_collection_download_pdf",
     "report_collection_download_xlsx",
-    "report_collection_download_annualreport_pdf",
+    "report_collection_download_annualreport",
 }
 """The PDF and Excel files of ``docs/upstream/report.md``, the annual report's among them."""
+
+DOCUMENTED_PATHS = frozenset(
+    re.findall(
+        r"(?:GET|POST) /api/v1/(\S+?)(?=[\s`]|$)",
+        "".join(
+            page.read_text(encoding="utf-8")
+            for page in sorted((Path(__file__).parent.parent / "docs" / "upstream").glob("*.md"))
+        ),
+    )
+)
+"""Every path the snapshot documents, each with its file suffix."""
 
 
 @pytest.mark.parametrize("wrapper", FILE_WRAPPERS.values(), ids=FILE_WRAPPERS.keys())
 def test_a_file_wrapper_is_named_after_its_path(wrapper: Callable[..., typing.Any]) -> None:
-    """Conventions §2 (D95): the suffix last; the verbatim path first in the docstring."""
+    """Conventions §2: the suffix last, and only where it tells operations on one path apart.
+
+    ``order/document/read.pdf`` keeps ``_pdf`` beside ``read.json`` and ``read.zip``;
+    ``report/collection/download_annualreport.pdf``, the one format of its path, drops it.
+    The verbatim path opens the module's docstring.
+    """
     module = inspect.getmodule(wrapper)
     assert module is not None
     match = re.match(r"``GET /api/v1/(\S+)``", module.__doc__ or "")
     assert match, "the verbatim path opens the module's docstring"
     path = match.group(1)
-    assert wrapper.__name__ == path.replace("/", "_").replace(".", "_")
+    stem = path.rpartition(".")[0]
+    formats = {other for other in DOCUMENTED_PATHS if other.rpartition(".")[0] == stem}
+    assert path in formats, "the path is one the snapshot documents"
+    named = path if len(formats) > 1 else stem
+    assert wrapper.__name__ == named.replace("/", "_").replace(".", "_")
     assert module.__name__.rsplit(".", 1)[-1] == wrapper.__name__
     assert f'endpoint="{path}"' in inspect.getsource(wrapper)
 
