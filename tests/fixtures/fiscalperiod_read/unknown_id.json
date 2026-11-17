@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-11-17T20:00:43.339423Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/fiscalperiod/read.json?id=999999999"
+  },
+  "response": {
+    "body": "{\"success\":false,\"errorMessage\":\"This fiscal period does not exist.\",\"data\":null}",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json;charset=utf-8"
+      ],
+      [
+        "date",
+        "Tue, 17 Nov 2026 20:00:43 GMT"
+      ],
+      [
+        "etag",
+        "\"1794633337004\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 200
+  }
+}

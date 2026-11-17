@@ -6,8 +6,9 @@ reach the demo organisation only, whose books are synthetic (``scripts/seed_demo
 Each read test makes one call, but the reads, which first look an id up in a list
 (account 1020 by number, the first journal entry, person and sales order),
 ``list_order_book_entries``, which first lists the purchase orders for one that books,
-and ``get_report_data``, which first reads the report tree for the balance sheet's
-element id (the tree it keeps, so a payroll report of it is refused with no request).
+``get_report_data``, which first reads the report tree for the balance sheet's
+element id (the tree it keeps, so a payroll report of it is refused with no request),
+and ``get_fiscal_period``, which reads the 2026 period by id and the current one without.
 ``fiscal_periods`` looks the fiscal periods up once for the module: the API user's
 current period is 2025, and the orders are in 2026.
 
@@ -68,7 +69,7 @@ One more asks for the document of an order that does not exist and expects
 2026-10-29), which ``classify`` maps to ``NotFoundError`` on a ``read.pdf`` by ``ids``
 (queue row 235).
 
-The calls of one run: 31 for the reads (17, 9 for the discovery lists and the reports:
+The calls of one run: 33 for the reads (19, 9 for the discovery lists and the reports:
 one each, and the tree ``get_report_data`` reads first, 3 for the book entries of an
 order, with the list of purchase orders they read first, and the history, and 2 for an
 order's document, with the list of sales orders it reads first), 5 for the files (the
@@ -85,7 +86,7 @@ for the refused delete of an entry an order booked (the list, the delete's read)
 for an order's book entry (the purchase categories, sweep, the order's create, the
 entry's create, the order's entries, the refused delete's read, the update's preview,
 the update as read and write, the read back, the delete as read and write, the order's
-delete); 91 in all, one more per leftover swept, two for a journal entry.
+delete); 93 in all, one more per leftover swept, two for a journal entry.
 """
 
 import json
@@ -153,6 +154,18 @@ async def test_list_fiscal_periods(demo_org: str) -> None:
     assert all(isinstance(period.start, date) for period in result.data)
     assert result.meta.request == {"org": demo_org}
     assert result.meta.tenant == demo_org
+
+
+async def test_get_fiscal_period(demo_org: str, fiscal_periods: dict[str, int]) -> None:
+    period = fiscal_periods["2026"]
+    by_id = await tasks.get_fiscal_period_async(demo_org, period)
+    assert (by_id.data.id, by_id.data.name, by_id.meta.request) == (
+        period,
+        "2026",
+        {"org": demo_org, "id": period},
+    )
+    current = await tasks.get_fiscal_period_async(demo_org)
+    assert (current.data.id, current.meta.request) == (fiscal_periods["2025"], {"org": demo_org})
 
 
 async def test_list_currencies(demo_org: str) -> None:
@@ -410,9 +423,14 @@ async def test_list_account_categories(demo_org: str) -> None:
     assert any(category.parent_id is None for category in result.data)
 
 
-async def test_list_cost_centers(demo_org: str) -> None:
-    result = await tasks.list_cost_centers_async(demo_org, only_active=True)
-    assert result.meta.request == {"org": demo_org, "onlyActive": "true"}
+async def test_list_cost_centers(demo_org: str, fiscal_periods: dict[str, int]) -> None:
+    # The balances of 2026, not the current period, as account_costcenter_list/fp2026 has them.
+    period = fiscal_periods["2026"]
+    result = await tasks.list_cost_centers_async(
+        demo_org, fiscal_period_id=period, only_active=True
+    )
+    assert result.meta.request == {"org": demo_org, "fiscalPeriodId": period, "onlyActive": "true"}
+    assert all(isinstance(centre.end_amount, Decimal | None) for centre in result.data)
     assert result.meta.total == len(result.data) > 0, "seed_demo.py --discovery made one"
     assert all(isinstance(centre.number, str) and centre.name for centre in result.data)
 
