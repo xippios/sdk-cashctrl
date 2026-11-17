@@ -2258,6 +2258,45 @@ def test_an_orders_delete_takes_its_manual_entries(
     assert not write.called
 
 
+@pytest.mark.parametrize("confirm", [False, True])
+@pytest.mark.parametrize("write", ["update", "delete"])
+@pytest.mark.parametrize(
+    ("kind", "shown"),
+    [(None, "no type"), ("absent", "no type"), ("IMPORTED", "type IMPORTED")],
+    ids=["null", "absent", "IMPORTED"],
+)
+def test_only_an_entry_booked_by_hand_is_changed_or_deleted(
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+    confirm: bool,
+    write: str,
+    kind: str | None,
+    shown: str,
+) -> None:
+    """``MANUAL`` is the type observed for an entry booked by hand (2026-11-17): any other
+    type, or none, is refused after the read, since upstream's answer to a write of it was
+    never observed. The recorded read ``order_bookentry_read/for_update`` changed in memory.
+    """
+    body = recorded_read(fixtures_dir, "order_bookentry_read", "for_update")
+    if kind == "absent":
+        del body["data"]["type"]
+    else:
+        body["data"]["type"] = kind
+    read = serve_read(respx_mock, "order/bookentry/read.json", body)
+    sent = respx_mock.post(url__regex=rf"{re.escape(BASE)}/order/bookentry/.*")
+    arguments: dict[str, Any] = {"description": "x"} if write == "update" else {}
+    task = WRITE_TASKS[f"{write}_order_book_entry"]
+    with pytest.raises(InvalidRequestError) as refused:
+        task(DEMO, BOOK_ENTRY, **arguments, confirm=confirm)
+    assert str(refused.value) == (
+        f"book entry {BOOK_ENTRY} has {shown}, not MANUAL, the type of an entry booked by "
+        f"hand; how upstream answers a write to it was never observed, so it is not {write}d "
+        "here. Nothing was sent"
+    )
+    assert read.call_count == 1, "one read, confirmed or not"
+    assert not sent.called
+
+
 @pytest.mark.anyio
 async def test_the_book_entry_writes_through_the_write_server(
     replay_fixture: ReplayFixture, respx_mock: respx.MockRouter, fixtures_dir: Path
