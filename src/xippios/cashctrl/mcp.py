@@ -1,18 +1,16 @@
 """MCP server for CashCtrl.
 
 Every task in ``tasks.__all__`` is a read-only tool, but those ``tasks.BULK_TASKS``
-names, which core skips: the server is passed ``tasks.__all__`` whole (ADR-0019). No
-logic lives here (ADR-0001). Entry point: ``xippios-cashctrl-mcp-read``; ``--org <name>``
-binds it to one organisation (``_cli``, ``_org_lock``).
+names (``tool_functions``, ADR-0019). No logic lives here (ADR-0001). Entry point:
+``xippios-cashctrl-mcp-read``; ``--org <name>`` binds it to one organisation (core's
+``serve_tenants``).
 """
 
-from mcp.server.mcpserver import MCPServer
-from xippios.core.mcp import build_server
+from xippios.core import TenantLock, bind_tasks, tenant_instructions
+from xippios.core.mcp import ToolSet, build_server, serve_tenants, tool_functions
 
 from xippios.cashctrl import tasks
-from xippios.cashctrl._cli import serve
-from xippios.cashctrl._client import SOURCE
-from xippios.cashctrl._org_lock import OrgLock, bind_tasks, instructions
+from xippios.cashctrl._client import SOURCE, TENANTS, check_org
 from xippios.cashctrl._version import __version__
 
 INSTRUCTIONS = (
@@ -24,23 +22,20 @@ INSTRUCTIONS = (
 )
 
 
-def build(lock: OrgLock | None = None) -> MCPServer:
-    """The read-only server, bound to one organisation when ``lock`` is given."""
-    return build_server(
+def build(lock: TenantLock | None = None) -> ToolSet:
+    """The read-only tool set, bound to one organisation when ``lock`` is given."""
+    return ToolSet(
         SOURCE,
-        bind_tasks([getattr(tasks, name) for name in tasks.__all__], lock),
-        version=__version__,
-        instructions=instructions(INSTRUCTIONS, lock),
+        bind_tasks(tool_functions(tasks), lock),
         caps=getattr(tasks, "MCP_CAPS", None),
+        instructions=tenant_instructions(INSTRUCTIONS, lock),
+        version=__version__,
     )
 
 
-server = build()
+server = build_server(build())
 
 
 def run() -> None:
     """Run the server: stdio by default, ``--http`` for streamable HTTP, ``--org`` to bind it."""
-    # Command-line options of the source's own reach core's parser through its hooks
-    # (ADR-0014): _cli.serve calls main(server, add_options=add_org, apply_options=<returns
-    # the server, bound to the organisation --org names>).
-    serve(server, build)
+    serve_tenants(server, build, TENANTS, noun="organisation", check=check_org)

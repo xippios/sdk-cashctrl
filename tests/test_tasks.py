@@ -48,7 +48,7 @@ from xippios.cashctrl.models import (
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 """The recorded fixtures, for what the module computes at import (``fixtures_dir`` in tests)."""
 TENANT_LIST = "list_organisations"
-"""The package's tenant list (``_tenants.list_task``, ADR-0024): no ``org``, no async twin."""
+"""The package's tenant list (core's ``list_task``, ADR-0024): no ``org``, no async twin."""
 ORG_TASK_NAMES = [name for name in tasks.__all__ if name != TENANT_LIST]
 TOOL_TASK_NAMES = [name for name in ORG_TASK_NAMES if name not in tasks.BULK_TASKS]
 """The tasks the adapters serve: the file tasks of ``BULK_TASKS`` are Python only."""

@@ -6,9 +6,9 @@ there is no single client here: every task takes ``org``, the name of an organis
 declared in the environment, and ``client_for(org)`` returns that organisation's own
 client, with its own base URL, its own key, its own token bucket and no shared cache.
 
-The registry is the package's own ``Tenants`` (``_tenants.py``, copied from xippios-core
-when 0.3.0 left it to this package, ADR-0024), ``TENANTS`` below; the environment is the
-contract (conventions §7):
+The registry is core's ``Tenants`` (``xippios.core.tenants``, ADR-0024), ``TENANTS``
+below, whose ``param`` declares ``org`` as the parameter that names an organisation; the
+environment is the contract (conventions §7):
 
 - ``CASHCTRL_ORGS``: comma-separated names matching ``^[a-z0-9_]+$``, e.g. ``acme,acme_test``;
 - per name, ``CASHCTRL_<NAME>_SUBDOMAIN`` and ``CASHCTRL_<NAME>_API_KEY``, the name
@@ -35,30 +35,44 @@ from xippios.core import (
     AsyncClient,
     BasicKeyAuth,
     ClientConfig,
+    EnvVar,
     NotFoundError,
     RateLimit,
+    Tenants,
     UpstreamError,
     XippiosError,
     error_from_response,
 )
 
-from xippios.cashctrl._tenants import Tenants
 from xippios.cashctrl._version import __version__
 from xippios.cashctrl.errors import FieldError, RequestRejected
 
 __all__ = [
     "BASE_URL_TEMPLATE",
     "DEMO",
+    "ENV_VARS",
     "NEUTRAL_HOST",
     "RATE_LIMIT",
     "SOURCE",
     "TENANTS",
+    "check_org",
     "check_subdomain",
     "classify",
     "client_for",
 ]
 
 SOURCE = "cashctrl"
+ENV_VARS = (
+    EnvVar("CASHCTRL_ORGS", secret=False, required=False),
+    EnvVar("CASHCTRL_<NAME>_SUBDOMAIN", secret=False, required=True),
+    EnvVar("CASHCTRL_<NAME>_API_KEY", secret=True, required=True),
+)
+"""The variables the package reads, for a host (conventions §7; ADR-0026, amendment 2026-11-18).
+
+``CASHCTRL_ORGS`` lists the organisations and is not needed for the reserved ``demo``,
+which its own ``CASHCTRL_DEMO_SUBDOMAIN`` and ``CASHCTRL_DEMO_API_KEY`` declare; every
+declared organisation needs its subdomain and its key. An ``EnvVar`` reads nothing.
+"""
 BASE_URL_TEMPLATE = "https://{subdomain}.cashctrl.com/api/v1"
 """Base URL of one organisation; ``subdomain`` is the organisation's (introduction.md)."""
 # A self-imposed pace: upstream documents no per-second or per-minute limit (ADR-0010 decision 1).
@@ -97,12 +111,28 @@ def check_subdomain(value: str) -> str:
 TENANTS = Tenants(
     SOURCE,
     list_var="CASHCTRL_ORGS",
+    param="org",
     fields=("SUBDOMAIN", "API_KEY"),
     reserved=(DEMO,),
     validate={"SUBDOMAIN": check_subdomain},
     hints={"SUBDOMAIN": "set the subdomain alone, one DNS label: acme for acme.cashctrl.com"},
 )
 """CashCtrl's organisations, declared in the environment (ADR-0024)."""
+
+
+def check_org(org: str) -> None:
+    """Check a declared organisation's subdomain at a bound server's startup.
+
+    Core's ``serve_tenants`` calls it after ``TENANTS.require(org)``, before the server
+    bound to ``org`` is built, so a missing or malformed subdomain stops the server at
+    startup, exit status 2, rather than on its first call. It reads the subdomain as
+    ``client_for(org)`` would.
+
+    Raises:
+        ConfigError: ``CASHCTRL_<NAME>_SUBDOMAIN`` is not set or holds no valid subdomain;
+            the message names the variable, never its value.
+    """
+    TENANTS.field(org, "SUBDOMAIN")
 
 
 NEUTRAL_HOST = "cashctrl.com"
