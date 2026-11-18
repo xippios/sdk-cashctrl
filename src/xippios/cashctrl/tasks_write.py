@@ -276,8 +276,8 @@ def _check_status(status_id: object, problems: list[str], *, required: bool) -> 
         return
     if not _whole(status_id) or status_id < 1:
         problems.append(
-            f"status_id must be a status id from list_order_categories, a whole number of "
-            f"at least 1, not {status_id!r}"
+            "status_id must be a status id from list_order_categories (over MCP, the tool "
+            f"cashctrl_list_order_categories), a whole number of at least 1, not {status_id!r}"
         )
 
 
@@ -286,7 +286,8 @@ def _check_associate(associate_id: object, problems: list[str]) -> None:
     if associate_id is not None and not _whole(associate_id):
         problems.append(
             f"associate_id must be a person's id, a whole number, not {associate_id!r}; "
-            "create a new person with create_person first"
+            "create a new person with create_person (over MCP, the tool "
+            "cashctrl_create_person) first"
         )
 
 
@@ -2260,7 +2261,7 @@ def _not_manual(entry: OrderBookEntry, write: str) -> InvalidRequestError | None
         reason = (
             f"was booked from its order's items (type {GENERATED}); upstream documents "
             f"that such entries cannot be {write}d directly, only by changing the order's "
-            "items with update_order"
+            "items with update_order (over MCP, the tool cashctrl_update_order)"
         )
     else:
         shown = "no type" if entry.type is None else f"type {entry.type}"
@@ -2355,7 +2356,11 @@ async def update_order_book_entry_async(
     merged = {**values, **given}
     merged.update(_cleared(cleared))
     if merged["account_id"] is None:
-        raise _missing("book entry", ["accountId"], "pass account_id, an id from list_accounts")
+        raise _missing(
+            "book entry",
+            ["accountId"],
+            "pass account_id, an id from list_accounts (over MCP, the tool cashctrl_list_accounts)",
+        )
     fields = api.order_bookentry_fields(id=entry.id, **merged)
     changes = _changes(api.order_bookentry_fields, BOOK_ENTRY_UPDATE, given, cleared, None)
     endpoint = "order/bookentry/update.json"

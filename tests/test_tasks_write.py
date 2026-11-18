@@ -47,6 +47,7 @@ from xippios.core.testing import (
     load_fixture,
     mcp_call,
     mcp_call_text,
+    sent_bodies,
 )
 
 from xippios.cashctrl import api, tasks_write
@@ -97,11 +98,6 @@ def recorded_body(fixtures_dir: Path, endpoint: str, case: str) -> list[tuple[st
     body = load_fixture(fixtures_dir / endpoint / f"{case}.json").request.body
     assert body is not None, f"{endpoint}/{case} recorded no request body"
     return parse_qsl(body, keep_blank_values=True, strict_parsing=True)
-
-
-def sent_body(route: respx.Route) -> list[tuple[str, str]]:
-    """The form fields the last call of ``route`` sent, decoded, in their order."""
-    return parse_qsl(route.calls.last.request.content.decode(), keep_blank_values=True)
 
 
 def recorded_read(fixtures_dir: Path, endpoint: str, case: str) -> dict[str, Any]:
@@ -160,6 +156,8 @@ def test_every_write_task_returns_a_preview_or_a_result(task: Callable[..., Any]
 
 
 # The write server --------------------------------------------------------------------
+
+
 @pytest.mark.anyio
 async def test_the_write_server_serves_write_tasks_only() -> None:
     """Conventions §8: a write server, its tools exactly the write tasks, confirm last.
@@ -238,7 +236,7 @@ def test_create_journal_entry_with_confirm_replays_the_recorded_create(
     sent = route.calls.last.request
     assert sent.method == "POST"
     assert sent.headers["Content-Type"] == FORM_CONTENT_TYPE
-    assert sent_body(route) == recorded_body(fixtures_dir, "journal_create", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "journal_create", "ok"))
     written = result.data
     assert isinstance(written, WriteResult)
     assert (written.performed, written.insert_id, written.message) == (
@@ -320,7 +318,7 @@ def test_update_journal_entry_with_confirm_reads_then_sends_the_whole_record(
         DEMO, JOURNAL_ENTRY, title="xippios-live fixture updated", confirm=True
     )
     assert (read.call_count, update.call_count) == (1, 1)
-    assert sent_body(update) == recorded_body(fixtures_dir, "journal_update", "ok")
+    assert sent_bodies(update)[-1] == dict(recorded_body(fixtures_dir, "journal_update", "ok"))
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (JOURNAL_ENTRY, "Book entry saved")
     assert result.meta.request["id"] == str(JOURNAL_ENTRY)
@@ -468,7 +466,11 @@ def test_update_journal_entry_refuses_an_entry_another_module_booked(
 
 
 def test_a_create_takes_a_persons_id_only(respx_mock: respx.MockRouter) -> None:
-    with pytest.raises(InvalidRequestError, match="create a new person with create_person"):
+    with pytest.raises(
+        InvalidRequestError,
+        match=r"create a new person with create_person \(over MCP, the tool "
+        r"cashctrl_create_person\) first",
+    ):
         tasks_write.create_journal_entry(DEMO, associate_id="Neu AG")  # type: ignore[arg-type]
     with pytest.raises(InvalidRequestError, match=r"items\[0\]\.associate_id"):
         tasks_write.create_journal_entry(
@@ -510,7 +512,7 @@ def test_delete_journal_entry_with_confirm_reads_then_deletes(
     route = replay_fixture("journal_delete", "ok")
     result = tasks_write.delete_journal_entry(DEMO, JOURNAL_ENTRY, confirm=True)
     assert (read.call_count, route.call_count) == (1, 1)
-    assert sent_body(route) == recorded_body(fixtures_dir, "journal_delete", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "journal_delete", "ok"))
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (None, "1 book entry deleted")
     assert result.meta.request == {"org": DEMO, "ids": str(JOURNAL_ENTRY)}
@@ -645,7 +647,7 @@ def test_create_person_with_confirm_replays_the_recorded_create(
 ) -> None:
     route = replay_fixture("person_create", "ok")
     result = create_the_recorded_person(confirm=True)
-    assert sent_body(route) == recorded_body(fixtures_dir, "person_create", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "person_create", "ok"))
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (PERSON, "Person saved")
     assert result.meta.tenant == DEMO
@@ -674,7 +676,7 @@ def test_update_person_with_confirm_reads_then_sends_the_whole_record(
     result = tasks_write.update_person(
         DEMO, PERSON, company="xippios-live Fixture AG", confirm=True
     )
-    assert sent_body(update) == recorded_body(fixtures_dir, "person_update", "ok")
+    assert sent_bodies(update)[-1] == dict(recorded_body(fixtures_dir, "person_update", "ok"))
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (PERSON, "Person saved")
 
@@ -803,9 +805,9 @@ def test_clearing_a_flag_sends_false(
         200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
     )
     tasks_write.update_person(DEMO, PERSON, clear=["is_customer"], confirm=True)
-    assert ("isCustomer", "false") in sent_body(write)
-    assert sent_body(write) == list(
-        preview_of(tasks_write.update_person(DEMO, PERSON, clear=["is_customer"])).payload.items()
+    assert sent_bodies(write)[-1]["isCustomer"] == "false"
+    assert sent_bodies(write)[-1] == dict(
+        preview_of(tasks_write.update_person(DEMO, PERSON, clear=["is_customer"])).payload
     )
 
 
@@ -914,7 +916,7 @@ def test_delete_person_previews_then_deletes(
     assert (preview.before.id, preview.payload) == (PERSON, {"ids": str(PERSON)})
     route = replay_fixture("person_delete", "ok")
     result = tasks_write.delete_person(DEMO, PERSON, confirm=True)
-    assert sent_body(route) == recorded_body(fixtures_dir, "person_delete", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "person_delete", "ok"))
     assert isinstance(result.data, WriteResult)
     assert result.data.message == "1 person deleted"
 
@@ -945,7 +947,7 @@ def test_create_person_never_echoes_ssn_or_iban(respx_mock: respx.MockRouter) ->
         200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
     )
     result = tasks_write.create_person(DEMO, **arguments, confirm=True)
-    sent = dict(sent_body(write))
+    sent = sent_bodies(write)[-1]
     assert sent["ssn"] == SSN, "upstream receives the value"
     assert json.loads(sent["bankAccounts"])[0]["iban"] == IBAN
     assert result.meta.request["ssn"] == "REDACTED"
@@ -980,7 +982,7 @@ def test_update_person_shows_no_stored_or_given_ssn(
         200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
     )
     result = tasks_write.update_person(DEMO, PERSON, department="x", confirm=True)
-    assert dict(sent_body(write))["ssn"] == SSN, "the stored value is carried over"
+    assert sent_bodies(write)[-1]["ssn"] == SSN, "the stored value is carried over"
     assert result.meta.request["ssn"] == "REDACTED"
 
 
@@ -1019,7 +1021,7 @@ def test_update_person_never_echoes_a_given_iban(
     update = replay_fixture("person_update", "ok")
     result = tasks_write.update_person(DEMO, PERSON, bank_accounts=accounts, confirm=True)
     assert read.call_count == 2, "the confirmed call reads again"
-    sent = dict(sent_body(update))
+    sent = sent_bodies(update)[-1]
     assert json.loads(sent["bankAccounts"]) == [
         {"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"}
     ], "upstream receives the value"
@@ -1091,7 +1093,7 @@ def test_create_order_with_confirm_replays_the_recorded_create(
 ) -> None:
     route = replay_fixture("order_create", "ok")
     result = create_the_recorded_order(confirm=True)
-    assert sent_body(route) == recorded_body(fixtures_dir, "order_create", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "order_create", "ok"))
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (ORDER, "Rechnung saved")
     assert result.meta.endpoint == "order/create.json"
@@ -1149,7 +1151,7 @@ def test_update_order_with_confirm_reads_then_sends_the_whole_order(
     assert (read.call_count, update.call_count) == (1, 1)
     sent = update.calls.last.request
     assert sent.headers["Content-Type"] == FORM_CONTENT_TYPE
-    assert sent_body(update) == recorded_body(fixtures_dir, "order_update", "ok")
+    assert sent_bodies(update)[-1] == dict(recorded_body(fixtures_dir, "order_update", "ok"))
     written = result.data
     assert isinstance(written, WriteResult)
     assert (written.performed, written.insert_id, written.message) == (
@@ -1410,7 +1412,7 @@ def test_delete_order_previews_the_order_then_deletes(
     assert (preview.before.nr, preview.payload) == ("RE-2026-103", {"ids": "3"})
     route = replay_fixture("order_delete", "ok")
     result = tasks_write.delete_order(DEMO, ORDER, confirm=True)
-    assert sent_body(route) == recorded_body(fixtures_dir, "order_delete", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "order_delete", "ok"))
     assert isinstance(result.data, WriteResult)
     assert result.data.message == "1 document deleted"
 
@@ -1488,7 +1490,7 @@ def test_update_order_status_with_confirm_replays_the_recorded_update(
     assert route.call_count == 1
     assert len(respx_mock.calls) == 1, "no read before the write"
     assert route.calls.last.request.headers["Content-Type"] == FORM_CONTENT_TYPE
-    assert sent_body(route) == recorded
+    assert sent_bodies(route)[-1] == dict(recorded)
     assert isinstance(result.data, WriteResult)
     assert (result.data.performed, result.data.insert_id, result.data.message) == (
         True,
@@ -1545,7 +1547,7 @@ def test_create_order_payment_with_confirm_replays_the_recorded_payment(
     result = tasks_write.create_order_payment(DEMO, PAY_DAY, [PAID], type="CASH_PDF", confirm=True)
     assert len(respx_mock.calls) == 1, "no read before the write"
     assert route.calls.last.request.headers["Content-Type"] == FORM_CONTENT_TYPE
-    assert sent_body(route) == recorded
+    assert sent_bodies(route)[-1] == dict(recorded)
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (None, "Payment order created")
     assert result.meta.endpoint == "order/payment/create.json"
@@ -1562,7 +1564,7 @@ def test_a_refused_payment_names_the_date_and_the_bank_accounts(
     route = replay_fixture("order_payment_create", "pain")
     with pytest.raises(RequestRejected) as refused:
         tasks_write.create_order_payment(DEMO, PAY_DAY, [PAID], type="PAIN", confirm=True)
-    assert sent_body(route) == recorded
+    assert sent_bodies(route)[-1] == dict(recorded)
     assert [(error.field, error.message) for error in refused.value.errors] == [
         ("date", "The date cannot be in the past."),
         (None, "Rechnung xippios-live: Sender: Bank account must be set."),
@@ -1751,7 +1753,8 @@ def test_an_entry_booked_from_the_items_is_refused_after_one_read(
     assert str(refused.value) == (
         f"book entry {GENERATED_ENTRY} was booked from its order's items (type GENERATED); "
         f"upstream documents that such entries cannot be {write}d directly, only by changing "
-        "the order's items with update_order. Nothing was sent"
+        "the order's items with update_order (over MCP, the tool cashctrl_update_order). "
+        "Nothing was sent"
     )
     assert read.call_count == 1, "one read, confirmed or not"
     assert not sent.called
@@ -1911,7 +1914,7 @@ def test_create_order_book_entry_with_confirm_replays_the_recorded_create(
     result = book_the_recorded_entry(confirm=True)
     assert len(respx_mock.calls) == 1, "no read before a create"
     assert route.calls.last.request.headers["Content-Type"] == FORM_CONTENT_TYPE
-    assert sent_body(route) == recorded
+    assert sent_bodies(route)[-1] == dict(recorded)
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (BOOK_ENTRY, "null saved"), (
         "upstream's message, as it was sent"
@@ -1946,7 +1949,7 @@ def test_update_order_book_entry_with_confirm_reads_then_sends_the_whole_entry(
     result = update_the_recorded_entry(confirm=True)
     assert (read.call_count, route.call_count) == (1, 1), "one read, then the write"
     recorded = recorded_body(fixtures_dir, "order_bookentry_update", "ok")
-    assert sent_body(route) == recorded
+    assert sent_bodies(route)[-1] == dict(recorded)
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (BOOK_ENTRY, "Book entry saved")
     assert result.meta.request == {"org": DEMO, **dict(recorded)}
@@ -1998,7 +2001,9 @@ def test_delete_order_book_entry_reads_the_entry_then_deletes(
     )
     result = tasks_write.delete_order_book_entry(DEMO, BOOK_ENTRY, confirm=True)
     assert (read.call_count, write.call_count) == (2, 1)
-    assert sent_body(write) == recorded_body(fixtures_dir, "order_bookentry_delete", "ok")
+    assert sent_bodies(write)[-1] == dict(
+        recorded_body(fixtures_dir, "order_bookentry_delete", "ok")
+    )
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (None, "1 book entry deleted")
 
@@ -2412,7 +2417,7 @@ async def test_an_order_update_through_the_write_server(
     assert not update.called
     done = await mcp_call(write_server, "cashctrl_update_order", {**arguments, "confirm": True})
     assert (done["data"]["performed"], done["data"]["insert_id"]) == (True, ORDER)
-    assert sent_body(update) == recorded_body(fixtures_dir, "order_update", "ok")
+    assert sent_bodies(update)[-1] == dict(recorded_body(fixtures_dir, "order_update", "ok"))
     assert done["meta"]["tenant"] == DEMO
 
 

@@ -152,7 +152,15 @@ from urllib.parse import parse_qsl
 
 import httpx
 from xippios.core import AsyncClient, BasicKeyAuth, RetryPolicy, sync
-from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response, fixture_path
+from xippios.core.testing import (
+    REDACTED,
+    Fixture,
+    Scrub,
+    fixture_from_response,
+    fixture_path,
+    fixture_text,
+    write_fixture,
+)
 
 from xippios.cashctrl._client import DEMO, SOURCE, TENANTS, client_for
 from xippios.cashctrl.api._form import FORM_CONTENT_TYPE
@@ -557,23 +565,6 @@ def _decoded(body: str) -> tuple[bool, Any]:
         return True, json.loads(body)
     except ValueError:
         return False, None
-
-
-_CUT_MARKS = ("truncated", "original_bytes", "original_count", "sha256")
-"""The response fields that mark a cut body; core's writer leaves them out of one not cut."""
-
-
-def to_json(fixture: Fixture) -> str:
-    """The fixture as text, laid out as core's ``write_fixture`` lays it out.
-
-    The recorder never cuts a body (no ``max_bytes=``), so the cut markers are left out,
-    as core leaves them out of a fixture that was not cut.
-    """
-    data = fixture.model_dump(mode="json")
-    if not fixture.response.truncated:
-        for name in _CUT_MARKS:
-            data["response"].pop(name, None)
-    return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
 
 def _key_like_values(node: Any, where: str) -> Iterator[str]:
@@ -1123,7 +1114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             reason = f"exports are out of scope for fixtures; {reason}"
         print(f"not written {path.relative_to(ROOT)}: {reason}")  # noqa: T201
         return 1
-    text = to_json(fixture)
+    text = fixture_text(fixture)
 
     leaks, suspicions = check(text, subdomain, key)
     if redacted_a_secret(response, fixture, key, subdomain):
@@ -1134,8 +1125,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if leaks:
         print(f"not written {path.relative_to(ROOT)}: it would contain " + "; ".join(leaks))  # noqa: T201
         return 1
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    write_fixture(fixture, path)
     print(fixture.response.status, fixture.request.url)  # noqa: T201
     if suspicions:
         print(f"review {path.relative_to(ROOT)} before committing:")  # noqa: T201

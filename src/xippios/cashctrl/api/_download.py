@@ -94,8 +94,7 @@ def check_dest(dest: str | os.PathLike[str]) -> Path:
 
     Raises:
         InvalidRequestError: ``dest`` is a directory, or its directory does not exist,
-            a bad argument (conventions §5) where core's ``download`` raises
-            ``ValueError``.
+            a bad argument (conventions §5).
     """
     target = Path(dest)
     if target.is_dir():
@@ -126,8 +125,7 @@ async def download(
 
     Raises:
         InvalidRequestError: ``dest`` is a directory, or its directory does not exist,
-            a bad argument (conventions §5) where core's ``download`` raises
-            ``ValueError``; nothing is sent.
+            a bad argument (conventions §5); nothing is sent.
         RequestRejected: Upstream answered HTTP 200 with ``"success": false``.
         NotFoundError: An id no record has, on a read by ids (``order/document/read.pdf``
             answers it with HTTP 404, ``classify``).
