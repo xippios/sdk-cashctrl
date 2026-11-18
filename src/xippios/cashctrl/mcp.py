@@ -23,19 +23,11 @@ __all__ = ["ENV_VARS", "SOURCE", "build", "run", "server"]
 
 INSTRUCTIONS = (
     "CashCtrl via xippios. "
-    "Tools are read-only. "
-    "cashctrl_list_orgs lists the declared tenants; "
-    "every other tool takes org, the name of one of them. "
-    "Where list tools (cashctrl_list_*) exist, call them first to find valid values, "
-    "then query."
+    "Tools are read-only. cashctrl_list_organisations lists the configured organisations; "
+    "every other tool takes org, the name of one of them, and an unknown name is answered "
+    "with the declared ones. "
+    "Call the list tools (cashctrl_list_*) first to find valid ids, then query."
 )
-BOUND_INSTRUCTIONS = (
-    "CashCtrl via xippios. "
-    "Tools are read-only. "
-    "Where list tools (cashctrl_list_*) exist, call them first to find valid values, "
-    "then query."
-)
-"""The text of a server ``lock`` binds, whose tools take no tenant: core's sentence names it."""
 
 
 def build(lock: TenantLock | None = None) -> ToolSet:
@@ -44,7 +36,7 @@ def build(lock: TenantLock | None = None) -> ToolSet:
         SOURCE,
         bind_tasks(tool_functions(tasks), lock),
         caps=getattr(tasks, "MCP_CAPS", None),
-        instructions=tenant_instructions(INSTRUCTIONS, lock, bound=BOUND_INSTRUCTIONS),
+        instructions=tenant_instructions(INSTRUCTIONS, lock),
         version=__version__,
         add_options=getattr(tasks, "mcp_add_options", None),
         apply_options=getattr(tasks, "mcp_apply_options", None),
@@ -59,4 +51,4 @@ def run() -> None:
 
     ``--org <name>`` binds it to one tenant.
     """
-    serve_tenants(server, build, TENANTS, check=check_org)
+    serve_tenants(server, build, TENANTS, noun="organisation", check=check_org)

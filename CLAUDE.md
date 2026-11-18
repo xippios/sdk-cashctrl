@@ -24,16 +24,15 @@ semantics; a wrapper is never written from memory of the API.
 ## Organisations
 
 CashCtrl serves each organisation from its own subdomain, and an API user belongs to one
-organisation. `_client.py` is therefore a registry, not one client: `TENANTS`, a
-`Tenants` of the package's own (`_tenants.py`, conventions §7), declared as
-`CASHCTRL_ORGS` with the fields `SUBDOMAIN` and `API_KEY`, the reserved `demo` and
-`check_subdomain` (one DNS label, lower-cased) as the subdomain's check. The registry,
-`list_organisations` and the `--org` lock are this package's: core held them as
-`xippios.core.Tenants`, `list_task` and `TenantLock` until 0.3.0 left them to it
-(sdk-core ADR-0024, which supersedes sdk-core ADR-0014's decisions on them); `_tenants.py` and
-`_org_lock.py` are private, copied from sdk-core `cb8ecdf`, and nothing outside the
-package imports them. Core keeps `ResultMeta.tenant`, `main`'s option hooks and the
-write server's rules.
+organisation. `_client.py` is therefore a registry, not one client: `TENANTS`, core's
+`Tenants` (conventions §7), declared as `CASHCTRL_ORGS` with the fields `SUBDOMAIN` and
+`API_KEY`, `param="org"`, the parameter that names an organisation, the reserved `demo`
+and `check_subdomain` (one DNS label, lower-cased) as the subdomain's check. The registry,
+`list_organisations` and the `--org` lock are core's: `Tenants`, `list_task`,
+`TenantLock`, `bind_tasks` and `tenant_instructions` from `xippios.core` and
+`serve_tenants` from `xippios.core.mcp`, which core 0.3.0 left to this package and 0.4.0
+took back (sdk-core ADR-0024). Core keeps `ResultMeta.tenant` and the write server's
+rules too.
 
 - `org` is the first, required parameter of every task; the MCP tools take it too unless
   the server is started with `--org`, which binds it so no tool takes it. It is the name
@@ -49,20 +48,21 @@ write server's rules.
   should hold (`Tenants(hints=...)`).
 - `TENANTS.names()` reads `CASHCTRL_ORGS` (comma-separated, `^[a-z0-9_]+$`) on every call
   and appends `demo` when `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY` are both
-  set. `list_organisations` (`_tenants.list_task`, the tool
+  set. `list_organisations` (core's `list_task`, the tool
   `cashctrl_list_organisations`) returns those names, nothing else, on the read server
   and as a route; on a bound server, the bound organisation only, `meta.tenant` `None`.
-- `--org <name>` binds an MCP server (read or write) to one organisation (`_cli.py`
-  through core's `main`'s `add_options` and `apply_options`, `_org_lock.py`): an
-  undeclared name or a missing or malformed subdomain stops it at startup (exit status
-  2). The lock is no middleware but a wrapper: `bind_tasks` hands `build_server` one tool
-  per task with `org` bound at build, the same `__name__` (tool names and `MCP_CAPS` keys
-  stay), the docstring without its `org` line, and a signature without `org`, so no tool
-  of a bound server takes `org`; the instructions end "This server is bound to org
-  <name>; every tool acts on that organisation and takes no org." A call that still
-  passes `org` is not refused: core's argument check drops an argument the tool does not
-  declare, and the tool acts on the bound organisation (observed under core 0.3.0,
-  `tests/test_org_lock.py`). Core serves the write server over `--http` on a loopback
+- `--org <name>` binds an MCP server (read or write) to one organisation (core's
+  `serve_tenants(server, build, TENANTS, noun="organisation", check=check_org)` in
+  `mcp.py` and `mcp_write.py`): an undeclared name or a missing or malformed subdomain
+  (`check_org` in `_client.py`) stops it at startup (exit status 2). The lock is no
+  middleware but a wrapper: `build(TenantLock(TENANTS, org))` returns the tool set whose
+  tasks `bind_tasks` binds, one tool per task with `org` bound at build, the same
+  `__name__` (tool names and `MCP_CAPS` keys stay), the docstring without its `org`
+  line, and a signature without `org`, so no tool of a bound server takes `org`; the
+  instructions end "This server is bound to org <name>; every tool acts on that
+  organisation and takes no org." A call that still passes `org` is refused by core's
+  argument check before the tool runs, naming the tool's arguments
+  (`tests/test_org_lock.py`). Core serves the write server over `--http` on a loopback
   `--host` only, unless `--allow-remote` is passed. The HTTP router has no lock:
   consumers pass `org` explicitly.
 - The subdomain stays out of messages and logs: core's status errors name the method and
@@ -80,9 +80,11 @@ write server's rules.
 **Demo only.** Fixtures, live tests and the fixture recorder use the organisation `demo`
 and nothing else, ever. The recorder takes no organisation; every live test takes the
 `demo_org` fixture, which fails unless `demo` is the only declared organisation;
-`tests/conftest.py` removes every `CASHCTRL_*` variable but the demo pair when pytest
-imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every test, sets the
-placeholder subdomain in every offline test and calls `TENANTS.reset()` around each.
+`tests/conftest.py` removes `CASHCTRL_ORGS` and every organisation's pair but demo's
+through core's `keep_reserved_tenants`, with the scaffold's `CASHCTRL_API_KEY` beside it,
+when pytest imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every
+test, sets the placeholder subdomain in every offline test and calls `TENANTS.reset()`
+around each.
 Core's plugin does the rest (sdk-core ADR-0013): no network outside a test marked `live` or
 `network`, no rate-limit waits, and the placeholder key on every auth object, with
 `CASHCTRL_DEMO_API_KEY` named in `xippios_placeholder_key_envs`. The demo organisation is
@@ -131,10 +133,7 @@ src/xippios/cashctrl/
   __init__.py      public surface: __version__ and re-exported task functions
   py.typed         PEP 561 marker; consumers' mypy --strict needs it
   _version.py      __version__ from distribution metadata
-  _client.py       organisation registry: TENANTS, client_for(org), classify
-  _tenants.py      Tenants and list_task, the registry's machinery (sdk-core ADR-0024; private)
-  _org_lock.py     the --org lock: OrgLock and bind_tasks, org bound on every tool (private)
-  _cli.py          --org for both MCP servers through core main's option hooks
+  _client.py       organisation registry: TENANTS, client_for(org), check_org, classify
   errors.py        RequestRejected (HTTP 200 with success:false) and FieldError
   models.py        pydantic models mirroring upstream payloads (UpstreamModel), the
                    projections tasks return without ssn and iban (sdk-core ADR-0017) and, written by
@@ -168,12 +167,11 @@ tests/
   test_tasks.py    structural checks on every task plus per-task replay tests
   test_downloads.py  the file tasks on synthetic bytes mounted by respx; a refusal leaves no file
   test_tasks_write.py  the write tasks: previews send nothing, writes replay, updates fail
-                   closed; the write server's own test (assert_write_tools)
+                   closed; the write server's own test (core's assert_write_tools)
   test_registry.py organisation declaration, lookup and per-organisation clients
-  test_tenants.py  the registry's machinery (_tenants.py), core's tests of it plus the client close
   test_key_resolution.py  keys resolved as in production: placeholder_api_key pins nothing
   test_errors.py   classify, RequestRejected and the recorded refusals
-  test_org_lock.py the --org lock: bound tools, driven through core's mcp_call_text (in-process)
+  test_org_lock.py the --org lock's wiring: bound tasks, both entry points, through core's mcp_call
   test_entry_points.py  the servers' entry points, -read and -write, and the text that names them
   test_record_fixture.py  the recorder never writes the demo host, subdomain or key
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
@@ -208,7 +206,7 @@ instead, named after the service, and this Layout says so (conventions §2).
 `tasks_write.py` holds fourteen write tasks, `create_*`, `update_*` and `delete_*` for
 journal entries, persons, orders and an order's book entries, `update_order_status` and
 `create_order_payment`, served by `xippios-cashctrl-mcp-write` only: never by the read
-server, never on the HTTP router (`assert_write_tools` in `tests/test_tasks_write.py`).
+server, never on the HTTP router (core's `assert_write_tools` in `tests/test_tasks_write.py`).
 The recipe for one more:
 
 1. **Layer 1.** `api/<module>_create.py` (and `_update`, `_delete`): a `<module>_fields`

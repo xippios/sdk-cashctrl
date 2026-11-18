@@ -24,16 +24,10 @@ __all__ = ["ENV_VARS", "SOURCE", "build", "run", "server"]
 
 INSTRUCTIONS = (
     "CashCtrl write tools via xippios. "
-    "Every tool takes org, the name of a declared tenant. "
-    "Every tool returns a preview and changes nothing unless confirm=true is passed. "
+    "Every tool takes org, the name of a configured organisation. "
+    "Every tool returns a preview unless confirm=true is passed. "
     "Call it once without confirm, show the preview, then confirm."
 )
-BOUND_INSTRUCTIONS = (
-    "CashCtrl write tools via xippios. "
-    "Every tool returns a preview and changes nothing unless confirm=true is passed. "
-    "Call it once without confirm, show the preview, then confirm."
-)
-"""The text of a server ``lock`` binds, whose tools take no tenant: core's sentence names it."""
 
 
 def build(lock: TenantLock | None = None) -> ToolSet:
@@ -42,7 +36,7 @@ def build(lock: TenantLock | None = None) -> ToolSet:
         SOURCE,
         bind_tasks(tool_functions(tasks_write), lock),
         caps=getattr(tasks_write, "MCP_CAPS", None),
-        instructions=tenant_instructions(INSTRUCTIONS, lock, bound=BOUND_INSTRUCTIONS),
+        instructions=tenant_instructions(INSTRUCTIONS, lock),
         version=__version__,
         add_options=getattr(tasks_write, "mcp_add_options", None),
         apply_options=getattr(tasks_write, "mcp_apply_options", None),
@@ -50,7 +44,7 @@ def build(lock: TenantLock | None = None) -> ToolSet:
     )
 
 
-server = build_server(build())
+server = build_server(build(), name="xippios-cashctrl-write")
 
 
 def run() -> None:
@@ -58,4 +52,4 @@ def run() -> None:
 
     ``--org <name>`` binds it to one tenant.
     """
-    serve_tenants(server, build, TENANTS, check=check_org)
+    serve_tenants(server, build, TENANTS, noun="organisation", check=check_org)

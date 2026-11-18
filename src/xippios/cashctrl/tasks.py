@@ -6,7 +6,7 @@
 organisation (``demo``, ``acme``), handed to the endpoint wrappers, which reach CashCtrl
 through ``client_for(org)``. No task spans organisations. ``tests/test_tasks.py`` checks
 every name in ``__all__``. The one exception is ``list_organisations``, the package's
-tenant list (``_tenants.list_task``, ADR-0024): no argument, the declared
+tenant list (core's ``list_task``, ADR-0024): no argument, the declared
 organisations' names only, so an agent can form valid calls.
 
 ``meta.endpoint`` is the upstream path after ``/api/v1/`` (``account/list.json``),
@@ -70,13 +70,13 @@ from xippios.core import (
     ResultCap,
     ResultMeta,
     collect,
+    list_task,
     paginate_offset,
     sync,
 )
 
 from xippios.cashctrl import api
 from xippios.cashctrl._client import SOURCE, TENANTS, client_for
-from xippios.cashctrl._tenants import list_task
 from xippios.cashctrl.models import (
     Account,
     AccountCategory,
