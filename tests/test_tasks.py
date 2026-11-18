@@ -559,7 +559,8 @@ def test_list_accounts_is_a_post_route(
     assert (len(numbers), numbers[-2:]) == (8, ["6900", "6950"])
     rejected = client.post("/cashctrl/list_accounts", json={"org": DEMO, "dir": "up"})
     assert rejected.status_code == 422
-    assert rejected.json()["detail"][0]["type"] == "literal_error", "FastAPI's own 422"
+    assert rejected.json()["title"] == "InvalidRequestError", "core's problem, not FastAPI's 422"
+    assert rejected.json()["detail"].startswith("dir: ")
     unknown = client.post("/cashctrl/list_accounts", json={"org": "nowhere"})
     assert unknown.status_code == 422
     assert unknown.json()["title"] == "InvalidRequestError", "the task's refusals as problems"
@@ -2561,28 +2562,36 @@ async def test_get_report_data_as_a_tool(
 
 
 @pytest.mark.anyio
-async def test_a_report_over_its_cap_is_a_note_naming_the_period_parameters(
+async def test_a_report_over_its_cap_is_cut_by_its_rows_with_a_note_naming_the_period(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     """``MCP_CAPS``'s note for ``get_report_data``, on the recorded sheet with a smaller bound.
 
     The recorded balance sheet, about 17 KB, fits the 128 KB the tool has, so the bound is
-    lowered here and the note kept; the cut is core's (``cap_result``).
+    lowered here and the note kept. The cut is core's (``cap_result``): the report holds
+    one list, its rows, so they are cut as a list's are, its first top-level row of two
+    kept, and ``total`` and ``properties`` stay whole.
     """
     replay_fixture("report_tree", "default")
     replay_fixture("report_element_data", "balance_fp2025")
-    cap = dataclasses.replace(tasks.MCP_CAPS["get_report_data"], max_bytes=2_000)
+    cap = dataclasses.replace(tasks.MCP_CAPS["get_report_data"], max_bytes=10_000)
     capped = build_server(SOURCE, [tasks.get_report_data], caps={"get_report_data": cap})
     arguments = {"org": DEMO, "element_id": 1, "fiscal_period": FP2025}
     payload = json.loads(await mcp_call_text(capped, "cashctrl_get_report_data", arguments))
-    assert set(payload) == {"note", "preview"}
-    assert payload["note"].startswith("result is ")
-    assert payload["note"].endswith(
-        "bytes, over the cap of 2000; narrow the period (fiscal_period, or start_date and "
-        "end_date) or read a smaller report of get_report_tree to see the rest"
-    )
     whole = await mcp_call(server, "cashctrl_get_report_data", arguments)
     assert "note" not in whole, "the tool's own cap, 128 KB, holds the recorded sheet"
+    assert set(payload) == {"data", "meta", "note"}
+    assert payload["data"]["data"] == whole["data"]["data"][:1]
+    assert len(whole["data"]["data"]) == 2
+    assert (payload["data"]["total"], payload["data"]["properties"]) == (
+        whole["data"]["total"],
+        whole["data"]["properties"],
+    )
+    assert payload["note"] == (
+        "showing 1 of 2 rows (cap: 200 rows or 10000 bytes); narrow the period "
+        "(fiscal_period, or start_date and end_date) or read a smaller report of "
+        "get_report_tree to see the rest"
+    )
 
 
 def test_every_cap_names_a_task_and_only_parameters_it_takes() -> None:

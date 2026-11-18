@@ -502,7 +502,8 @@ agent needs and the default result cap (200 rows or 64 KB) would cut gets a cap 
 own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (sdk-core ADR-0016):
 `list_custom_fields` (500 rows or 128 KB; no filter but `type`, and a write needs a
 type's custom fields whole) and `get_report_data` (128 KB; a report is read whole, and
-its result, no list, is cut to a note and a preview); `list_cost_centers` and
+over its bound its top-level rows are cut, `total` and `properties` kept whole, with the
+note); `list_cost_centers` and
 `list_history` keep the default bound with a note naming their filters (the history's
 note also names `limit`, and core's cut ends with where to resume). Every other list
 takes filters or pages, or is short. Where the documentation gives no schema and the
