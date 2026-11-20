@@ -1,164 +1,123 @@
 Record a fixture for CashCtrl: $ARGUMENTS
 
-Expected arguments: `<endpoint> <case> [key=value ...] [--wrong-key] [--method POST]`, for
-example `account/read.json unknown_id id=999999999` or, for a write,
-`journal/delete.json ok --method POST ids=51`.
+Expected arguments: `<wrapper> <case> [key=value ...]`: the endpoint wrapper the fixture
+serves, a short name for the case, and the request parameters, for example
+`get_example by_year year=2024`.
 
-Fixtures are recorded through the real client by `scripts/record_fixture.py`, never typed
-in by hand (conventions §10). **Every fixture comes from the demo organisation and from
-nothing else**: the script has no organisation parameter, drops `CASHCTRL_ORGS` from its
-own environment and always records with `client_for("demo")`'s configuration. Never
-record from a productive organisation, never adapt the script or a one-off snippet to do
-so, and never set `CASHCTRL_ORGS` with real names to record. The repository is public.
-
-A fixture rides in the change of the task it tests, which meets sdk-core's definition
-of done, https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, and
-its review checklist, https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md:
+Fixtures are recorded through the real client, never typed in by hand (conventions §10).
+The file lands at `tests/fixtures/<wrapper>/<case>.json` with credentials scrubbed: the
+directory is named after the wrapper function (conventions §2), and `<case>` is
+lowercase snake case for the words you choose, an upstream code inside it written as
+upstream writes it (`CH_2026_8.json`). A fixture recorded through a task rather than a
+wrapper, such as a download's metadata or a helper's answer, lives under the task's
+name. It rides in the change of the task it tests, which meets sdk-core's definition of
+done, https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, and its
+review checklist, https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md:
 steps 4 to 6 are what they check in a fixture.
 
-The demo subdomain is treated exactly like a key: never in a file, a commit, a log line or
-a report. Never print `CASHCTRL_DEMO_SUBDOMAIN` or any variable ending in `_API_KEY`.
+1. The key comes from the environment, `CASHCTRL_DEMO_API_KEY`: never read, test or print that variable, not even to see whether it is set. The client guards the key itself: where the variable is unset or empty, it refuses on its first request, before anything is sent, with a `ConfigError` that names the variable, never a value.
 
-**The demo organisation is synthetic.** It holds invented books only, seeded by
-`scripts/seed_demo.py` and described in `docs/demo-org.md`: placeholder companies,
-`.example` addresses, invented amounts. Any module and any amount may therefore be
-recorded. If the demo pair ever points at an organisation that is not that synthetic
-one, stop: never record from it. These policies stand all the same, and each refusal
-writes nothing and exits non-zero:
+2. Find the request path and parameters for the endpoint in `docs/upstream/` and in the
+   wrapper under `src/xippios/cashctrl/api/`. Use the wrapper's parameter names.
 
-- **GET, and POST for the write tools' paths only.** The docstring of
-  `scripts/record_fixture.py` lists the paths a POST may be recorded for
-  (`WRITE_PATHS`) and the marker each write must carry or find on its orders, and the
-  recorder refuses everything else before a request is sent; a GET goes only to a path
-  `docs/upstream/` documents as a GET. A POST sends the `key=value` pairs as the form
-  body, in their order, as the write tools send theirs. A recorded write changes the
-  demo organisation: the recorder says so, names the `insertId` upstream answered, and
-  asks for the matching delete. Record only a marked record, as the docstring says, its
-  update and its delete, in that order, so that every record created is deleted again;
-  never touch a seeded record. Afterwards confirm with one list per resource
-  (`query=xippios-live`, counts only) that nothing is left. Never work around this.
-- **`.json` only.** An endpoint without the extension (`account/balance`,
-  `account/costcenter/balance`, `fiscalperiod/result`, `setting/get`) answers a bare
-  number or a document, and an export (`.pdf`, `.xlsx`, `.csv`, `.zip`) a file; both
-  are refused before a request is sent.
-- **No e-mail addresses.** Every e-mail address in the request URL, the request body,
-  the response body (`createdBy`, `lastUpdatedBy`, HTML fields such as `notes`) and the
-  response header values becomes `user@example.com`, also when `@` is written `%40`,
-  `&#64;`, `&#x40;` or `&commat;`; `SYSTEM` stays. A header name is not scrubbed: the
-  final check refuses one that holds an address. `createdBy` may carry the address of
-  the real user who wrote a record.
-- **No API user tags.** CashCtrl names an API user in `createdBy` and `lastUpdatedBy` as
-  `API:` and the first four characters of its key (observed on the records
-  `scripts/seed_demo.py` wrote). Every such tag becomes `API:REDACTED`, the marker in any
-  case, at the start of a word or after a JSON escape. The final check refuses any other
-  tag in any case and position, in the text and in the body's decoded strings, and the
-  key's first four characters on their own as a possible key prefix.
-- **No token-like fields and no personal identifiers.** The text value of every body
-  field named `hash`, `token`, `secret` or `apiKey` (`api_key`, `api-key`), and of every
-  field named `ssn` or whose name ends in `iban` (`iban`, `qrIban`, `qr_iban`, `orgIban`,
-  `orgQrIban`, `recipientIban`), the identifiers this package keeps out
-  of its projections (ADR-0017), in any case and at any depth, becomes `REDACTED`.
-  `order/read.json` sends `hash`, an undocumented 32-character text that may be the
-  token of a public link to the order document (observed on 2026-10-23, not verified);
-  `person/list.json` sends `ssn` and `iban`, `location/list.json` `iban` and `qrIban`,
-  and `order/document/read.json` `orgIban`, `orgQrIban` and `recipientIban`, only ever
-  seen `null`; the others were never seen. The final check refuses any value under such a name but `null` or `REDACTED`,
-  whatever its type or shape (text behind an escaped field name, a number, an array, an
-  object), in the response body and in a write's form body, a JSON form value such as
-  `bankAccounts` included: a write that sends `ssn` or an `iban` is not recorded. A
-  compound name (`publicHash`) is not scrubbed; `hash` is a key-like word, so the file is
-  written for review.
+3. Record it with a one-off script run through `uv run python`:
 
-1. The demo pair comes from the clone's own `.envrc` through direnv, `direnv exec .`
-   from the clone or a directory under it, a worktree among them. Confirm it without
-   printing it: `direnv exec . sh -c '[ -n "$CASHCTRL_DEMO_SUBDOMAIN" ] && [ -n "$CASHCTRL_DEMO_API_KEY" ] && echo ok'`.
-2. Find the request path and parameters in `docs/upstream/` and in the wrapper under
-   `src/xippios/cashctrl/api/`. Parameters are named as upstream names them
-   (`fiscalPeriodId`).
-   Recordings are `.json` endpoints: reads (`list.json`, `read.json`) and the write
-   tools' `create.json`, `update.json`, `delete.json` and `update_status.json`. Exports
-   (PDF, Excel, ZIP) are out of scope, and the recorder also refuses a body that is not
-   UTF-8 text, because it can be neither scrubbed nor reviewed. For a write, compute the
-   form fields offline through the task's preview (`confirm=False`, which sends nothing
-   for a create, a status or a payment; an `update.json`'s preview replays the recorded
-   read) and pass exactly those pairs,
-   in that order: the tests compare the preview's `payload` with the recorded request
-   body.
-3. Record, from the repository root:
+   ```python
+   from pathlib import Path
 
-   ```bash
-   direnv exec . uv run scripts/record_fixture.py <endpoint> <case> [key=value ...]
-   direnv exec . uv run scripts/record_fixture.py <path>/create.json ok --method POST [key=value ...]
+   from xippios.core.testing import fixture_path, record_sync
+   from xippios.cashctrl._client import DEMO, client_for
+
+   fixture = record_sync(
+       client_for(DEMO),  # the reserved org, the one a fixture records
+       "<request path>",  # relative to the base URL, as in the wrapper
+       fixture_path(Path("tests/fixtures"), "<wrapper>", "<case>"),
+       params={...},  # the parameters from the arguments
+   )
+   print(fixture.response.status, fixture.request.url)
    ```
 
-   It builds the fixture in memory with core's `fixture_from_response` and
-   `Scrub(secrets=[key, its basic-auth token])` (credentials scrubbed, the key replaced
-   with `REDACTED` where it appears as given), then runs its own step, `TenantScrub`, on
-   the `Fixture` core returns, before the write (ADR-0024): the demo host replaced with
-   `demo.cashctrl.com` everywhere in it, the host offline tests replay against, in any
-   case and percent-encoded too, the key in every encoded form replaced with `REDACTED`,
-   and a fixture still holding the host, the subdomain or the key, behind a JSON escape
-   included, refused; it replaces every
-   e-mail address with
-   `user@example.com`, every API user tag in `createdBy` and `lastUpdatedBy` with
-   `API:REDACTED` and the value of every token-like field (`hash`, `token`, `secret`,
-   `apiKey`) and identifier (`ssn`, every name ending in `iban`) with `REDACTED`, checks it, and only
-   then writes
-   `tests/fixtures/<endpoint>/<case>.json` (`account/read.json` becomes `account_read/`).
-   It prints only the status and that URL. `--wrong-key` sends an invalid key instead of
-   the real one, to record a 401.
-   Error cases (an unknown id, a refusal) are worth recording; the recorder keeps them
-   instead of raising. The recorder's client never retries, so a 5xx is recorded as it
-   came and spends no request on a retry; core's `record` takes no
-   `retry=`, so the client carries it: `recording_client` builds
-   `AsyncClient(dataclasses.replace(client_for("demo").config, retry=RetryPolicy(max_attempts=1)), auth=...)`,
-   for `--wrong-key` as well, and `tests/test_record_fixture.py` checks it offline.
-4. The check runs on the scrubbed fixture before the write, over its text, the
-   decoded strings of its response body and, for a write, the request body (the raw
-   text, every form field decoded and every string of a JSON value such as `items`): if
-   the subdomain on its own, an e-mail address other than `user@example.com`, an API
-   user tag other than `API:REDACTED` (in any case and position), the key's first four
-   characters on their own ("possible key prefix") or a value other than `null` or
-   `REDACTED` under a token-like field name is in it, nothing is written and the script
-   exits non-zero; if a key-like name carries a value other than `REDACTED`, it writes
-   the file and exits non-zero for review. Either way, stop and report what it named;
-   never print the file to find out. A possible key prefix may be a coincidence of four
-   characters: find them in the response by other means before recording again, never by
-   printing the key.
-5. Check again before committing, never echoing a value:
+   A wrapper that routes to a second base of the upstream passes that base's absolute URL
+   in place of the request path, as the wrapper does; the fixture's directory is still
+   the wrapper's.
 
-   ```bash
-   grep -rniE 'api[_-]?key|token|secret|authorization|password' tests/fixtures
-   grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' tests/fixtures | sort -u
-   direnv exec . sh -c 'git grep -n --untracked -i -- "$CASHCTRL_DEMO_SUBDOMAIN" >/dev/null && echo LEAK || echo clean'
-   grep -rhoiE '(hash|token|secret|api[_-]?key)\\?": *\\?"[^"\\]*' tests/fixtures | sort -u
-   grep -rhoiE --include='*.json' '\\?"(ssn|[a-z0-9_-]*iban)\\?" *: *[^,}]*' tests/fixtures | grep -cvE ': *(null|\\?"REDACTED\\?")$'
-   grep -rhoiE --include='*.json' '(ssn=|iban=|iban%22%3A)[^&"]*' tests/fixtures | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
-   ```
+   Error cases (a 404 for an unknown code, for instance) are worth recording too; the
+   recorder keeps them instead of raising. A recording is one request: the recorder sends
+   it once through `client_for(DEMO)`, never retried, whatever the client's `RetryPolicy` says, and
+   never answered from the cache, so a 429 or a 5xx is recorded as it came and spends no
+   second request on an upstream that counts a quota (conventions §10). Pass
+   `client_for(DEMO)` itself: a recording needs no client of its own.
 
-   The first prints nothing but `REDACTED` values; a match in upstream's own text (a
-   word such as `SECRETARY` in a name or a description) is no credential: read every
-   match by eye. The second prints `user@example.com` and nothing else; the third prints
-   `clean`.
-   `grep -rhoiE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u` prints `API:REDACTED` at
-   most. The fourth grep prints `REDACTED` values only. The last two count, without
-   printing them, the values of `ssn` and of every field whose name ends in `iban`, the
-   identifiers this package keeps out of its projections (ADR-0017), that are neither
-   `null` nor `REDACTED`, in the JSON bodies and in a write's form body (`ssn=`, a field
-   ending in `iban=`, and `iban` inside the percent-encoded `bankAccounts`); both print
-   `0`. A real value found means the file is
-   deleted, never committed.
-6. The fixture file stays under 256 KiB (conventions §10, ADR-0019 decision 5); `ci.yml`
-   fails on a larger one. The recorder cuts no body (no `max_bytes=`) and refuses one
-   that is not UTF-8 text, so narrow the query instead: keep the fixture small enough to
-   review, well under 40 KB (`limit=`, a filter, a query), and prefer the narrowest query
-   that shows the shape. The default chart of accounts (139 accounts) is too large for
-   one fixture; narrow `account/list.json`.
-7. Reference it from a test with the `replay_fixture("<endpoint>", "<case>")` fixture and
-   call through `client_for("demo")` or a task with `org="demo"`. Stage it
-   (`git add tests/fixtures`) before `uv run pre-commit run --all-files`, which scans
-   only the files in git's index: an unstaged fixture escapes detect-secrets. When
+   A downloaded file's fixture is the GET exchange of the file's URL, the one the
+   download task streams: pass that URL in place of the request path, absolute where
+   the file lives on another host. The client sends its credentials to the base URL's
+   origin alone, its scheme, host and port, so a file on another host is recorded
+   without them and needs no `auth=None` (conventions §6). The plugin replays it for the
+   download call, and its envelope keeps the provenance: the URL, `recorded_at`, the
+   `ETag` and `Last-Modified` headers where upstream sends them, and, for a cut body,
+   the whole file's `original_bytes` and `sha256` (step 5).
+
+4. Check the file: `grep -niE 'api[_-]?key|token|secret|authorization' tests/fixtures/<wrapper>/<case>.json`
+   must print nothing but `REDACTED` values. A match in upstream's own text (a word such
+   as `SECRETARY` in a name or a description) is no credential: read every match by eye.
+   If a credential slipped through, delete the file and stop: report which field leaked
+   so the scrubber in `xippios-core` can learn it. Where the response carries a documented
+   personal identifier the source keeps out of its projections (`ssn`, `iban` and their
+   like, sdk-core ADR-0017), record with `scrub=Scrub(secrets=[...])` from
+   `xippios.core.testing`, or rewrite those values by key in a recorder step of the
+   source's own. `record` writes the file itself and takes no hook, so that step sends the
+   request itself, with `request(..., raise_on_error=False)` on a client built for one
+   attempt,
+   `AsyncClient(dataclasses.replace(config, retry=RetryPolicy(max_attempts=1)), auth=...)`,
+   its auth the reserved org's as `_build` in `xippios.cashctrl._client` makes it, on
+   `TENANTS.var(DEMO, "API_KEY")`, with `AsyncClient` and `RetryPolicy` from `xippios.core` and
+   `config` from `xippios.cashctrl._client`. It builds the
+   `Fixture` in memory with `fixture_from_response(response, scrub=...)`, rewrites the
+   values on it and writes it with `write_fixture(fixture, path)`, both from
+   `xippios.core.testing`, which lays it out as `record` does, so nothing unscrubbed
+   touches disk (conventions §10). Grep the file for those fields too
+   (`grep -nE '"(ssn|iban)"' <file>`, with the fields the source declares): every match
+   must show a scrubbed value. A real value found means the file is deleted, never
+   committed.
+
+5. The fixture file stays under 256 KiB (conventions §10); `ci.yml` fails on one over it
+   that a pull request adds or changes. A fixture over the cap that a pull request only
+   moves, its content unchanged, stays as it was recorded until a pull request records
+   it again, and that recording cuts it: no fixture is kept whole over the cap by
+   exception. Narrow the query first. A text body or a JSON answer too large for the cap
+   is recorded with `max_bytes=` (`80_000` keeps the file under the cap: it bounds the
+   body, which the file escapes as a JSON string). A JSON array keeps its first whole
+   elements, or its last with `keep="last"` for a list ordered oldest first, cut in
+   upstream's own text; a JSON object is cut the same way, at the array of the top-level
+   key that `array_key=` names (`array_key="data"` for `{"data": [...]}`), the rest of
+   the object kept as upstream wrote it; a text keeps its first bytes. The envelope marks
+   the cut with `truncated: true`, `original_bytes` and `sha256` of the whole body and,
+   for an array, `original_count`; replay serves the cut body. The recorder refuses
+   `max_bytes=` on a JSON object without `array_key=`: name the key, or record a small
+   real answer instead (a short date range, one commodity). An XML, ZIP, gzip, XLS or
+   XLSX body is never cut, nor one that is not UTF-8 text: record a small real sample (a
+   short query, one member of the archive, a few rows). The recorder reads at most
+   32 MiB of a body (`max_read_bytes=`) and refuses a larger answer before it writes
+   anything. A downloaded file is recorded whole when it is small, else with
+   `max_bytes=` where it is text. The sample file a parser test reads is no recorded
+   exchange: it lives under `tests/fixtures/files/<file_kind>/`, its provenance one row
+   in `tests/fixtures/files/README.md` (sdk-core ADR-0020). A test on a cut fixture or a
+   sample asserts the shape, never a size.
+
+6. Reference it from a test with the `replay_fixture("<wrapper>", "<case>")` fixture.
+   Stage it (`git add tests/fixtures`) before `uv run pre-commit run --all-files`, which
+   scans only the files in git's index: an unstaged fixture escapes detect-secrets. When
    detect-secrets flags a recorded HTML error page (a site's "Page not found" carries
    hashes it reads as secrets), never edit the fixture to pass it: narrow the request,
    or drop the fixture and keep the status alone, named in the PR description with the
    call counted. An HTML error body is kept only when a test needs it.
+
+   A line of a fixture that the scan flags and a person judged no secret is an audited
+   entry of `.secrets.baseline`, `"is_secret": false`, which names the fixture's path
+   twice: as its key under `results` and as its own `"filename"`. A pull request that
+   renames or moves the fixture, a directory renamed by conventions §10 say, moves its
+   entries to the new path in the same commit, the key and each `"filename"` both, their
+   audit kept, and stages the baseline with the move. The hook flags the lines again
+   while either still names the old path or the baseline's change is unstaged, and
+   `uv run detect-secrets scan --baseline .secrets.baseline` keeps them under the new
+   path with the audit dropped.

@@ -18,13 +18,13 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "xippios-core~=0.3.0",
+  "xippios-core~=0.4.0",
 ]
 
 [project.optional-dependencies]
-mcp = ["xippios-core[mcp]~=0.3.0"]
-http = ["xippios-core[http]~=0.3.0"]
-testing = ["xippios-core[testing]~=0.3.0"]
+mcp = ["xippios-core[mcp]~=0.4.0"]
+http = ["xippios-core[http]~=0.4.0"]
+testing = ["xippios-core[testing]~=0.4.0"]
 
 [project.scripts]
 xippios-cashctrl-mcp-read = "xippios.cashctrl.mcp:run"
@@ -106,6 +106,7 @@ addopts = "-ra --strict-markers --import-mode=importlib"
 testpaths = ["tests"]
 # record_property, in a live test say, warns under xunit2 when a run writes --junitxml.
 junit_family = "xunit1"
-# Core's plugin sets it to the placeholder key in every test not marked live (ADR-0013).
-# The demo organisation's key: the scaffold's CASHCTRL_API_KEY is never read (ADR-0024).
+# Core's plugin sets them to the placeholder key in every test not marked live
+# (sdk-core ADR-0035), the reserved org's key first, the one
+# key of this package's own that a test reads.
 xippios_placeholder_key_envs = ["CASHCTRL_DEMO_API_KEY"]
