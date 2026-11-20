@@ -28,6 +28,12 @@ INSTRUCTIONS = (
     "with the declared ones. "
     "Call the list tools (cashctrl_list_*) first to find valid ids, then query."
 )
+BOUND_INSTRUCTIONS = (
+    "CashCtrl via xippios. "
+    "Tools are read-only. "
+    "Call the list tools (cashctrl_list_*) first to find valid ids, then query."
+)
+"""The text of a server ``lock`` binds, whose tools take no tenant: core's sentence names it."""
 
 
 def build(lock: TenantLock | None = None) -> ToolSet:
@@ -36,7 +42,7 @@ def build(lock: TenantLock | None = None) -> ToolSet:
         SOURCE,
         bind_tasks(tool_functions(tasks), lock),
         caps=getattr(tasks, "MCP_CAPS", None),
-        instructions=tenant_instructions(INSTRUCTIONS, lock),
+        instructions=tenant_instructions(INSTRUCTIONS, lock, bound=BOUND_INSTRUCTIONS),
         version=__version__,
         add_options=getattr(tasks, "mcp_add_options", None),
         apply_options=getattr(tasks, "mcp_apply_options", None),
