@@ -81,10 +81,9 @@ rules too.
 and nothing else, ever. The recorder takes no organisation; every live test takes the
 `demo_org` fixture, which fails unless `demo` is the only declared organisation;
 `tests/conftest.py` removes `CASHCTRL_ORGS` and every organisation's pair but demo's
-through core's `keep_reserved_tenants`, with the scaffold's `CASHCTRL_API_KEY` beside it,
-when pytest imports it, before any fixture runs, and `CASHCTRL_ORGS` again for every
-test, sets the placeholder subdomain in every offline test and calls `TENANTS.reset()`
-around each.
+through core's `keep_reserved_tenants` when pytest imports it, before any fixture runs, and
+`CASHCTRL_ORGS` again for every test, sets the placeholder subdomain in every offline test
+and calls `TENANTS.reset()` around each.
 Core's plugin does the rest (sdk-core ADR-0013): no network outside a test marked `live` or
 `network`, no rate-limit waits, and the placeholder key on every auth object, with
 `CASHCTRL_DEMO_API_KEY` named in `xippios_placeholder_key_envs`. The demo organisation is
@@ -380,9 +379,8 @@ never runs them. Every `live` test runs, write tests included, so a live write t
 only on data kept for testing (the demo organisation, sdk-core ADR-0024) and cleans up after itself.
 Only its `uv run pytest -m live --tb=short --assert=plain` step sees the demo
 organisation's pair, from the secrets `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`
-(the `live_secrets` answer), beside the scaffold's `CASHCTRL_API_KEY`, which
-`tests/conftest.py` removes and nothing reads; both demo secrets must give sdk-cashctrl
-access for the nightly run to pass. Every live run takes `--tb=short --assert=plain`, since
+(the `live_secrets` answer and the reserved organisation's key); both must give
+sdk-cashctrl access for the nightly run to pass. Every live run takes `--tb=short --assert=plain`, since
 the log of `live.yml` is public: the first keeps a failing test's frame arguments out of
 it, a raw upstream payload among them, and the second the values a failed `assert`
 compares. A live test asserts on shapes and counts, never on a raw payload.
@@ -412,8 +410,7 @@ compares. A live test asserts on shapes and counts, never on a raw payload.
   (conventions §10).
 - Never read or print `.envrc`, `.env`, the credential variables of this package,
   `CASHCTRL_<NAME>_SUBDOMAIN` and `CASHCTRL_<NAME>_API_KEY` of every organisation,
-  `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY` among them, the scaffold's
-  `CASHCTRL_API_KEY`, or any variable ending in `_API_KEY`, `_REFRESH_TOKEN` or `_SECRET`.
+  `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY` among them, or any variable ending in `_API_KEY`, `_REFRESH_TOKEN` or `_SECRET`.
 - Never write a key, a token or another credential into a file or a commit.
 - Never put logic in `mcp.py` or `http.py`, and never add a route or a tool by hand: the
   adapters register `tasks.__all__` (sdk-core ADR-0001).

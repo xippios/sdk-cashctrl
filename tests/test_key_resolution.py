@@ -11,16 +11,13 @@ import base64
 import httpx
 import pytest
 import respx
-from xippios.core import ConfigError, InvalidRequestError
+from xippios.core import ConfigError
 
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
 
 pytestmark = pytest.mark.anyio
 
 HIDDEN_SUBDOMAIN = "xa-hidden-subdomain"
-SCAFFOLD_KEY_ENV = "CASHCTRL_API_KEY"  # pragma: allowlist secret
-"""The template's key variable, which live.yml passes from its secret beside the demo pair."""
-SCAFFOLD_KEY = "scaffold-key-value"  # pragma: allowlist secret
 DEMO_KEY = "demo-key-value"  # pragma: allowlist secret
 
 
@@ -48,17 +45,14 @@ def basic(key: str) -> str:
     return "Basic " + base64.b64encode(f"{key}:".encode()).decode("ascii")
 
 
-@pytest.mark.parametrize("scaffold_key", ["", SCAFFOLD_KEY])
-async def test_the_scaffold_key_is_no_organisations_key(
-    monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter, scaffold_key: str
+async def test_the_demo_client_sends_its_key_as_the_basic_user_name(
+    monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter
 ) -> None:
-    """The live run's ``CASHCTRL_API_KEY``, empty or set, leaves demo's key as it is.
+    """Demo's own key, sent as the HTTP basic user name with no password.
 
-    live.yml passes it from its secret beside the demo pair; the registry declares no
-    organisation from it, and the demo client sends its own key. The route answers only
-    that key, so a request with any other is no match and fails the test.
+    The route answers only that header, so a request with any other is no match and fails
+    the test.
     """
-    monkeypatch.setenv(SCAFFOLD_KEY_ENV, scaffold_key)
     monkeypatch.setenv(TENANTS.var(DEMO, "SUBDOMAIN"), HIDDEN_SUBDOMAIN)
     monkeypatch.setenv(TENANTS.var(DEMO, "API_KEY"), DEMO_KEY)
     assert TENANTS.names() == (DEMO,)
@@ -69,12 +63,3 @@ async def test_the_scaffold_key_is_no_organisations_key(
     route.mock(return_value=httpx.Response(200, json={}))
     await client_for(DEMO).get("/fiscalperiod/list.json")
     assert route.call_count == 1
-
-
-def test_the_scaffold_key_declares_no_organisation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without the demo pair, ``CASHCTRL_API_KEY`` stands in for no organisation."""
-    monkeypatch.setenv(SCAFFOLD_KEY_ENV, SCAFFOLD_KEY)
-    monkeypatch.delenv(TENANTS.var(DEMO, "SUBDOMAIN"), raising=False)
-    assert TENANTS.names() == ()
-    with pytest.raises(InvalidRequestError, match="unknown tenant"):
-        client_for(DEMO)

@@ -1,4 +1,3 @@
-import os
 from collections.abc import Iterator
 
 import pytest
@@ -15,9 +14,6 @@ pytest_plugins = ["xippios.core.testing.plugin"]
 # tenant list and every tenant's variables but the reserved demo's, which the live tests
 # read, so no test sees another tenant (conventions §7; sdk-core ADR-0042, decision 1).
 keep_reserved_tenants(TENANTS)
-# The scaffold's CASHCTRL_API_KEY, which the registry's scheme names for no organisation
-# and nothing reads, goes too.
-os.environ.pop("CASHCTRL_API_KEY", None)
 
 PLACEHOLDER_SUBDOMAIN = "demo"
 """Fixtures are recorded as https://demo.cashctrl.com/api/v1/... (scripts/record_fixture.py)."""
