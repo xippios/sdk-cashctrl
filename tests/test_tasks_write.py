@@ -1596,7 +1596,8 @@ def test_a_refused_payment_names_the_date_and_the_bank_accounts(
         ),
         (
             lambda: tasks_write.update_order_status(DEMO, [ORDER], 0),
-            "status_id must be a status id from list_order_categories",
+            "status_id must be a status id from list_order_categories (over MCP, the tool "
+            "cashctrl_list_order_categories), a whole number of at least 1, not 0",
         ),
         (
             lambda: tasks_write.update_order_status(DEMO, [ORDER], None),  # type: ignore[arg-type]
@@ -1786,9 +1787,13 @@ def test_update_order_book_entry_refuses_an_entry_without_its_account(
     body["data"].update(type="MANUAL", accountId=None)
     serve_read(respx_mock, "order/bookentry/read.json", body)
     write = respx_mock.post(f"{BASE}/order/bookentry/update.json")
-    with pytest.raises(InvalidRequestError, match="the book entry gives no accountId"):
+    refusal = re.escape(
+        "the book entry gives no accountId, which update.json requires; pass account_id, an "
+        "id from list_accounts (over MCP, the tool cashctrl_list_accounts). Nothing was sent"
+    )
+    with pytest.raises(InvalidRequestError, match=refusal):
         tasks_write.update_order_book_entry(DEMO, GENERATED_ENTRY, description="x")
-    with pytest.raises(InvalidRequestError, match="the book entry gives no accountId"):
+    with pytest.raises(InvalidRequestError, match=refusal):
         tasks_write.update_order_book_entry(DEMO, GENERATED_ENTRY, clear=["account_id"])
     preview = preview_of(tasks_write.update_order_book_entry(DEMO, GENERATED_ENTRY, account_id=3))
     assert preview.payload["accountId"] == "3", "given, it is sent"
