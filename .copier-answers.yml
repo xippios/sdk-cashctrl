@@ -9,6 +9,7 @@ core_git_ref: ''
 core_version: 0.3.0
 gateway: none
 has_files: false
+has_reference_data: false
 human: jdidaskalu
 import_path: cashctrl
 live_secrets: '[CASHCTRL_DEMO_SUBDOMAIN, CASHCTRL_DEMO_API_KEY]'
@@ -18,5 +19,7 @@ rate_limit_provenance: self-imposed
 source_dependencies: '[]'
 source_name: CashCtrl
 source_slug: cashctrl
+tenant_param: org
 upstream_docs_url: https://app.cashctrl.com/static/help/en/api/index.html
 upstream_url: https://cashctrl.com
+write_server: true
