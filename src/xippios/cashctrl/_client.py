@@ -62,16 +62,18 @@ __all__ = [
 ]
 
 SOURCE = "cashctrl"
-ENV_VARS = (
+ENV_VARS: tuple[EnvVar, ...] = (
     EnvVar("CASHCTRL_ORGS", secret=False, required=False),
-    EnvVar("CASHCTRL_<NAME>_SUBDOMAIN", secret=False, required=True),
     EnvVar("CASHCTRL_<NAME>_API_KEY", secret=True, required=True),
+    EnvVar("CASHCTRL_<NAME>_SUBDOMAIN", secret=True, required=True),
 )
-"""The variables the package reads, for a host (conventions §7; ADR-0026, amendment 2026-11-18).
+"""The variables the package reads, for a host (conventions §7; sdk-core ADR-0026, amendment
+2026-11-18, point c).
 
 ``CASHCTRL_ORGS`` lists the organisations and is not needed for the reserved ``demo``,
 which its own ``CASHCTRL_DEMO_SUBDOMAIN`` and ``CASHCTRL_DEMO_API_KEY`` declare; every
-declared organisation needs its subdomain and its key. An ``EnvVar`` reads nothing.
+declared organisation needs its key and its subdomain, and the subdomain is kept as a key
+is, never in a file, a log line or a report. An ``EnvVar`` reads nothing.
 """
 BASE_URL_TEMPLATE = "https://{subdomain}.cashctrl.com/api/v1"
 """Base URL of one organisation; ``subdomain`` is the organisation's (introduction.md)."""
