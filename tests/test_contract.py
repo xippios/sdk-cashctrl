@@ -27,11 +27,11 @@ def test_the_package_ships_no_reference_scaffold() -> None:
 def test_env_vars_name_the_organisations_and_their_pair_secret() -> None:
     """The tenant list first, then each organisation's key and subdomain, both secret: the
     subdomain is kept like a key, never in a file, a log line or a report."""
-    assert ENV_VARS == (
+    assert (
         EnvVar("CASHCTRL_ORGS", secret=False, required=False),
         EnvVar("CASHCTRL_<NAME>_API_KEY", secret=True, required=True),
         EnvVar("CASHCTRL_<NAME>_SUBDOMAIN", secret=True, required=True),
-    )
+    ) == ENV_VARS
     assert TENANTS.list_var == ENV_VARS[0].name_or_pattern
     assert {f"CASHCTRL_<NAME>_{field}" for field in TENANTS.fields} == {
         var.name_or_pattern for var in ENV_VARS[1:]

@@ -62,9 +62,7 @@ def fetched(script: ModuleType, *, observed: bool) -> str:
 def test_fetched_lists_observed_in_a_row_of_its_own_where_it_exists(script: ModuleType) -> None:
     with_file = fetched(script, observed=True)
     assert with_file.splitlines()[-1] == ROW
-    assert "never edited by hand but `OBSERVED.md`, where it exists" in with_file.replace(
-        "\n", " "
-    )
+    assert "never edited by hand but `OBSERVED.md`, where it exists" in with_file.replace("\n", " ")
     without = fetched(script, observed=False)
     assert "| OBSERVED.md |" not in without
     assert without.splitlines()[-1].startswith("| introduction.md |")
