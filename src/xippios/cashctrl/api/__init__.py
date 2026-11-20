@@ -1,6 +1,6 @@
 """Endpoint wrappers for CashCtrl.
 
-Layer 1 of ADR-0001: one module per upstream operation, named after it. A wrapper
+Layer 1 of sdk-core ADR-0001: one module per upstream operation, named after it. A wrapper
 takes ``org`` first, then the parameters as upstream names them (snake_cased), calls
 ``xippios.cashctrl._client.client_for(org)`` and returns models from ``models.py`` that
 mirror the payload. No composition and no defaults beyond upstream's own: a paginated

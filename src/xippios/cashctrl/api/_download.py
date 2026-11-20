@@ -5,7 +5,7 @@ Every file operation this package wraps (the list exports ``<module>/list.csv``,
 ``download.pdf``, ``download.xlsx`` and ``download_annualreport.pdf``) is a ``GET`` whose query
 is the operation's parameters under upstream's names, as for a ``.json`` read.
 ``download`` sends it through the organisation's client with core's
-``AsyncClient.download`` (ADR-0019 decision 1): the body streams to a file, never held in
+``AsyncClient.download`` (sdk-core ADR-0040, decision 1): the body streams to a file, never held in
 memory and never cached, and the limiter, ``classify`` and the retry rule apply as they
 do to ``get``.
 

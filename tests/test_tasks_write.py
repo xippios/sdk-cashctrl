@@ -928,7 +928,9 @@ IBAN = "CH00 TEST 0000 0000 0000 0"
 
 
 def test_create_person_never_echoes_ssn_or_iban(respx_mock: respx.MockRouter) -> None:
-    """ADR-0017: the values go upstream, but neither the preview nor ``meta.request`` shows them.
+    """The values go upstream, but neither the preview nor ``meta.request`` shows them.
+
+    The personal identifiers stay out of every result (sdk-core ADR-0017).
 
     The confirmed call is answered by a mocked success, not a fixture, to show what was
     sent: a fixture never carries the values.
@@ -1004,7 +1006,7 @@ def test_a_previewed_record_leaves_out_ssn_and_iban(
 def test_update_person_never_echoes_a_given_iban(
     replay_fixture: ReplayFixture, fixtures_dir: Path
 ) -> None:
-    """ADR-0017: an ``iban`` given to ``update_person`` goes upstream, never into a result.
+    """sdk-core ADR-0017: an ``iban`` given to ``update_person`` goes upstream, never into a result.
 
     The recorded read the update starts from, and for the confirmed call the recorded
     update's answer: a replay never matches the request body, so the form asserted here

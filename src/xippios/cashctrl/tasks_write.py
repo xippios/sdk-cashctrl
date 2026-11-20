@@ -56,7 +56,7 @@ write was performed, and ``org`` alone for a preview, whose ``payload`` holds th
 the payload never appears twice. ``tests/test_tasks.py`` checks every name in
 ``__all__``.
 
-Personal identifiers (ADR-0017): ``create_person`` and ``update_person`` take ``ssn``
+Personal identifiers (sdk-core ADR-0017): ``create_person`` and ``update_person`` take ``ssn``
 and, in ``bank_accounts``, each account's ``iban``, and send them as given, but no
 result echoes them: a preview's ``payload`` and ``changes`` and a performed write's
 ``meta.request`` show ``REDACTED`` instead (``_shown``), and the record a preview shows
@@ -138,7 +138,7 @@ PAYMENT_TYPES: tuple[str, ...] = get_args(PaymentType)
 
 
 IDENTIFIERS = frozenset({"ssn"})
-"""Form fields that hold a documented personal identifier (ADR-0017), by upstream name."""
+"""Form fields that hold a documented personal identifier (sdk-core ADR-0017), by upstream name."""
 IDENTIFIERS_IN_LISTS = {"bankAccounts": "iban"}
 """JSON list fields whose items hold one, by upstream name: the list and the item's key.
 
@@ -167,7 +167,7 @@ def _redacted_items(text: str, key: str) -> str:
 
 
 def _shown(fields: Mapping[str, str]) -> dict[str, str]:
-    """``fields`` as a result may show them: no personal identifier's value (ADR-0017).
+    """``fields`` as a result may show them: no personal identifier's value (sdk-core ADR-0017).
 
     ``ssn`` and the ``iban`` of each item of ``bankAccounts`` become ``REDACTED``; every
     other field, and an identifier sent empty (a cleared ``ssn``, which reveals nothing),

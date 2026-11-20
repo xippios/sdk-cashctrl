@@ -48,7 +48,10 @@ from xippios.cashctrl.models import (
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 """The recorded fixtures, for what the module computes at import (``fixtures_dir`` in tests)."""
 TENANT_LIST = "list_organisations"
-"""The package's tenant list (core's ``list_task``, ADR-0024): no ``org``, no async twin."""
+"""The package's tenant list, core's ``list_task`` (sdk-core ADR-0042, decision 1).
+
+No ``org``, no async twin.
+"""
 ORG_TASK_NAMES = [name for name in tasks.__all__ if name != TENANT_LIST]
 TOOL_TASK_NAMES = [name for name in ORG_TASK_NAMES if name not in tasks.BULK_TASKS]
 """The tasks the adapters serve: the file tasks of ``BULK_TASKS`` are Python only."""
@@ -158,7 +161,7 @@ def test_list_fiscal_periods_replays_the_recorded_list(
     assert result.meta.endpoint == "fiscalperiod/list.json"
     assert result.meta.request == {"org": DEMO}
     assert (result.meta.published_at, result.meta.vintage) == (None, None)
-    assert result.meta.total == 2, "upstream's total (ADR-0012)"
+    assert result.meta.total == 2, "upstream's total (sdk-core ADR-0034)"
     assert [(period.id, period.name) for period in result.data] == [(2, "2025"), (1, "2026")]
     first = result.data[0]  # created by the seeder, as the API user
     assert (first.start, first.end) == (date(2025, 1, 1), date(2025, 12, 31)), "date part kept"
@@ -523,7 +526,7 @@ async def test_list_accounts_as_a_tool(
         '[{"comparison":"eq","field":"number","value":"1020"}]'
     )
     # Refused by the tool's schema, before the task runs: core answers conventions §8's
-    # text (ADR-0014, amendment 2026-10-27).
+    # text (sdk-core ADR-0036, decision 12).
     bad = {"org": DEMO, "filter": [{**item, "comparison": "equals"}]}
     assert await mcp_call_text(server, "cashctrl_list_accounts", bad) == (
         "error: InvalidRequestError: filter.0.comparison: "
@@ -1020,7 +1023,7 @@ def test_list_persons_replays_every_person(
     assert buero.created == datetime(2026, 10, 23, 10, 29, 12)
     assert (buero.discount_percentage, buero.date_birth) == (None, None)
     assert isinstance(buero, PersonProjection)
-    assert not hasattr(buero, "iban"), "ADR-0017: no personal identifier in a projection"
+    assert not hasattr(buero, "iban"), "sdk-core ADR-0017: no personal identifier in a projection"
     assert not hasattr(buero, "ssn")
 
 
@@ -1087,7 +1090,7 @@ IBAN = "CH00 TEST 0000 0000 0000 0"
 
 
 def test_the_projections_leave_out_ssn_and_iban_and_nothing_else() -> None:
-    """ADR-0017: the read models stay faithful; the projections differ by exactly these."""
+    """sdk-core ADR-0017: the read models stay faithful; the projections differ by exactly these."""
     assert set(Person.model_fields) - set(PersonProjection.model_fields) == {"ssn", "iban"}
     assert set(PersonProjection.model_fields) <= set(Person.model_fields)
     assert set(PersonDetail.model_fields) - set(PersonDetailProjection.model_fields) == {"ssn"}
@@ -1121,7 +1124,7 @@ def person_with_identifiers(fixtures_dir: Path) -> dict[str, typing.Any]:
 
 
 def test_the_person_projection_itself_drops_each_iban(fixtures_dir: Path) -> None:
-    """ADR-0017 enforced by the type: ``project`` alone, no task, carries no IBAN.
+    """sdk-core ADR-0017 enforced by the type: ``project`` alone, no task, carries no IBAN.
 
     The recorded person read with bank accounts, changed in memory; the key in any case.
     """
@@ -1147,7 +1150,7 @@ def test_the_person_projection_itself_drops_each_iban(fixtures_dir: Path) -> Non
 async def test_get_person_leaves_out_ssn_and_each_iban(
     respx_mock: respx.MockRouter, fixtures_dir: Path
 ) -> None:
-    """A read changed in memory, not a fixture: no fixture carries the values (ADR-0017).
+    """A read changed in memory, not a fixture: no fixture carries the values (sdk-core ADR-0017).
 
     The wrapper keeps them; the task, its tool and its route show neither.
     """
@@ -1182,7 +1185,10 @@ async def test_get_person_leaves_out_ssn_and_each_iban(
 def test_get_journal_entry_projects_the_persons_it_names(
     respx_mock: respx.MockRouter, fixtures_dir: Path
 ) -> None:
-    """A read changed in memory: an associate's ``ssn`` and ``iban`` stay out (ADR-0017)."""
+    """A read changed in memory: an associate's ``ssn`` and ``iban`` stay out.
+
+    The personal identifiers stay out of what a task returns (sdk-core ADR-0017).
+    """
     body = recorded_body(fixtures_dir, "journal_read", "collective")
     for associate in body["data"]["associates"]:
         associate["ssn"] = SSN
@@ -1591,7 +1597,7 @@ async def test_a_history_over_its_cap_names_the_filters_and_where_to_resume(
     """``MCP_CAPS``'s note for ``list_history``, on the recorded history with one row a page.
 
     The recorded history, two entries, fits the default bound, so the bound is lowered
-    here and the note kept; the cut and the resume hint are core's (ADR-0016).
+    here and the note kept; the cut and the resume hint are core's (sdk-core ADR-0038, decision 3).
     """
     replay_fixture("history_list", "order")
     cap = dataclasses.replace(tasks.MCP_CAPS["list_history"], max_rows=1)
@@ -2164,10 +2170,10 @@ def test_get_report_data_drops_identifier_keys_at_any_depth(
     """On the recorded balance sheet changed in memory: no recorded report holds them.
 
     A report the type rule lets through may still carry ``ssn`` or ``iban`` in its rows
-    (ADR-0017; one the tree does not list, or a type the rule does not name), so the
+    (sdk-core ADR-0017; one the tree does not list, or a type the rule does not name), so the
     drop stays the second guard: the keys are injected in three letter cases, in a
     top-level row, in a row two levels down and in ``properties``. The task drops them
-    and changes nothing else; the wrapper keeps them (ADR-0003).
+    and changes nothing else; the wrapper keeps them (sdk-core ADR-0028, decision 1).
     """
     original = recorded_body(fixtures_dir, "report_element_data", "balance_fp2025")
     changed = json.loads(json.dumps(original))
@@ -2297,7 +2303,8 @@ REFUSED_TYPES = (
 """The ten payroll and people report types in the recorded tree, as the docstring lists them."""
 RULE = (
     "payroll and people reports, every type that starts with SALARY_ or contains PERSON, "
-    "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART (personal data, ADR-0017)"
+    "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART "
+    "(personal data, sdk-core ADR-0017)"
 )
 REFUSED_DOCUMENTED_TYPES = {
     "SALARY_BOOK_ENTRIES",
@@ -2500,9 +2507,10 @@ def test_an_element_the_kept_tree_lacks_reads_the_tree_once_more(
 ) -> None:
     """The miss path, on the recorded tree with an element 99 added in memory.
 
-    A cold read that lacks the element asks upstream (fidelity, ADR-0003); a kept tree
-    that lacks it is read once more, and the element found there is judged by its type;
-    one still missing is asked of upstream, the identifier drop the guard.
+    A cold read that lacks the element asks upstream (fidelity, sdk-core ADR-0028,
+    decision 1); a kept tree that lacks it is read once more, and the element found there
+    is judged by its type; one still missing is asked of upstream, the identifier drop the
+    guard.
     """
     recorded_tree = recorded_body(fixtures_dir, "report_tree", "default")
     grown = json.loads(json.dumps(recorded_tree))
@@ -2595,7 +2603,7 @@ async def test_a_report_over_its_cap_is_cut_by_its_rows_with_a_note_naming_the_p
 
 
 def test_every_cap_names_a_task_and_only_parameters_it_takes() -> None:
-    """A cap's note never promises a filter the tool lacks (ADR-0016)."""
+    """A cap's note never promises a filter the tool lacks (sdk-core ADR-0038)."""
     every_parameter = {
         name
         for task_name in tasks.__all__
@@ -2937,7 +2945,10 @@ def test_every_task_names_its_organisation_as_the_tenant(
     tool: str,
     case: tuple[str, dict[str, typing.Any]],
 ) -> None:
-    """``meta.tenant`` is ``org``, by name (ADR-0014); ``org`` stays in ``meta.request``."""
+    """``meta.tenant`` is ``org``, by name, and ``org`` stays in ``meta.request``.
+
+    A result names its tenant by name (sdk-core ADR-0036, decision 5).
+    """
     replay_case(replay_fixture, case[0])
     task = getattr(tasks, tool.removeprefix("cashctrl_"))
     result = task(DEMO, **tool_arguments(tool, case, fixtures_dir))

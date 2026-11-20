@@ -401,7 +401,7 @@ async def test_a_transport_error_does_not_name_the_subdomain(
 async def test_a_429_is_a_rate_limit_error_with_retry_after(
     respx_mock: respx.MockRouter,
 ) -> None:
-    """ADR-0010 decision 3: core's mapping inside ``classify``, ``Retry-After`` as sent.
+    """sdk-core ADR-0033, decision 3: core's mapping inside ``classify``, ``Retry-After`` as sent.
 
     CashCtrl documents the 429 and nothing about its window (``error-handling.md``); 120
     seconds is beyond the retry policy's backoff, so the client raises at once.

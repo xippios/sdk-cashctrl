@@ -6,18 +6,18 @@
 organisation (``demo``, ``acme``), handed to the endpoint wrappers, which reach CashCtrl
 through ``client_for(org)``. No task spans organisations. ``tests/test_tasks.py`` checks
 every name in ``__all__``. The one exception is ``list_organisations``, the package's
-tenant list (core's ``list_task``, ADR-0024): no argument, the declared
+tenant list (core's ``list_task``, sdk-core ADR-0042, decision 1): no argument, the declared
 organisations' names only, so an agent can form valid calls.
 
 ``meta.endpoint`` is the upstream path after ``/api/v1/`` (``account/list.json``),
-``meta.tenant`` the organisation the data came from, by name (ADR-0014), and
+``meta.tenant`` the organisation the data came from, by name (sdk-core ADR-0036, decision 5), and
 ``meta.request`` holds ``org`` plus the query parameters sent, under upstream's names.
 CashCtrl publishes no release time or identifier, so ``published_at`` and ``vintage``
 stay empty. Every list task sets ``meta.total`` to upstream's ``total``, its count of the
-records matching the request (ADR-0012); it is never computed from ``len(data)``.
+records matching the request (sdk-core ADR-0034); it is never computed from ``len(data)``.
 
 The persons a task returns are projections without the personal identifiers ``ssn`` and
-``iban`` (ADR-0017, ``_person`` and its neighbours), the locations and an order's
+``iban`` (sdk-core ADR-0017, ``_person`` and its neighbours), the locations and an order's
 document projections without their bank account numbers (``_location``,
 ``_order_document``), and the rows of a
 report, kept as upstream sends them, lose every key named ``ssn`` or ending in ``iban``
@@ -41,14 +41,14 @@ collect the same records again.
 The file tasks, ``download_order_document``, the list exports ``export_*`` and the
 report files ``download_report``, ``download_report_collection`` and
 ``download_annual_report``, are named in ``BULK_TASKS``: Python only, no tool and no
-route (ADR-0019 decision 4). Each streams one file to the path its caller gives and
+route (sdk-core ADR-0040, decision 4). Each streams one file to the path its caller gives and
 returns core's ``Downloaded``; ``meta.endpoint`` is the file's operation
 (``journal/list.csv``) and ``meta.retrieved_at`` the time the file was complete. A
 refusal sent as HTTP 200 is raised, never written (``api/_download.py``). A file may
 hold what a projection leaves out, at its caller's request or as upstream renders it:
 the person export names ``PERSON_COLUMNS`` unless its caller names columns, ``ssn`` or
 ``iban`` among them deliberately, and an invoice's QR-bill may carry the organisation's
-IBAN or QR-IBAN (ADR-0017). A report file is refused by ``get_report_data``'s type rule
+IBAN or QR-IBAN (sdk-core ADR-0017). A report file is refused by ``get_report_data``'s type rule
 on the tree read right before its download (``_tree_now``), but no key is dropped from a
 file.
 """
@@ -153,7 +153,8 @@ __all__ = [
     "list_tax_codes",
 ]
 
-# A task named here is Python-only: no tool, no route; the adapters skip it (ADR-0019 decision 4).
+# A task named here is Python-only: no tool, no route; the adapters skip it (sdk-core ADR-0040,
+# decision 4).
 BULK_TASKS: frozenset[str] = frozenset(
     {
         "download_annual_report",
@@ -167,7 +168,7 @@ BULK_TASKS: frozenset[str] = frozenset(
     }
 )
 """The file tasks: each streams a file to the path its caller gives and returns
-``Result[Downloaded]``, so no tool or route serves it (ADR-0019)."""
+``Result[Downloaded]``, so no tool or route serves it (sdk-core ADR-0040, decision 4)."""
 
 MCP_CAPS: Mapping[str, ResultCap] = {
     "get_report_data": ResultCap(
@@ -192,7 +193,8 @@ MCP_CAPS: Mapping[str, ResultCap] = {
         )
     ),
 }
-"""Per-tool MCP result caps (ADR-0016), which ``mcp.py`` passes to ``build_server``.
+"""Per-tool MCP result caps (sdk-core ADR-0038, decision 5), which ``mcp.py`` passes to
+``build_server``.
 
 Every other tool keeps the family default, 200 rows or 64 KB. ``list_custom_fields`` has
 no filter or paging beyond its ``type`` and a write needs a type's custom fields whole
@@ -204,7 +206,7 @@ its totals, is about 17 KB, some 650 bytes a row, so 64 KB holds a report of abo
 rows and 128 KB one of about 200; the note names the period parameters (a raised bound
 for a tool that is no reference list). ``list_cost_centers`` keeps the default
 bound and names its filters, and so does ``list_history``, whose whole log may hold far
-more than the bound: a cut is resumed at ``start`` (ADR-0016, amended 2026-10-27), or
+more than the bound: a cut is resumed at ``start`` (sdk-core ADR-0038, decision 3), or
 narrowed to one record's history.
 """
 
@@ -228,7 +230,7 @@ PERSON_COLUMNS: tuple[str, ...] = tuple(
 
 ``PersonProjection``'s fields, what ``list_persons`` returns, under upstream's names
 (``firstName``), in its order: the personal identifiers ``ssn`` and ``iban`` stay out of
-the file unless the caller names them (ADR-0017).
+the file unless the caller names them (sdk-core ADR-0017).
 """
 PAGE_SIZE = 100
 """Records per request when a list task collects every page.
@@ -262,12 +264,14 @@ def _meta(
 
 
 def _person(person: Person) -> PersonProjection:
-    """A ``person/list.json`` entry without ``ssn`` and ``iban`` (ADR-0017)."""
+    """A ``person/list.json`` entry without ``ssn`` and ``iban`` (sdk-core ADR-0017)."""
     return PersonProjection.project(person)
 
 
 def _person_detail(person: PersonDetail) -> PersonDetailProjection:
-    """A ``person/read.json`` record without ``ssn`` and its bank accounts' ``iban`` (ADR-0017).
+    """A ``person/read.json`` record without ``ssn`` and its bank accounts' ``iban``.
+
+    The personal identifiers stay out of what a task returns (sdk-core ADR-0017).
 
     The projection drops each ``iban`` itself (its validator), so nothing is overridden.
     """
@@ -275,7 +279,7 @@ def _person_detail(person: PersonDetail) -> PersonDetailProjection:
 
 
 def _journal_entry_detail(entry: JournalEntryDetail) -> JournalEntryDetailProjection:
-    """A ``journal/read.json`` record whose ``associates`` are projected (ADR-0017)."""
+    """A ``journal/read.json`` record whose ``associates`` are projected (sdk-core ADR-0017)."""
     associates = [_person_detail(person) for person in entry.associates]
     return JournalEntryDetailProjection.project(entry, associates=associates)
 
@@ -286,7 +290,7 @@ async def _offset_pages[T](
     start: int,
     limit: int | None,
 ) -> tuple[list[T], int]:
-    """One page, or every page from ``start`` on, with upstream's ``total`` (ADR-0012).
+    """One page, or every page from ``start`` on, with upstream's ``total`` (sdk-core ADR-0034).
 
     Args:
         fetch_page: Fetches the page at an offset with a page size, e.g. a wrapper call
@@ -375,7 +379,7 @@ def _check_list_arguments(
     limit: object = None,
     columns: object = None,
 ) -> list[Filter] | None:
-    """Refuse what upstream would silently ignore, before anything is sent (ADR-0007).
+    """Refuse what upstream would silently ignore, before anything is sent (sdk-core ADR-0007).
 
     Only what the documentation fixes is checked: ``dir`` is ``ASC`` or ``DESC``, every
     ``filter`` item is a ``Filter``, or a mapping that validates as one, whose
@@ -1251,7 +1255,7 @@ async def list_cost_centers_async(
 
 
 def _location(location: Location) -> LocationProjection:
-    """A ``location/list.json`` entry without ``iban`` and ``qr_iban`` (ADR-0017)."""
+    """A ``location/list.json`` entry without ``iban`` and ``qr_iban`` (sdk-core ADR-0017)."""
     return LocationProjection.project(location)
 
 
@@ -1316,7 +1320,7 @@ _REFUSED_REPORT_RULE = (
     "payroll and people reports, every type that starts with SALARY_ or contains PERSON, "
     "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART"
 )
-"""What ``get_report_data`` refuses, as its refusal states it (ADR-0017)."""
+"""What ``get_report_data`` refuses, as its refusal states it (sdk-core ADR-0017)."""
 
 
 def _is_refused_report_type(report_type: str) -> bool:
@@ -1399,7 +1403,7 @@ def _refused_types(nodes: Sequence[ReportTreeNode]) -> str:
 def _without_identifiers(value: JsonValue) -> JsonValue:
     """``value`` without a key ``models.is_identifier_key`` names, at any depth.
 
-    ``ssn`` and every name ending in ``iban``, in any letter case (ADR-0017), the rule the
+    ``ssn`` and every name ending in ``iban``, in any letter case (sdk-core ADR-0017), the rule the
     fixture recorder applies.
     """
     if isinstance(value, dict):
@@ -1414,10 +1418,10 @@ def _without_identifiers(value: JsonValue) -> JsonValue:
 
 
 def _report(report: ReportData) -> ReportData:
-    """``report`` without the identifier keys in its rows and ``properties`` (ADR-0017).
+    """``report`` without the identifier keys in its rows and ``properties`` (sdk-core ADR-0017).
 
     The rows stay upstream's JSON (``JsonValue``); dropping a nested identifier is the
-    projection rule's parsing only (ADR-0003, amendment 2026-10-26).
+    projection rule's parsing only (sdk-core ADR-0028, decision 1).
     """
     return ReportData.project(
         report,
@@ -1435,7 +1439,9 @@ def _report_problems(
     language: object,
     sort: object,
 ) -> list[str]:
-    """What a report's call gets wrong, or upstream would answer for another period (ADR-0007).
+    """What a report's call gets wrong, or upstream would answer for another period.
+
+    A bad argument is refused before anything is sent (sdk-core ADR-0007).
 
     ``ids`` names the report, ``{"element_id": 1}`` or ``{"collection_id": 1}``.
     ``docs/upstream/report.md``, "Read JSON data": ``fiscalPeriod`` "overrides the
@@ -1479,7 +1485,7 @@ def _refuse(problems: Sequence[str]) -> None:
 def _report_refusal(subject: str, task: str) -> InvalidRequestError:
     """The refusal of a payroll or people report by ``task``: ``subject``, then the rule."""
     return InvalidRequestError(
-        f"{subject}: {task} refuses {_REFUSED_REPORT_RULE} (personal data, ADR-0017)",
+        f"{subject}: {task} refuses {_REFUSED_REPORT_RULE} (personal data, sdk-core ADR-0017)",
         source=SOURCE,
     )
 
@@ -1568,7 +1574,7 @@ async def get_report_data_async(
     return Result(data=report, meta=meta)
 
 
-# The file tasks (ADR-0019 decision 4), named in BULK_TASKS:
+# The file tasks (sdk-core ADR-0040, decision 4), named in BULK_TASKS:
 # Python only. Each streams one file to the path its caller gives, through a file wrapper
 # and api/_download.py, and returns core's Downloaded; nothing is read into a result.
 
@@ -1874,7 +1880,7 @@ async def export_persons_async(
     the fields ``list_persons`` returns, named one by one (``PERSON_COLUMNS``), so the
     personal identifiers ``ssn`` and ``iban`` stay out of it. A column ``columns`` names
     is exported as named: a caller that names ``ssn``, ``iban`` or ``qrIban`` fetches
-    them deliberately and gets them in the file (ADR-0017). The file is streamed to
+    them deliberately and gets them in the file (sdk-core ADR-0017). The file is streamed to
     ``dest``, the path the caller gives, and is never read into a result, kept in memory
     or cached; no MCP tool or HTTP route serves it (``BULK_TASKS``). ``data`` describes
     it: ``path``, ``bytes``, ``content_type``, ``filename`` and ``retrieved_at``.
@@ -2272,7 +2278,8 @@ means that no organisation is declared where the server runs.
 """
 
 list_organisations = list_task(TENANTS, name="list_organisations", doc=LIST_ORGANISATIONS_DOC)
-"""The declared organisations' names (ADR-0024); ``meta.tenant`` is ``None``."""
+"""The declared organisations' names (sdk-core ADR-0036, decision 6); ``meta.tenant`` is
+``None``."""
 
 list_fiscal_periods = sync(list_fiscal_periods_async)
 list_currencies = sync(list_currencies_async)

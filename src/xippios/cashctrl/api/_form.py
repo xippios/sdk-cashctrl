@@ -24,7 +24,7 @@ charset=UTF-8``, the charset declared as ``scripts/seed_demo.py`` declared it fo
 65 writes that seeded the demo organisation, an umlaut read back byte for byte
 (``docs/demo-org.md``, Observed write semantics). A refusal (HTTP 200 with
 ``"success": false``) is raised by ``_client.classify`` as ``RequestRejected``; core
-never retries a ``POST`` after a 5xx or a transport failure (ADR-0011).
+never retries a ``POST`` after a 5xx or a transport failure (sdk-core ADR-0011).
 """
 
 import json

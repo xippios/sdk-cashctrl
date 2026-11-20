@@ -74,7 +74,7 @@ names (`onlyActive`), the organisation as `tenant`, when they were fetched and, 
 list, `total`, upstream's count of the matching records. Async twins are named
 `<task>_async` (`list_organisations` has none). The tasks are listed in the status table
 below. Persons come back without the personal identifiers `ssn` and `iban`
-(`list_persons`, `get_person`, the persons `get_journal_entry` names; ADR-0017),
+(`list_persons`, `get_person`, the persons `get_journal_entry` names; sdk-core ADR-0017),
 locations and an order's document without their bank account numbers (`iban` and
 `qr_iban`, `list_locations`; `orgIban`, `orgQrIban` and `recipientIban`,
 `get_order_document`), and report rows without any key named `ssn` or ending in `iban`
@@ -254,7 +254,7 @@ write server only: never by the read server, never as an HTTP route.
 - CashCtrl checks every write and refuses with the fields it objects to, e.g.
   `error: RequestRejected: CashCtrl rejected the request: debitId: This field cannot be
   empty.`; a refused write changed nothing. A write that meets a server error or a
-  timeout is never repeated (ADR-0011): read back before sending it again.
+  timeout is never repeated (sdk-core ADR-0011): read back before sending it again.
 
 ```python
 from datetime import date
@@ -289,7 +289,7 @@ documents of orders as one PDF; the list exports `export_journal_entries`,
 collection of them as one document, each with `format` (`pdf` or `xlsx`) and the period
 `get_report_data` takes, and `download_annual_report`, a PDF. They are Python
 only: no MCP tool and no HTTP route serves them, since no tool hands an agent a file
-path (`BULK_TASKS`, ADR-0019). Each streams the file to `dest`, the path the caller
+path (`BULK_TASKS`, sdk-core ADR-0040, decision 4). Each streams the file to `dest`, the path the caller
 gives; nothing is read into the result, kept in memory or cached, and `data` describes
 the file (`path`, `bytes`, `content_type`, `filename`, `retrieved_at`). A refusal
 raises and writes nothing, and a file already at `dest` stays as it was:
@@ -301,7 +301,7 @@ order or report id, which CashCtrl answers with HTTP 404.
   `meta.total` first and pass a `limit` of at least that.
 - **Personal identifiers.** Without `columns`, the person export names the fields
   `list_persons` returns as its columns, so `ssn` and `iban` stay out of the file; a
-  caller that names them in `columns` gets them, deliberately (ADR-0017). An order
+  caller that names them in `columns` gets them, deliberately (sdk-core ADR-0017). An order
   document is what its recipient gets: an invoice's QR-bill may carry the
   organisation's IBAN or QR-IBAN and the recipient's name and address. Where a file
   goes is the caller's choice.

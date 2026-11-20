@@ -1,9 +1,10 @@
 """Keys resolved as in production: core's placeholder pin is lifted in this module.
 
 Core's plugin pins ``PLACEHOLDER_KEY`` on every auth object in every test not marked
-``live`` (ADR-0013), so a test of how a key is resolved overrides ``placeholder_api_key``
-at module level with a fixture that pins nothing (conventions §15, item 5). The shell's
-demo key, which direnv may have loaded, is removed instead, so no test here can send it.
+``live`` (sdk-core ADR-0035, decision 3), so a test of how a key is resolved overrides
+``placeholder_api_key`` at module level with a fixture that pins nothing (conventions §15,
+item 5). The shell's demo key, which direnv may have loaded, is removed instead, so no
+test here can send it.
 """
 
 import base64
@@ -23,7 +24,7 @@ DEMO_KEY = "demo-key-value"  # pragma: allowlist secret
 
 @pytest.fixture
 def placeholder_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pins nothing (ADR-0013); the shell's demo key is removed instead."""
+    """Pins nothing (sdk-core ADR-0035, decision 3); the shell's demo key is removed instead."""
     monkeypatch.delenv(TENANTS.var(DEMO, "API_KEY"), raising=False)
 
 

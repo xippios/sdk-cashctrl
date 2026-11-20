@@ -14,9 +14,9 @@ follows, sdk-core's conventions among them, are listed under
 | API base URL | `https://<subdomain>.cashctrl.com/api/v1`, one per organisation |
 | Documentation | https://app.cashctrl.com/static/help/en/api/index.html, snapshotted in `docs/upstream/` |
 | Credentials | `CASHCTRL_ORGS` names the organisations; per name `CASHCTRL_<NAME>_SUBDOMAIN` and `CASHCTRL_<NAME>_API_KEY`, the key sent as the HTTP basic user name. The reserved `demo` is declared by its own pair and never listed |
-| Rate limit | 60 requests per minute per organisation, burst 1; a self-imposed pace, upstream documents none, only a 429 (sdk-core ADR-0010); enforced client-side in `_client.py`, one token bucket per organisation; see Rate limit below |
+| Rate limit | 60 requests per minute per organisation, burst 1; a self-imposed pace, upstream documents none, only a 429 (sdk-core ADR-0033, decision 1); enforced client-side in `_client.py`, one token bucket per organisation; see Rate limit below |
 | Write tools | yes, in `tasks_write.py`, served by `xippios-cashctrl-mcp-write` |
-| Core | `xippios-core~=0.3.0` from PyPI, its `mcp`, `http` and `testing` extras likewise: one core minor, adopted through conventions §15 (sdk-core ADR-0018) |
+| Core | `xippios-core~=0.3.0` from PyPI, its `mcp`, `http` and `testing` extras likewise: one core minor, adopted through conventions §15 (sdk-core ADR-0039) |
 
 The snapshot listed in `docs/upstream/FETCHED.md` is the reference for names, parameters and
 semantics; a wrapper is never written from memory of the API.
@@ -31,7 +31,7 @@ and `check_subdomain` (one DNS label, lower-cased) as the subdomain's check. The
 `list_organisations` and the `--org` lock are core's: `Tenants`, `list_task`,
 `TenantLock`, `bind_tasks` and `tenant_instructions` from `xippios.core` and
 `serve_tenants` from `xippios.core.mcp`, which core 0.3.0 left to this package and 0.4.0
-took back (sdk-core ADR-0024). Core keeps `ResultMeta.tenant` and the write server's
+took back (sdk-core ADR-0042, decision 1). Core keeps `ResultMeta.tenant` and the write server's
 rules too.
 
 - `org` is the first, required parameter of every task; the MCP tools take it too unless
@@ -84,7 +84,7 @@ and nothing else, ever. The recorder takes no organisation; every live test take
 through core's `keep_reserved_tenants` when pytest imports it, before any fixture runs, and
 `CASHCTRL_ORGS` again for every test, sets the placeholder subdomain in every offline test
 and calls `TENANTS.reset()` around each.
-Core's plugin does the rest (sdk-core ADR-0013): no network outside a test marked `live` or
+Core's plugin does the rest (sdk-core ADR-0035): no network outside a test marked `live` or
 `network`, no rate-limit waits, and the placeholder key on every auth object, with
 `CASHCTRL_DEMO_API_KEY` named in `xippios_placeholder_key_envs`. The demo organisation is
 synthetic: invented books seeded by `scripts/seed_demo.py` and described in
@@ -100,9 +100,9 @@ nothing else but a payment of a deleted order (see Write tools). The demo subdom
 treated like a key: never in a file, a commit, a log line or a report. The repository is
 public.
 
-## Rate limit (sdk-core ADR-0010)
+## Rate limit (sdk-core ADR-0033)
 
-Decisions 1, 2, 3 and 5 of sdk-core ADR-0010 are adopted; decision 4 is deliberately not applied.
+Decisions 1, 2, 3 and 5 of sdk-core ADR-0033 are adopted; decision 4 is deliberately not applied.
 
 1. **Pace.** 60 requests per minute per organisation with a burst of 1, one request at
    a time and then one a second, one token bucket per client (`RATE_LIMIT` in
@@ -117,7 +117,7 @@ Decisions 1, 2, 3 and 5 of sdk-core ADR-0010 are adopted; decision 4 is delibera
    `x-cashctrl-requests-left` (299 on every answer observed on 2026-10-23, a 401
    included) with an unknown window and scope, so it is not read.
 4. **No firing into a spent quota** is deliberately not applied: no `QuotaPolicy` is
-   installed. Core's `QuotaPolicy` (sdk-core ADR-0015) keeps a long-window quota, and
+   installed. Core's `QuotaPolicy` (sdk-core ADR-0037, decision 2) keeps a long-window quota, and
    CashCtrl documents none, nor a window for
    `x-cashctrl-requests-left`; its 429 asks only for delays, a pace refusal. With no
    window to give it, a policy would take its default of an hour and turn one 429
@@ -312,7 +312,7 @@ value under `iban` in a body to `REDACTED`, so a projection that kept one could 
 replay-tested with a real value.
 
 - The endpoint wrappers' read models stay faithful and carry them (`Person`,
-  `PersonDetail`, `JournalEntryDetail.associates`, `Location`, `OrderDocument`; sdk-core ADR-0003).
+  `PersonDetail`, `JournalEntryDetail.associates`, `Location`, `OrderDocument`; sdk-core ADR-0028, decision 1).
 - The tasks return projections without them, built with `UpstreamModel.project` in
   `tasks.py`: `PersonProjection` (`list_persons`), `PersonDetailProjection`
   (`get_person`; each bank account kept without its `iban`, which the projection's own
@@ -336,7 +336,7 @@ replay-tested with a real value.
   client, which `TENANTS.reset()` or a changed variable drops; `get_report_tree`
   refreshes it; an element the kept tree lacks reads it once more, one still missing is
   asked of upstream. Other reports come back as sent, every key `ssn` or ending in `iban`
-  dropped at any depth, in any case (`_report`; sdk-core ADR-0003, amendment 2026-10-26).
+  dropped at any depth, in any case (`_report`; sdk-core ADR-0028, decision 1).
 - A task that fetches them deliberately may return them and says so in its docstring.
   Files may carry them, at the caller's path, never in a result or a tool
   (`BULK_TASKS`): `export_persons` names `PERSON_COLUMNS` unless its caller names
@@ -361,7 +361,7 @@ uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loop
 ```
 
 `uv run pytest` is offline: core's plugin refuses the network and skips the rate limiter's
-waits in every test not marked `live` (conventions §10, sdk-core ADR-0013). A test that
+waits in every test not marked `live` (conventions §10, sdk-core ADR-0035). A test that
 asserts a limiter wait or a quota pause is marked `rate_limited`, one that must reach the
 network `network`. It sends the key's placeholder, with `CASHCTRL_DEMO_API_KEY` set to it
 because `pyproject.toml` names that variable under `xippios_placeholder_key_envs`; the
@@ -376,7 +376,7 @@ reads or prints (Never below).
 `.github/workflows/live.yml` runs the live tests nightly at 02:36 UTC, a time derived from
 the slug so that sources sharing a key never start together, and on demand; a pull request
 never runs them. Every `live` test runs, write tests included, so a live write test acts
-only on data kept for testing (the demo organisation, sdk-core ADR-0024) and cleans up after itself.
+only on data kept for testing (the demo organisation, sdk-core ADR-0036, decision 2) and cleans up after itself.
 Only its `uv run pytest -m live --tb=short --assert=plain` step sees the demo
 organisation's pair, from the secrets `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`
 (the `live_secrets` answer and the reserved organisation's key); both must give
@@ -414,7 +414,7 @@ compares. A live test asserts on shapes and counts, never on a raw payload.
 - Never write a key, a token or another credential into a file or a commit.
 - Never put logic in `mcp.py` or `http.py`, and never add a route or a tool by hand: the
   adapters register `tasks.__all__` (sdk-core ADR-0001).
-- Never rename or re-map an upstream concept to another source's (sdk-core ADR-0003).
+- Never rename or re-map an upstream concept to another source's (sdk-core ADR-0028, decision 1).
 - Never return a documented personal identifier in a task's projection, echo one in
   `meta.request`, or commit one in a fixture (sdk-core ADR-0017).
 - Never edit `docs/upstream/` by hand: `/refresh-upstream` fetches it, and the pull request
@@ -484,7 +484,7 @@ Step 5, the docstring for agents, is the command's; then:
    `test_live.py` that takes the `demo_org` fixture.
 
 A list that documents `start` and `limit` (journal, persons, orders, history) pages through
-`_offset_pages` in `tasks.py` (conventions §4, sdk-core ADR-0012): `limit` given is one request
+`_offset_pages` in `tasks.py` (conventions §4, sdk-core ADR-0034): `limit` given is one request
 for the page at `start` (default 0); `limit` omitted collects every page from `start`
 through core's `paginate_offset`, `PAGE_SIZE` (100, upstream's documented default) a
 request. `meta.total` is upstream's `total` on every list task, never `len(data)`.
@@ -496,7 +496,7 @@ packaged: a multi-tenant source packages no tenant data, nor a value set
 `docs/upstream/` fixes (`PACKAGED_LISTS` is empty; `/refresh-reference-data` says how
 one would come). A lookup whose whole list an
 agent needs and the default result cap (200 rows or 64 KB) would cut gets a cap of its
-own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (sdk-core ADR-0016):
+own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (sdk-core ADR-0038, decision 5):
 `list_custom_fields` (500 rows or 128 KB; no filter but `type`, and a write needs a
 type's custom fields whole) and `get_report_data` (128 KB; a report is read whole, and
 over its bound its top-level rows are cut, `total` and `properties` kept whole, with the
@@ -535,7 +535,7 @@ the five report files, and expects an unknown order's and an unknown report's re
 `/record-fixture <endpoint> <case> <parameters>` walks it, and the docstring of
 `scripts/record_fixture.py` holds the recorder's policies in full: one request through a
 client that never retries, core's `Scrub` (conventions §10) and its own `TenantScrub`
-(sdk-core ADR-0024, decision 4), the final check before the one write, and the delete it
+(sdk-core ADR-0042, decision 4), the final check before the one write, and the delete it
 asks for after a write. The demo-only rule above names what it scrubs and refuses.
 Before committing, run the grep block of `/record-fixture` (step 5); its last two greps
 print `0`. Fixtures are never typed in by hand.

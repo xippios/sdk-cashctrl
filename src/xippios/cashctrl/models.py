@@ -7,11 +7,11 @@ named as upstream names them in snake_case. Where upstream spells a field differ
 results serialise under the snake_case names in Python, over MCP and over HTTP alike
 (``is_current``, ``end_amount``), the same names the tool arguments use. Within-source
 hygiene only: dates become ``datetime.date``/``datetime``, numbers become ``int`` or
-``Decimal`` (ADR-0008: JSON numbers on the wire). Documented value sets are ``Literal``
-types here (``Direction``, ``Language``), so the tool schemas list them; an enumeration
+``Decimal`` (sdk-core ADR-0031, decision 1: JSON numbers on the wire). Documented value sets are
+``Literal`` types here (``Direction``, ``Language``), so the tool schemas list them; an enumeration
 generated into ``enums.py`` would be a ``StrEnum``, and one of integer ids an ``IntEnum``
-(conventions §3). No cross-source normalisation (ADR-0003): an upstream concept stays an
-upstream concept, and nothing is renamed or computed.
+(conventions §3). No cross-source normalisation (sdk-core ADR-0028, decision 1): an upstream concept
+stays an upstream concept, and nothing is renamed or computed.
 
 These read models stay faithful, documented personal identifiers included: ``ssn`` and
 ``iban`` (``Person``, ``PersonDetail``, and ``JournalEntryDetail.associates``), a
@@ -21,7 +21,7 @@ tasks return leave those out (``PersonProjection``, ``PersonDetailProjection``,
 ``JournalEntryDetailProjection``, ``LocationProjection``, ``OrderDocumentProjection``),
 as ``get_report_data`` drops them from its raw rows (``ReportData`` itself keeps what
 upstream sends), a write task does not echo one in ``meta.request`` and its preview
-shows one as ``REDACTED``, and fixtures never carry their values (ADR-0017).
+shows one as ``REDACTED``, and fixtures never carry their values (sdk-core ADR-0017).
 
 ``created_by`` and ``last_updated_by`` are ``AuditUser`` on every model that has them:
 CashCtrl writes an API user there as ``API:`` and the first four characters of its key,
@@ -152,7 +152,7 @@ def _date_part(value: object) -> object:
 
 
 def is_identifier_key(name: str) -> bool:
-    """Whether a payload key names a personal identifier this package keeps out (ADR-0017).
+    """Whether a payload key names a personal identifier this package keeps out (sdk-core ADR-0017).
 
     ``ssn`` by its whole name and every name that ends in ``iban`` (``iban``, ``qrIban``,
     ``orgIban``, ``recipientIban``, ``bank.iban``), in any letter case: ``get_report_data``
@@ -732,7 +732,7 @@ class _PersonFields(UpstreamModel):
     the list sends them as ``null``), so everything that may be empty defaults to ``None``.
     ``ssn``, which both send, is declared on the read models (``Person``,
     ``PersonDetail``) alone, so that the projections tasks return can leave it out
-    (ADR-0017).
+    (sdk-core ADR-0017).
     """
 
     id: int
@@ -845,9 +845,9 @@ class Person(_PersonEntryFields):
     ``mobile_work``, ``mobile_private``, ``url``, ``superior_name`` and
     ``location_name``.
 
-    The endpoint wrapper's read model, faithful to upstream (ADR-0003): it carries
-    ``ssn`` and ``iban``, which ``PersonProjection``, what ``list_persons`` returns,
-    leaves out (ADR-0017).
+    The endpoint wrapper's read model, faithful to upstream (sdk-core ADR-0028, decision 1): it
+    carries ``ssn`` and ``iban``, which ``PersonProjection``, what ``list_persons`` returns, leaves
+    out (sdk-core ADR-0017).
     """
 
     ssn: str | None = None
@@ -857,7 +857,7 @@ class Person(_PersonEntryFields):
 class PersonProjection(_PersonEntryFields):
     """One person as ``list_persons`` returns it: ``Person`` without ``ssn`` and ``iban``.
 
-    Documented personal identifiers stay out of the projections tasks return (ADR-0017,
+    Documented personal identifiers stay out of the projections tasks return (sdk-core ADR-0017,
     conventions §3): ``ssn``, "Social security number of the employee", and ``iban``, an
     IBAN (documented for each of a person's ``bankAccounts``; on the list only seen
     ``null``). Every other field is ``Person``'s, under the same name and type; built
@@ -912,9 +912,9 @@ class PersonDetail(_PersonDetailFields):
     ``title_name``, ``language_code`` (``de``), ``canton_code``, ``country_code2``
     (``CH``), ``country_code3`` (``CHE``), ``number_of_children`` and ``icon_cls``.
 
-    The endpoint wrapper's read model, faithful to upstream (ADR-0003): it carries
-    ``ssn`` and, in each of ``bank_accounts``, ``iban``, which
-    ``PersonDetailProjection``, what the tasks return, leaves out (ADR-0017).
+    The endpoint wrapper's read model, faithful to upstream (sdk-core ADR-0028, decision 1): it
+    carries ``ssn`` and, in each of ``bank_accounts``, ``iban``, which ``PersonDetailProjection``,
+    what the tasks return, leaves out (sdk-core ADR-0017).
     """
 
     ssn: str | None = None
@@ -931,7 +931,7 @@ def _without_iban(account: JsonValue) -> JsonValue:
 class PersonDetailProjection(_PersonDetailFields):
     """One person as ``get_person`` returns it: ``PersonDetail`` without ``ssn`` and ``iban``.
 
-    Documented personal identifiers stay out of the projections tasks return (ADR-0017,
+    Documented personal identifiers stay out of the projections tasks return (sdk-core ADR-0017,
     conventions §3): ``ssn`` is left out, and so is the ``iban`` of each of
     ``bank_accounts``, whose other keys are kept as sent. The type enforces both: it has
     no ``ssn`` field, and its validator drops each bank account's ``iban`` (the key in
@@ -947,7 +947,7 @@ class PersonDetailProjection(_PersonDetailFields):
     @field_validator("bank_accounts")
     @classmethod
     def _drop_iban(cls, accounts: list[JsonValue]) -> list[JsonValue]:
-        """Each bank account without its ``iban`` (ADR-0017); its other keys as sent."""
+        """Each bank account without its ``iban`` (sdk-core ADR-0017); its other keys as sent."""
         return [_without_iban(account) for account in accounts]
 
 
@@ -989,9 +989,9 @@ class JournalEntryDetail(_JournalEntryDetailFields):
     ``["33","4","42"]``, kept as sent) and ``items_index`` (the lines' texts as one
     search string).
 
-    The endpoint wrapper's read model, faithful to upstream (ADR-0003): ``associates``
-    are ``PersonDetail`` records, ``ssn`` and ``iban`` included; what
-    ``get_journal_entry`` returns is ``JournalEntryDetailProjection`` (ADR-0017).
+    The endpoint wrapper's read model, faithful to upstream (sdk-core ADR-0028, decision 1):
+    ``associates`` are ``PersonDetail`` records, ``ssn`` and ``iban`` included; what
+    ``get_journal_entry`` returns is ``JournalEntryDetailProjection`` (sdk-core ADR-0017).
     """
 
     associates: list[PersonDetail] = Field(default_factory=list)
@@ -1001,7 +1001,7 @@ class JournalEntryDetailProjection(_JournalEntryDetailFields):
     """One journal entry as ``get_journal_entry`` returns it, its persons projected.
 
     ``JournalEntryDetail`` with ``associates`` as ``PersonDetailProjection`` records,
-    without ``ssn`` and ``iban`` (ADR-0017, conventions §3). Every other field is
+    without ``ssn`` and ``iban`` (sdk-core ADR-0017, conventions §3). Every other field is
     ``JournalEntryDetail``'s, under the same name and type; built with
     ``UpstreamModel.project``.
     """
@@ -1299,7 +1299,7 @@ class OrderDocument(_OrderDocumentFields):
 
     This read model stays faithful; ``get_order_document`` returns
     ``OrderDocumentProjection``, which leaves out the three bank account numbers
-    (ADR-0017). The recorder rewrites every name ending in ``iban``, these three included;
+    (sdk-core ADR-0017). The recorder rewrites every name ending in ``iban``, these three included;
     the recorded answer holds ``null`` for all three.
     """
 
@@ -1311,7 +1311,7 @@ class OrderDocument(_OrderDocumentFields):
 class OrderDocumentProjection(_OrderDocumentFields):
     """An order's document without ``org_iban``, ``org_qr_iban`` and ``recipient_iban``.
 
-    What ``get_order_document`` returns (ADR-0017): every field of ``OrderDocument`` but
+    What ``get_order_document`` returns (sdk-core ADR-0017): every field of ``OrderDocument`` but
     the organisation's and the recipient's bank account numbers, under the same names;
     ``org_bank_account_id`` and ``recipient_bank_account_id`` name the bank accounts
     instead.
@@ -1785,7 +1785,7 @@ class Location(_LocationFields):
     ``bank_account_id``.
 
     This read model stays faithful; ``list_locations`` returns ``LocationProjection``,
-    which leaves out ``iban`` and ``qr_iban`` (ADR-0017).
+    which leaves out ``iban`` and ``qr_iban`` (sdk-core ADR-0017).
     """
 
     iban: JsonValue = None
@@ -1795,7 +1795,7 @@ class Location(_LocationFields):
 class LocationProjection(_LocationFields):
     """A ``location/list.json`` entry without ``iban`` and ``qr_iban``, the bank account numbers.
 
-    What ``list_locations`` returns (ADR-0017): every field of ``Location`` but those two,
+    What ``list_locations`` returns (sdk-core ADR-0017): every field of ``Location`` but those two,
     under the same names; ``bank_account_id`` names the bank account instead.
     """
 
@@ -1878,8 +1878,8 @@ class ReportData(UpstreamModel):
     ``docs/upstream/report.md``, "Read JSON data": "Returns the JSON data of a single
     element by ID for the given time period." The documentation gives no schema, and
     the rows differ by report type (``report/element/create.json`` lists 41), so ``data``
-    and ``properties`` are kept as upstream sends them (``JsonValue``, ADR-0003): rows
-    under upstream's camelCase names (``endAmount``), amounts as JSON numbers, not
+    and ``properties`` are kept as upstream sends them (``JsonValue``, sdk-core ADR-0028,
+    decision 1): rows under upstream's camelCase names (``endAmount``), amounts as JSON numbers, not
     ``Decimal``.
 
     Observed on 2026-10-27 for the balance sheet (``BALANCE``) of fiscal period 2025:
@@ -2275,10 +2275,10 @@ class WritePreview[T](UpstreamModel):
             text, e.g. ``{"debitId": "3", "amount": "100.00"}``: booleans ``true`` or
             ``false``, dates ``YYYY-MM-DD``, lists as JSON, ``custom`` as XML. A personal
             identifier, ``ssn`` or the ``iban`` of an item of ``bankAccounts``, shows as
-            ``REDACTED``; upstream receives the value (ADR-0017).
+            ``REDACTED``; upstream receives the value (sdk-core ADR-0017).
         before: For an update or a delete, the record as upstream holds it now, read with
             ``read.json``, as the task's projection, without ``ssn`` and ``iban``
-            (ADR-0017); ``None`` for a create.
+            (sdk-core ADR-0017); ``None`` for a create.
         changes: For an update, the fields the call changes, upstream name to encoded
             text, a personal identifier as ``REDACTED``; ``None`` otherwise.
     """

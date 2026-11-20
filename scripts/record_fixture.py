@@ -87,7 +87,7 @@ never shows a value, and exits with status 1:
   ``token``, ``secret``, ``apiKey`` (``api_key``, ``api-key``) or ``ssn``, or whose name
   ends in ``iban`` (``iban``, ``qrIban``, ``qr_iban``, ``orgIban``, ``orgQrIban``,
   ``recipientIban``), the identifiers this package keeps out of its
-  projections (ADR-0017), in any case, has its text value replaced by ``REDACTED``.
+  projections (sdk-core ADR-0017), in any case, has its text value replaced by ``REDACTED``.
   ``order/read.json`` sends ``hash``, an undocumented 32-character text that may be the
   token of a public link to the order document (observed on 2026-10-23, not verified);
   ``person/list.json`` sends ``ssn`` and ``iban``, ``location/list.json`` ``iban`` and
@@ -107,7 +107,7 @@ credentials scrubbed, the key and its token made ``REDACTED`` where they appear 
 and a plain verify that refuses the exchange when either is still there as given; core
 also refuses a body that is not UTF-8 text, which no scrub can read (exports are out of
 scope for fixtures, which the recorder's message says first). Then the recorder's own
-step, ``TenantScrub``, runs on the ``Fixture`` core returns (ADR-0024, decision 4): the
+step, ``TenantScrub``, runs on the ``Fixture`` core returns (sdk-core ADR-0042, decision 4): the
 demo host (``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``, in any case, IDNA or
 percent-encoded) becomes ``demo.cashctrl.com``, the host offline tests replay against, in
 the URL, the headers and both bodies; the key and its token become ``REDACTED`` in any
@@ -247,7 +247,7 @@ def secret_name(name: str) -> bool:
 
     A token-like name whole (``TOKEN_NAME``), and a personal identifier by the package's
     one rule, ``models.is_identifier_key``: ``ssn`` whole and every name that ends in
-    ``iban``, in any case (ADR-0017). ``ssn`` and ``iban`` are the
+    ``iban``, in any case (sdk-core ADR-0017). ``ssn`` and ``iban`` are the
     documented personal identifiers this package keeps out of its projections;
     ``qrIban`` (``qr_iban``, ``qr-iban``) is the QR-IBAN of the organisation's own bank
     account that ``location/list.json`` sends next to its ``iban``, and
@@ -737,8 +737,8 @@ def _plain_or_encoded(value: str, *, any_case: bool = False) -> str:
 
     Covers any mix: what a URL encoder leaves alone and what it encodes, in either hex
     case, ``+`` for a space as in a form body or a query, and ``\/`` for ``/`` as some
-    JSON encoders write it. Copied from core's ``Scrub`` (ADR-0024). With ``any_case``
-    a letter's encoding is taken in either letter case as well (``%52`` and ``%72`` for
+    JSON encoders write it. Copied from core's ``Scrub`` (sdk-core ADR-0042, decision 6). With
+    ``any_case`` a letter's encoding is taken in either letter case as well (``%52`` and ``%72`` for
     ``r``), for a pattern compiled with ``re.IGNORECASE``: the host and the subdomain.
     """
     parts = []
@@ -764,7 +764,7 @@ class TenantScrub:
     r"""The recorder's own step on the ``Fixture`` core returns, before the one write.
 
     Core's ``Scrub`` held it as ``host=``, ``rewrite=``, the percent-encoded matching and
-    the JSON-decoded verify until 0.3.0 left them to this recorder (ADR-0024, decisions 3
+    the JSON-decoded verify until 0.3.0 left them to this recorder (sdk-core ADR-0042, decisions 3
     and 4; copied from sdk-core ``cb8ecdf``, ``src/xippios/core/testing/scrub.py``).
     Bound to the request it scrubs, it rewrites the fixture (``rewrite``) and refuses
     what survives (``verify``):
