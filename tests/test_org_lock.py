@@ -144,7 +144,12 @@ async def test_both_entry_points_bind_to_the_org(
     assert transport == "stdio"
     assert server is not module.server
     assert server.name == module.server.name
-    assert server.instructions == f"{module.INSTRUCTIONS} {SENTENCE}"
+    # The bound server's own text leaves out the clause that a tool takes org, which the
+    # unbound server's keeps, and core's sentence names the organisation.
+    assert module.server.instructions == module.INSTRUCTIONS
+    assert "takes org" in module.INSTRUCTIONS
+    assert server.instructions == f"{module.BOUND_INSTRUCTIONS} {SENTENCE}"
+    assert "takes org" not in server.instructions
     bound = {tool.name: tool for tool in await server.list_tools()}
     unbound = {tool.name: tool for tool in await module.server.list_tools()}
     assert bound.keys() == unbound.keys(), "the same tools, by name"
