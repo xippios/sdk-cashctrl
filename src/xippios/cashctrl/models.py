@@ -7,11 +7,11 @@ named as upstream names them in snake_case. Where upstream spells a field differ
 results serialise under the snake_case names in Python, over MCP and over HTTP alike
 (``is_current``, ``end_amount``), the same names the tool arguments use. Within-source
 hygiene only: dates become ``datetime.date``/``datetime``, numbers become ``int`` or
-``Decimal`` (sdk-core ADR-0031, decision 1: JSON numbers on the wire). Documented value sets are
-``Literal`` types here (``Direction``, ``Language``), so the tool schemas list them; an enumeration
-generated into ``enums.py`` would be a ``StrEnum``, and one of integer ids an ``IntEnum``
-(conventions §3). No cross-source normalisation (sdk-core ADR-0028, decision 1): an upstream concept
-stays an upstream concept, and nothing is renamed or computed.
+``Decimal`` (sdk-core ADR-0031, decision 1: JSON numbers on the wire). Documented value
+sets are ``Literal`` types here, written by hand (``Direction``, ``Language``), so the
+tool schemas list them: the package packages no list, so no enumeration is generated
+(conventions §3). No cross-source normalisation (sdk-core ADR-0028, decision 1): an
+upstream concept stays an upstream concept, and nothing is renamed or computed.
 
 These read models stay faithful, documented personal identifiers included: ``ssn`` and
 ``iban`` (``Person``, ``PersonDetail``, and ``JournalEntryDetail.associates``), a

@@ -146,10 +146,7 @@ src/xippios/cashctrl/
   mcp_write.py     xippios-cashctrl-mcp-write entry point
   mcp.py           xippios-cashctrl-mcp-read entry point
   http.py          FastAPI router
-  params.py, enums.py, reference/  the packaged lists' scaffold: none is packaged
-                   (/refresh-reference-data)
 scripts/
-  refresh_reference.py   the template's skeleton, until a value set is packaged
   refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
   record_fixture.py      records one exchange with the demo organisation; core's Scrub, then its own
                          TenantScrub (host, encoded and JSON checks) and scrub_text
@@ -191,7 +188,7 @@ CHANGELOG.md       the releases, each section assembled from the fragments
                    tests), organization.yml (the organization's checks from xippios/.github:
                    conventions, a review of a pull request against the documents the README
                    lists, and adr-index, which runs scripts/adr_index.py --check)
-.claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep
+.claude/commands/  add-endpoint, record-fixture, refresh-upstream, release-prep
 ```
 
 `src/xippios/` has **no** `__init__.py`: it is a PEP 420 namespace package shared with
@@ -430,7 +427,6 @@ template release reaches it in a pull request of its own, with
 `uvx --from 'copier>=9.19' copier update --defaults --vcs-ref=<tag>` (conventions §15): the
 update renders the template's files again and never overwrites the files this package
 fills, `__init__.py`, `_client.py`, `errors.py`, `models.py`, `api/`, `parse/`, `tasks.py`,
-`params.py`, `enums.py`, `reference/`, `scripts/refresh_reference.py`,
 `scripts/refresh_upstream.py`, `tests/test_tasks.py`, `tests/test_live.py`,
 `tests/fixtures/`, `docs/upstream/`, `docs/adr.md`, `docs/adr.json`, `README.md`,
 `CHANGELOG.md` and `CLAUDE.md`. sdk-template's
@@ -492,10 +488,9 @@ request. `meta.total` is upstream's `total` on every list task, never `len(data)
 Lookups (accounts, currencies, tax codes, fiscal periods, account and person categories,
 titles, cost centers, locations, custom fields) are tasks too, named `list_<thing>`, so
 agents can form valid calls; they serve the organisation's own data live and are never
-packaged: a multi-tenant source packages no tenant data, nor a value set
-`docs/upstream/` fixes (`PACKAGED_LISTS` is empty; `/refresh-reference-data` says how
-one would come). A lookup whose whole list an
-agent needs and the default result cap (200 rows or 64 KB) would cut gets a cap of its
+packaged: a multi-tenant source packages no tenant data, and a value set
+`docs/upstream/` fixes is a `Literal` in `models.py`, written by hand. A lookup whose
+whole list an agent needs and the default result cap (200 rows or 64 KB) would cut gets a cap of its
 own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (sdk-core ADR-0038, decision 5):
 `list_custom_fields` (500 rows or 128 KB; no filter but `type`, and a write needs a
 type's custom fields whole) and `get_report_data` (128 KB; a report is read whole, and
