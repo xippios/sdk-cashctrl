@@ -142,8 +142,8 @@ Before committing, check again from the repository root, never echoing a value::
     grep -rniE 'api[_-]?key|token|secret|authorization|password' tests/fixtures
     grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' tests/fixtures | sort -u
     grep -rhoiE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u
-    direnv exec . sh -c 'git grep -n --untracked -i -- "$CASHCTRL_DEMO_SUBDOMAIN" \
-        >/dev/null && echo LEAK || echo clean'
+    grep -rhoiE '[a-z0-9.-]+\.cashctrl\.com' tests/fixtures | sort -u
+    git diff --cached -U0 | grep -E '^\+' | grep -ohiE '[a-z0-9.-]+\.cashctrl\.com' | sort -u
     grep -rhoiE '(hash|token|secret|api[_-]?key)\\?": *\\?"[^"\\]*' tests/fixtures | sort -u
     grep -rhoiE --include='*.json' '\\?"(ssn|[a-z0-9_-]*iban)\\?" *: *[^,}]*' tests/fixtures \
         | grep -cvE ': *(null|\\?"REDACTED\\?")$'
@@ -153,14 +153,19 @@ Before committing, check again from the repository root, never echoing a value::
 The first prints nothing but ``REDACTED`` values; a match in upstream's own text (a word
 such as ``SECRETARY`` in a name or a description) is no credential: read every match by
 eye. The second prints ``user@example.com`` and nothing else, the third ``API:REDACTED``
-at most, the fourth ``clean`` and the fifth ``REDACTED`` values only. The last two count,
-without printing them, the values of ``ssn`` and of every field whose name ends in
-``iban`` that are neither ``null`` nor ``REDACTED``, in the JSON bodies and in a write's
-form body (``ssn=``, a field ending in ``iban=``, and ``iban`` inside the percent-encoded
-``bankAccounts``): both print ``0``. A real value found means the file is deleted, never
-committed. A fixture stays well under 40 KB, small enough to review: narrow the query
-(``limit=``, a filter, a query), since the recorder cuts no body; the default chart of
-accounts is too large for one fixture.
+at most, and the fourth the placeholder's host, ``demo.cashctrl.com``, alone. The fifth
+lists the hosts that the staged change adds: the placeholder's, the documentation's
+``app.cashctrl.com`` and the invented hosts of the tests pass, and one that names a real
+organisation goes from the change. Neither reads a variable of an organisation or
+compares against its value: the recorder's own check refuses a fixture that holds the
+subdomain before it writes one. The sixth prints ``REDACTED`` values only. The last two
+count, without printing them, the values of ``ssn`` and of every field whose name ends
+in ``iban`` that are neither ``null`` nor ``REDACTED``, in the JSON bodies and in a
+write's form body (``ssn=``, a field ending in ``iban=``, and ``iban`` inside the
+percent-encoded ``bankAccounts``): both print ``0``. A real value found means the file
+is deleted, never committed. A fixture stays well under 40 KB, small enough to review:
+narrow the query (``limit=``, a filter, a query), since the recorder cuts no body; the
+default chart of accounts is too large for one fixture.
 """
 
 import argparse
