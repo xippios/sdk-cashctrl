@@ -1,4 +1,4 @@
-"""Record one exchange with the demo organisation into a fixture (``/record-fixture``).
+r"""Record one exchange with the demo organisation into a fixture (``/record-fixture``).
 
 Run from the repository root with the demo pair (``CASHCTRL_DEMO_SUBDOMAIN``,
 ``CASHCTRL_DEMO_API_KEY``) in the environment::
@@ -136,6 +136,31 @@ status 1. Only the status and the scrubbed URL are printed.
 
 The write is the recorder's own, not core's ``record``: ``record`` writes as soon as
 core's verify passes, before the recorder's step and final check could run.
+
+Before committing, check again from the repository root, never echoing a value::
+
+    grep -rniE 'api[_-]?key|token|secret|authorization|password' tests/fixtures
+    grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' tests/fixtures | sort -u
+    grep -rhoiE 'API:[A-Za-z0-9]+' tests/fixtures | sort -u
+    direnv exec . sh -c 'git grep -n --untracked -i -- "$CASHCTRL_DEMO_SUBDOMAIN" \
+        >/dev/null && echo LEAK || echo clean'
+    grep -rhoiE '(hash|token|secret|api[_-]?key)\\?": *\\?"[^"\\]*' tests/fixtures | sort -u
+    grep -rhoiE --include='*.json' '\\?"(ssn|[a-z0-9_-]*iban)\\?" *: *[^,}]*' tests/fixtures \
+        | grep -cvE ': *(null|\\?"REDACTED\\?")$'
+    grep -rhoiE --include='*.json' '(ssn=|iban=|iban%22%3A)[^&"]*' tests/fixtures \
+        | grep -cvE '(=|%3A)(REDACTED|null|%22REDACTED%22[^&"]*)$'
+
+The first prints nothing but ``REDACTED`` values; a match in upstream's own text (a word
+such as ``SECRETARY`` in a name or a description) is no credential: read every match by
+eye. The second prints ``user@example.com`` and nothing else, the third ``API:REDACTED``
+at most, the fourth ``clean`` and the fifth ``REDACTED`` values only. The last two count,
+without printing them, the values of ``ssn`` and of every field whose name ends in
+``iban`` that are neither ``null`` nor ``REDACTED``, in the JSON bodies and in a write's
+form body (``ssn=``, a field ending in ``iban=``, and ``iban`` inside the percent-encoded
+``bankAccounts``): both print ``0``. A real value found means the file is deleted, never
+committed. A fixture stays well under 40 KB, small enough to review: narrow the query
+(``limit=``, a filter, a query), since the recorder cuts no body; the default chart of
+accounts is too large for one fixture.
 """
 
 import argparse
