@@ -29,7 +29,8 @@ organisation. `_client.py` is therefore a registry, not one client: `TENANTS`, c
 `Tenants` (conventions §7), declared as `CASHCTRL_ORGS` with the fields `SUBDOMAIN` and
 `API_KEY`, `param="org"`, the reserved `demo` and `check_subdomain` as the subdomain's check.
 The registry, `list_organisations` and the `--org` lock are core's (sdk-core ADR-0042,
-decision 1); the docstrings of `_client.py` and `mcp.py` say how the package wires them.
+decision 1); the docstrings of `_client.py` and `tests/test_org_lock.py` say how the
+package wires them.
 
 - `org` is the first, required parameter of every task; the MCP tools take it too unless
   the server is started with `--org`, which binds it so no tool takes it. It is the name
@@ -45,11 +46,12 @@ decision 1); the docstrings of `_client.py` and `mcp.py` say how the package wir
 - `--org <name>` binds an MCP server (read or write) to one organisation through core's
   `serve_tenants`: an undeclared name or a missing or malformed subdomain (`check_org`)
   stops it at startup (exit status 2). Core's `bind_tasks` binds `org` into every tool,
-  as `mcp.py`'s docstring says, so no tool of a bound server takes `org`, and its
-  instructions name the organisation. A call that still passes `org` is refused by core's
-  argument check before the tool runs (`tests/test_org_lock.py`). Core serves the write
-  server over `--http` on a loopback `--host` only, unless `--allow-remote` is passed. The
-  HTTP router has no lock: consumers pass `org` explicitly.
+  as the docstring of `tests/test_org_lock.py` says, so no tool of a bound server takes
+  `org`, and its instructions name the organisation. A call that still passes `org` is
+  refused by core's argument check before the tool runs (`tests/test_org_lock.py`). Core
+  serves the write server over `--http` on a loopback `--host` only, unless
+  `--allow-remote` is passed. The HTTP router has no lock: consumers pass `org`
+  explicitly.
 - The subdomain stays out of messages and logs: core's status errors name the method and
   the path, never the host, and `classify` hands core a copy of an error response whose
   body names `cashctrl.com` instead of the organisation's host, so neither the quoted
