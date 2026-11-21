@@ -153,6 +153,8 @@ tests/
   test_refresh_upstream.py  the capture script keeps and lists OBSERVED.md, offline
   test_observed.py  OBSERVED.md's notes and probes
   test_claude_md.py  this file stays under 37,000 characters
+  test_built_answers.py  every answer a test builds names its kind of conventions §10
+  replay_census.py  the replays that answer another request, read by test_built_answers.py
   test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
 docs/
   upstream/        documentation snapshot, FETCHED.md, OBSERVED.md

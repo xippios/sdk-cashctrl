@@ -4,6 +4,127 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/) (pre-1.0: breaking changes bump the minor).
 
+## [0.5.0] - 2026-11-21
+
+### Added
+
+- `xippios.cashctrl.mcp.ENV_VARS` and `xippios.cashctrl.mcp_write.ENV_VARS` name the
+  variables the package reads, as core's `EnvVar` entries: `CASHCTRL_ORGS`, then each
+  organisation's `CASHCTRL_<NAME>_API_KEY` and `CASHCTRL_<NAME>_SUBDOMAIN`, both secret. A
+  host reads them to configure the package without its documentation.
+  (https://github.com/xippios/sdk-core/issues/245,
+  https://github.com/xippios/sdk-template/issues/81)
+
+### Changed
+
+- Every answer the tests build or change in memory says where it comes from and which kind
+  of sdk-core's conventions §10 it is, or that it is an input of the test and no answer from
+  CashCtrl, and `tests/test_built_answers.py` fails a test that builds one without saying
+  so. Nothing changes for a caller.
+  (https://github.com/xippios/sdk-cashctrl/issues/124)
+- Two errors that the client words from CashCtrl's answers name the request by its method
+  and path, as xippios-core's `request_description` gives it and sdk-core's conventions §5
+  ask: a refusal sent as HTTP 200, `RequestRejected`, after the fields or upstream's
+  message, and the `ValidationError` of a file task whose answer is JSON but no refusal. A
+  refused journal entry reads `CashCtrl rejected the request: debitId: This field cannot be empty. (POST /api/v1/journal/create.json)`,
+  where it read `CashCtrl rejected the request: debitId: This field cannot be empty.`, in the
+  exception's message, in a tool's answer after `error: RequestRejected:` and in a route's
+  problem `detail`, and an export's stray JSON reads `CashCtrl: the answer is JSON that is neither a file nor a refusal; nothing was written (GET /api/v1/account/list.pdf)`,
+  where it read `cashctrl: account/list.pdf answered JSON that is neither a file nor a refusal; nothing was written`.
+  The classes, their bases, their statuses and every attribute stay, and a
+  `RequestRejected` built without the new keyword `request` names no request, as before.
+  (https://github.com/xippios/sdk-cashctrl/issues/117)
+- `CLAUDE.md` keeps every rule it held in fewer than 37,000 characters, below the 40,000 at
+  which Claude Code cuts it, and a test holds it under that bound. The recipe for a write
+  tool moves into `docs/write-tools.md`, which the README's documents list, and the
+  package's tests and documents cite each decision by the public pull request whose text
+  holds it. No tool or result changes.
+  (https://github.com/xippios/sdk-cashctrl/issues/65)
+- What CashCtrl was seen doing beside its documentation moved from `CLAUDE.md`,
+  `README.md`, `docs/demo-org.md` and the docstrings into `docs/upstream/OBSERVED.md`,
+  each note ending with its probe: its date, its operation and its recording or request.
+  `docs/upstream/FETCHED.md` lists the file in a row of its own. The descriptions of the
+  MCP tools `cashctrl_get_fiscal_period`, `cashctrl_list_history`,
+  `cashctrl_create_journal_entry` and `cashctrl_create_order_payment` keep what they say of
+  upstream without the probe's date or the word observed, and the 404 of an unknown id on a
+  report download or an order's document now rests on recorded answers.
+  (https://github.com/xippios/sdk-cashctrl/issues/70)
+- The two errors that `classify` words itself name the request by its method and path, as
+  xippios-core's `request_description` gives it, where they named the path alone, as
+  sdk-core's conventions §5 and its ADR-0030, decision 4, ask. An unknown id on a read
+  reads `CashCtrl: This account does not exist. (GET /api/v1/account/read.json)`, where it
+  read `CashCtrl: This account does not exist. (/account/read.json)`, and the 404 of an
+  unknown id on a file path reads `CashCtrl: no record has an id asked, HTTP 404
+  (GET /api/v1/report/element/download.pdf)`, where it read `CashCtrl: no record has an id
+  asked, HTTP 404 (/report/element/download.pdf)`. The class, the status and every
+  attribute stay. (https://github.com/xippios/sdk-cashctrl/issues/107)
+- The refusal of a payroll or people report by `get_report_data`, `download_report`,
+  `download_report_collection` and `download_annual_report` ends
+  `(personal data, sdk-core ADR-0017)`, where it ended `(personal data, ADR-0017)`. The
+  record it names is sdk-core's, since the package keeps none of its own, and no other
+  refusal of the package cites a record.
+  (https://github.com/xippios/sdk-cashctrl/pull/113)
+- A server bound with `--org` gives instructions of its own, without the clause that every
+  tool takes `org`, before the sentence that names the organisation, where it gave the
+  unbound server's instructions and then that sentence. Its tools, which take no `org`,
+  are unchanged. (https://github.com/xippios/sdk-template/issues/219,
+  https://github.com/xippios/sdk-cashctrl/issues/112)
+- Each entry point names itself in its usage line and in an error of its command line,
+  `xippios-cashctrl-mcp-read: error: ...`, where both named their servers,
+  `xippios-cashctrl` and `xippios-cashctrl-write`. The help of `--allow-remote` says on the
+  read server that it changes nothing, since that server is not held to loopback, and on
+  the write server that it serves this write server beyond loopback.
+  (https://github.com/xippios/sdk-core/issues/167)
+- A tool's error answer sets `isError` on its result beside the text
+  `error: <ErrorClass>: <message>`, for an error the task raises, an argument the tool's
+  schema refuses and one it does not declare, where it came back as a result like any
+  other. A client tells an error from data without reading the text.
+  (https://github.com/xippios/sdk-core/issues/168)
+- `cashctrl_get_report_data` over its cap of 128 KB answers the report with its top-level
+  rows cut, `total` and `properties` whole, and the note naming the period parameters,
+  where it answered the note and a preview of the text alone.
+  (https://github.com/xippios/sdk-core/issues/131,
+  https://github.com/xippios/sdk-cashctrl/issues/61)
+- A route answers an argument its schema refuses, a `dir` outside `ASC` and `DESC` or a
+  missing `id` say, as problem details before the task runs: status 422, title
+  `InvalidRequestError` and a detail that starts with the argument's name, where FastAPI's
+  own 422 answered a `detail` list that echoed the input.
+  (https://github.com/xippios/sdk-core/issues/66,
+  https://github.com/xippios/sdk-cashctrl/issues/61)
+- A write task's refusal that names another task names its MCP tool beside it, e.g.
+  `create a new person with create_person (over MCP, the tool cashctrl_create_person)
+  first`, for `list_order_categories`, `create_person`, `update_order` and
+  `list_accounts`. (https://github.com/xippios/sdk-core/issues/111,
+  https://github.com/xippios/sdk-cashctrl/issues/61)
+
+### Breaking
+
+- `xippios.cashctrl.mcp.build()` and `xippios.cashctrl.mcp_write.build()` return core's
+  `ToolSet`, the tools a host serves as the entry point does, and take core's
+  `TenantLock`, where they returned the server and took the package's own lock. A caller
+  that built a server from `build()` passes the tool set to
+  `xippios.core.mcp.build_server`, and `mcp.server` and `mcp_write.server` are the servers
+  as before. (https://github.com/xippios/sdk-core/issues/245,
+  https://github.com/xippios/sdk-core/issues/166)
+- `xippios.cashctrl.params` and `xippios.cashctrl.enums` are gone: they held no list,
+  `PACKAGED_LISTS` empty and no enumeration, since the package packages none, and no
+  task, tool or route used them. A caller that imported either drops the import, and a
+  value set upstream documents is a `Literal` type in `xippios.cashctrl.models`.
+  (https://github.com/xippios/sdk-cashctrl/issues/111)
+- A tool of either server refuses an argument that it does not declare, before it runs,
+  and its error names the arguments the tool takes, where the argument was dropped and the
+  tool ran without it. So a server bound with `--org` refuses a call that still names
+  `org`, where it ran the tool for the bound organisation, and a client leaves out what
+  the tool's schema does not list. (https://github.com/xippios/sdk-core/issues/84,
+  https://github.com/xippios/sdk-cashctrl/issues/61)
+- Adopts sdk-template v0.4.0, from v0.3.4, with `core_version=0.4.0`, `live_secrets=[CASHCTRL_DEMO_SUBDOMAIN]`, `api_key_location=basic`.
+  The package depends on `xippios-core~=0.4.0`, whose tenant kit replaces the package's
+  copies, and follows conventions 1.28. The answers `write_server=true`, `tenant_param=org`
+  and `has_reference_data=false` render its two servers, their `--org` binding and the
+  live run's key, and no reference scaffold.
+  (https://github.com/xippios/sdk-template/releases/tag/v0.4.0, https://github.com/xippios/sdk-cashctrl/issues/112,
+  https://github.com/xippios/sdk-cashctrl/issues/105)
+
 ## [0.4.0] - 2026-11-18
 
 ### Added
