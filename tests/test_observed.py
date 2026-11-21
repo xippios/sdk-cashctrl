@@ -5,9 +5,9 @@ script neither writes nor checks and ``FETCHED.md`` lists in a row of its own, a
 each note its evidence: the probe that showed it, its date, its operation and its sample, a
 recording under ``tests/fixtures/``, or its request where the probe kept no answer. A note
 here is a ``###`` section, and its last paragraph, ``Probe:``, names them. The package's
-own text, ``CLAUDE.md``, ``README.md``, ``docs/demo-org.md``, ``docs/write-tools.md`` and
-every module under ``src/xippios/cashctrl/``, keeps what its reader needs and no probe: the
-probes stand in ``OBSERVED.md`` alone.
+own text, ``CLAUDE.md``, ``README.md``, ``docs/demo-org.md``, ``docs/write-tools.md``,
+every module under ``src/xippios/cashctrl/`` and the live tests, keeps what its reader
+needs and no probe: the probes stand in ``OBSERVED.md`` alone.
 """
 
 import json
@@ -46,6 +46,9 @@ RULES = [
 """The package's documents, which point to ``OBSERVED.md`` and keep no probe."""
 SCRIPTS = [ROOT / "scripts" / "record_fixture.py"]
 """The scripts whose text states what upstream does, which keep no probe either."""
+TESTS = [ROOT / "tests" / "test_live.py"]
+"""The tests whose docstrings and comments say what upstream answers live, which keep no
+probe either: a live run's finding goes to ``OBSERVED.md`` with its probe."""
 WRAPPED = re.compile(r'\A"""``(GET|POST) /api/v1/([^`\s]+)``')
 """A wrapper module's first line: the operation it wraps."""
 
@@ -131,7 +134,7 @@ def test_the_package_keeps_no_probe() -> None:
     sources = sorted((ROOT / "src" / "xippios" / "cashctrl").rglob("*.py"))
     found = {
         str(path.relative_to(ROOT)): [match[0] for match in PROBE.finditer(" ".join(text.split()))]
-        for path in [*RULES, *SCRIPTS, *sources]
+        for path in [*RULES, *SCRIPTS, *TESTS, *sources]
         if (text := path.read_text(encoding="utf-8"))
     }
     assert {path: probes for path, probes in found.items() if probes} == {}
