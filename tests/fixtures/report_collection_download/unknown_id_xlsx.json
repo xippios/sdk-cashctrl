@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-11-21T03:55:57.842369Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://demo.cashctrl.com/api/v1/report/collection/download.xlsx?collectionId=999999999"
+  },
+  "response": {
+    "body": "CashCtrl - 404 Not Found",
+    "body_base64": false,
+    "headers": [
+      [
+        "cache-control",
+        "must-revalidate"
+      ],
+      [
+        "content-type",
+        "text/plain;charset=utf-8"
+      ],
+      [
+        "date",
+        "Sat, 21 Nov 2026 03:55:57 GMT"
+      ],
+      [
+        "etag",
+        "\"1794633337004\""
+      ],
+      [
+        "via",
+        "1.1 Caddy"
+      ],
+      [
+        "x-cashctrl-requests-left",
+        "299"
+      ]
+    ],
+    "status": 404
+  }
+}
