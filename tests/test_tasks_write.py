@@ -597,7 +597,7 @@ def test_a_preview_refuses_an_entry_an_order_booked(
     path: str,
     call: Callable[[], Any],
 ) -> None:
-    """The recorded read of an entry an order booked (2026-10-26), unchanged: refused.
+    """The recorded read of an entry an order booked, ``journal_read/order_booked``: refused.
 
     ``orderId`` is set, ``attachmentCount`` is ``null``; without ``confirm`` the delete's
     and the update's read refuses it, and nothing is written.
@@ -1566,7 +1566,7 @@ def test_create_order_payment_with_confirm_replays_the_recorded_payment(
 def test_a_refused_payment_names_the_date_and_the_bank_accounts(
     replay_fixture: ReplayFixture, fixtures_dir: Path
 ) -> None:
-    """``PAIN`` for the order 26 on 2026-10-29: refused, the fields and messages named."""
+    """``PAIN`` for the order 26: refused, its fields and messages named (``OBSERVED.md``)."""
     preview = preview_of(tasks_write.create_order_payment(DEMO, PAY_DAY, [PAID], type="PAIN"))
     recorded = recorded_body(fixtures_dir, "order_payment_create", "pain")
     assert list(preview.payload.items()) == recorded
@@ -2031,7 +2031,7 @@ def test_an_orders_delete_takes_its_manual_entries(
     """The check of https://github.com/xippios/sdk-cashctrl/issues/44, made once, live.
 
     The entry 150, booked by the create tool on the marked order 70, read after the
-    order's delete on 2026-11-17: upstream answers that it does not exist.
+    order's delete: upstream answers that it does not exist (``docs/upstream/OBSERVED.md``).
     """
     replay_fixture("order_bookentry_read", "order_deleted")
     write = respx_mock.post(url__regex=rf"{re.escape(BASE)}/order/bookentry/.*")

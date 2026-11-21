@@ -34,13 +34,15 @@ ENDPOINT_BLOCK = re.compile(
 PROBE = re.compile(
     r"\b(?:observed|observation|verified|verification|seen|probed|compared|answered|refused"
     r"|recorded since)\b(?:(?!\.\s).){0,60}?\b20\d\d-\d\d-\d\d\b"
-    r"|\b20\d\d-\d\d-\d\d\b(?:(?!\.\s).){0,25}?\b(?:observed|seen)\b"
+    r"|(?<![`\"'])\b20\d\d-\d\d-\d\d\b(?![`\"'])(?:(?!\.\s).){0,25}?"
+    r"\b(?:observed|seen|answered|answers|refused|refuses|rejected|rejects|returned|returns)\b"
     r"|\bobserved in [A-Z][a-z]+ 20\d\d\b"
     r"|\((?:observed|verified)\b",
     re.IGNORECASE,
 )
-"""A probe in prose: what upstream did, was seen, compared, answered or refused, with its date,
-or a citation ``(observed``. A fixture's provenance, recorded on a date, is none."""
+"""A probe in prose: what upstream did, was seen, compared, answered or refused, with its date
+before or after the verb, or a citation ``(observed``. A fixture's provenance, recorded on a
+date, is none, nor a date in quotes or a code span, a value sent or compared."""
 RULES = [
     ROOT / "CLAUDE.md",
     ROOT / "README.md",
