@@ -39,6 +39,10 @@ PROBE = re.compile(
 """A probe in prose: observed, verified or seen with its date, or a citation ``(observed``."""
 RULES = [ROOT / "CLAUDE.md", ROOT / "README.md", ROOT / "docs" / "demo-org.md"]
 """The package's documents, which point to ``OBSERVED.md`` and keep no probe."""
+SCRIPTS = [ROOT / "scripts" / "record_fixture.py"]
+"""The scripts whose text states what upstream does, which keep no probe either."""
+WRAPPED = re.compile(r'\A"""``(GET|POST) /api/v1/([^`\s]+)``')
+"""A wrapper module's first line: the operation it wraps."""
 
 
 def text() -> str:
@@ -122,7 +126,32 @@ def test_the_package_keeps_no_probe() -> None:
     sources = sorted((ROOT / "src" / "xippios" / "cashctrl").rglob("*.py"))
     found = {
         str(path.relative_to(ROOT)): [match[0] for match in PROBE.finditer(" ".join(text.split()))]
-        for path in [*RULES, *sources]
+        for path in [*RULES, *SCRIPTS, *sources]
         if (text := path.read_text(encoding="utf-8"))
     }
     assert {path: probes for path, probes in found.items() if probes} == {}
+
+
+def test_every_wrapper_that_points_to_the_notes_has_its_note() -> None:
+    """A wrapper whose docstring points to ``OBSERVED.md`` wraps an operation a probe names.
+
+    So a pointer to a note that does not exist fails, and so does a wrapper that states
+    its answer's shape without the pointer.
+    """
+    probed = {
+        (method, path)
+        for paragraphs in notes().values()
+        for method, path in OPERATION.findall(paragraphs[-1])
+    }
+    missing, unpointed = [], []
+    for module in sorted((ROOT / "src" / "xippios" / "cashctrl" / "api").glob("*.py")):
+        source = module.read_text(encoding="utf-8")
+        wrapped = WRAPPED.match(source)
+        if wrapped is None:
+            continue
+        points = "docs/upstream/OBSERVED.md" in source
+        if points and (wrapped[1], wrapped[2]) not in probed:
+            missing.append(module.name)
+        if not points and re.search(r"\bIts answer\b|\{\"total\": \d", source):
+            unpointed.append(module.name)
+    assert (missing, unpointed) == ([], [])
