@@ -217,9 +217,11 @@ tests, and the docstring of `tasks_write.py` holds the decisions taken for them.
    preview computes. In `tests/test_tasks_write.py` the preview sends no request and its
    `payload` equals the recorded request body. In `tests/test_live.py` one test per
    resource calls each write tool once with `confirm=True`, every record marked
-   `xippios-live`; it first sweeps leftovers, deletes what it created by id with the
-   delete tool, and a `finally` deletes it through the wrapper if an assertion failed
-   first.
+   `xippios-live` (title, company or description, and `nr` where it has one, so no
+   sequence number advances), dated 2026-10-24; it first sweeps leftovers (list with
+   `query=xippios-live`, delete each whose marked field holds the marker), deletes what it
+   created by id with the delete tool, and a `finally` deletes it through the wrapper if
+   an assertion failed first.
 7. **Statuses and payments**: `update_order_status` and `create_order_payment` send the
    fields given, nothing read: a preview sends no request. A payment books nothing and has
    no documented delete: the live test deletes the paid order and leaves the payment, an
