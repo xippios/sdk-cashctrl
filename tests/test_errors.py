@@ -207,30 +207,52 @@ def test_a_404_means_the_endpoint_does_not_exist() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "path", ["/order/document/read.pdf?ids=999999", "/order/document/read.pdf?ids=3%2C5&lang=de"]
-)
-def test_a_404_on_a_read_pdf_by_ids_is_not_found(path: str) -> None:
-    """Observed on 2026-10-29: an unknown order's PDF is a 404; upstream signals absence."""
-    error = classify(response(path, 404, b"<title>CashCtrl - 404 Not Found</title>", {}))
+FILE_404S = {
+    "/order/document/read.pdf": ("order_document_read", "unknown_id_pdf"),
+    "/report/element/download.pdf": ("report_element_download", "unknown_id_pdf"),
+    "/report/element/download.xlsx": ("report_element_download", "unknown_id_xlsx"),
+    "/report/collection/download.pdf": ("report_collection_download", "unknown_id_pdf"),
+    "/report/collection/download.xlsx": ("report_collection_download", "unknown_id_xlsx"),
+}
+"""The file paths whose 404 for an id no record has is recorded, by path: the fixture."""
+
+
+def recorded_at(fixtures_dir: Path, path: str) -> httpx.Response:
+    """The recorded 404 of the operation of ``path``, served for the request ``path`` names.
+
+    A recorded answer served at another URL of the same operation, for a state upstream
+    answers alike there (conventions §10): an id no record has, with other parameters.
+    """
+    answer = recorded(fixtures_dir, *FILE_404S[path.split("?", 1)[0]])
+    return response(path, answer.status_code, answer.content, dict(answer.headers))
+
+
+@pytest.mark.parametrize("path", sorted(FILE_404S))
+def test_the_recorded_404_of_an_unknown_id_is_not_found(fixtures_dir: Path, path: str) -> None:
+    """Each file path answered an id no record has with HTTP 404 (docs/upstream/OBSERVED.md)."""
+    answer = recorded(fixtures_dir, *FILE_404S[path])
+    assert answer.status_code == 404
+    error = classify(answer)
     assert isinstance(error, NotFoundError)
-    assert str(error) == (
-        "CashCtrl: no record has an id asked, HTTP 404 (/order/document/read.pdf)"
-    ), "the path, never the query or the host"
+    assert str(error) == (f"CashCtrl: no record has an id asked, HTTP 404 ({path})"), (
+        "the path, never the query or the host"
+    )
 
 
 @pytest.mark.parametrize(
     "path",
     [
+        "/order/document/read.pdf?ids=999999",
+        "/order/document/read.pdf?ids=3%2C5&lang=de",
         "/report/element/download.pdf?elementId=999999&fiscalPeriod=2",
         "/report/element/download.xlsx?elementId=999999&startDate=2025-01-01&language=de",
         "/report/collection/download.pdf?collectionId=999999",
         "/report/collection/download.xlsx?collectionId=999999&fiscalPeriod=2",
     ],
 )
-def test_a_404_on_a_report_download_by_its_id_is_not_found(path: str) -> None:
-    """Observed on 2026-11-17 for an element's PDF and a collection's Excel file."""
-    error = classify(response(path, 404, b"CashCtrl - 404 Not Found", {}))
+def test_a_404_by_the_id_with_other_parameters_is_not_found(fixtures_dir: Path, path: str) -> None:
+    """The recorded 404 served for a request by the id with more parameters, or other ids."""
+    error = classify(recorded_at(fixtures_dir, path))
     assert isinstance(error, NotFoundError)
     assert str(error) == (
         f"CashCtrl: no record has an id asked, HTTP 404 ({path.split('?', 1)[0]})"

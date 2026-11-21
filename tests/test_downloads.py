@@ -30,7 +30,13 @@ from xippios.core import (
     UpstreamError,
     ValidationError,
 )
-from xippios.core.testing import fixture_path, load_fixture, sent_query, sent_urls
+from xippios.core.testing import (
+    ReplayFixture,
+    fixture_path,
+    load_fixture,
+    sent_query,
+    sent_urls,
+)
 
 from xippios.cashctrl import api, tasks
 from xippios.cashctrl._client import DEMO, SOURCE
@@ -476,16 +482,15 @@ def test_an_unknown_order_is_not_found_and_nothing_is_written(
 
 
 def test_an_unknown_orders_404_is_not_found_and_dest_stays(
-    respx_mock: respx.MockRouter, tmp_path: Path
+    replay_fixture: ReplayFixture, tmp_path: Path
 ) -> None:
-    """Observed on 2026-10-29: upstream answers an id no order has with HTTP 404."""
-    respx_mock.get(f"{BASE}/order/document/read.pdf").respond(
-        404, text="<title>CashCtrl - 404 Not Found</title>"
-    )
+    """The recorded 404 of an id no order has (docs/upstream/OBSERVED.md), replayed."""
+    route = replay_fixture("order_document_read", "unknown_id_pdf", match_params=["ids"])
     dest = tmp_path / "invoice.pdf"
     dest.write_bytes(b"the caller's earlier file")
     with pytest.raises(NotFoundError) as info:
-        tasks.download_order_document(DEMO, [999999], dest)
+        tasks.download_order_document(DEMO, [999999999], dest)
+    assert route.call_count == 1
     assert str(info.value).endswith("(/order/document/read.pdf)")
     assert dest.read_bytes() == b"the caller's earlier file"
     assert files(tmp_path) == ["invoice.pdf"]
@@ -865,26 +870,39 @@ def test_the_annual_report_is_refused_when_no_collection_is_marked_system(
 
 
 @pytest.mark.parametrize(
-    ("task", "endpoint"),
+    ("task", "endpoint", "fmt"),
     [
-        ("download_report", "report/element/download.pdf"),
-        ("download_report_collection", "report/collection/download.pdf"),
+        ("download_report", "report/element/download.pdf", "pdf"),
+        ("download_report", "report/element/download.xlsx", "xlsx"),
+        ("download_report_collection", "report/collection/download.pdf", "pdf"),
+        ("download_report_collection", "report/collection/download.xlsx", "xlsx"),
     ],
 )
 def test_a_report_the_tree_does_not_list_is_not_found_and_dest_stays(
-    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path, task: str, endpoint: str
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+    replay_fixture: ReplayFixture,
+    tmp_path: Path,
+    task: str,
+    endpoint: str,
+    fmt: ReportFormat,
 ) -> None:
-    """Asked of upstream as given, as by ``get_report_data``: a 404 (observed 2026-11-17)."""
+    """Asked of upstream as given, as by ``get_report_data``: the recorded 404, replayed.
+
+    Recorded for the id alone and served here for the id with a fiscal period, a request
+    of the same operation that upstream answers alike (conventions §10).
+    """
     tree = mount_tree(respx_mock, fixtures_dir)
-    route = respx_mock.get(f"{BASE}/{endpoint}").respond(404, text="CashCtrl - 404 Not Found")
-    dest = tmp_path / "missing.pdf"
+    directory = endpoint.rsplit(".", 1)[0].replace("/", "_")
+    route = replay_fixture(directory, f"unknown_id_{fmt}")
+    dest = tmp_path / f"missing.{fmt}"
     dest.write_bytes(b"the caller's earlier file")
     with pytest.raises(NotFoundError) as info:
-        getattr(tasks, task)(DEMO, 999999, "pdf", dest, fiscal_period=FP2025)
+        getattr(tasks, task)(DEMO, 999999999, fmt, dest, fiscal_period=FP2025)
     assert str(info.value) == f"CashCtrl: no record has an id asked, HTTP 404 (/{endpoint})"
     assert (tree.call_count, route.call_count) == (1, 1)
     assert dest.read_bytes() == b"the caller's earlier file"
-    assert files(tmp_path) == ["missing.pdf"]
+    assert files(tmp_path) == [f"missing.{fmt}"]
 
 
 def test_a_report_files_refusal_sent_as_http_200_is_raised_and_removed(
