@@ -539,7 +539,7 @@ its docstring holds the recorder's use and policies in full: one request through
 client that never retries, core's `Scrub` (conventions §10) and its own `TenantScrub`
 (sdk-core ADR-0042, decision 4), the final check before the one write, and the delete it
 asks for after a write. The demo-only rule above names what it scrubs and refuses.
-On `FILE_PATHS` it writes an error status or a refusal, `success` false, alone. Before committing, run the grep block at the end of that docstring; its last two greps
+On `FILE_PATHS` it writes a 4xx or 5xx with a text body or a 2xx refusal alone. Before committing, run the grep block at the end of that docstring; its last two greps
 print `0`. Fixtures are never typed in by hand.
 
 ### Never

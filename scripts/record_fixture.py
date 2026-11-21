@@ -75,10 +75,11 @@ never shows a value, and exits with status 1:
   whose 404 for an id no record has ``_client.classify`` maps: ``order/document/read.pdf``
   and the PDF and Excel files of a report element and of a report collection, as the
   maintainer decided on 2026-11-21, so that the mapping rests on recorded answers. Their
-  answer is written only when it is no file: an error status, or at HTTP 2xx CashCtrl's
-  refusal, a JSON object with ``success`` false. Any other answer of HTTP 2xx, whatever
-  its content type says, is refused after its one request and nothing is written
-  (``is_no_refusal``), so the recorder never keeps a file. Give such a path an id no
+  answer is written only when it is no file: an error of HTTP 4xx or 5xx whose body is
+  text, or at HTTP 2xx CashCtrl's refusal, a JSON object with ``success`` false. Any other
+  answer, a 1xx or 3xx, any other 2xx and any answer whose body is binary, whatever its
+  content type says, is refused after its one request and nothing is written
+  (``kept_at_a_file_path``), so the recorder never keeps a file. Give such a path an id no
   record has, ``elementId=999999999``; its fixture lands in its wrapper's directory, the
   extension the last word: ``tests/fixtures/report_element_download_pdf/unknown_id.json``.
 - No e-mail addresses. Every e-mail-shaped string in the request URL, the request
@@ -253,8 +254,8 @@ FILE_PATHS = frozenset(
 
 The downloads whose 404 for an id no record has ``_client.classify`` maps to
 ``NotFoundError``, admitted by the maintainer's decision of 2026-11-21 so that the mapping
-rests on recorded answers; an answer of HTTP 2xx is written only when it is CashCtrl's
-refusal (``is_no_refusal``).
+rests on recorded answers; only an error of HTTP 4xx or 5xx with a text body or CashCtrl's
+refusal at HTTP 2xx is written (``kept_at_a_file_path``).
 """
 MARK = "xippios-live"
 """The marker a recorded create must carry in one of its values (title, company, ...)."""
@@ -502,20 +503,22 @@ async def exchange_async(
 exchange = sync(exchange_async)
 
 
-def is_no_refusal(response: httpx.Response) -> bool:
-    """Whether a file path's answer must not be written: HTTP 2xx, and no refusal.
+def kept_at_a_file_path(response: httpx.Response) -> bool:
+    """Whether a file path's answer is written: a text error, or CashCtrl's refusal.
 
-    A refusal is CashCtrl's, a JSON object with ``success`` false, whatever the content
-    type says. A file path's answer is recorded only when it is an error status or such a
-    refusal, never the file an id fetched, nor another answer of HTTP 2xx.
+    An error of HTTP 4xx or 5xx whose body is UTF-8 text, whatever its content type says,
+    or at HTTP 2xx a JSON object with ``success`` false. Never a 1xx or 3xx, another 2xx,
+    or an answer whose body is binary: the file an id fetched is never recorded.
     """
+    if 400 <= response.status_code < 600:
+        return _is_text(response.content)
     if not response.is_success:
         return False
     try:
         answer = json.loads(response.content)
     except ValueError:
-        return True
-    return not (isinstance(answer, dict) and answer.get("success") is False)
+        return False
+    return isinstance(answer, dict) and answer.get("success") is False
 
 
 def order_ids(text: str) -> list[int] | None:
@@ -1186,12 +1189,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     response = exchange(client, method, f"/{args.endpoint}", args.params)
     if method == "POST":
         print(changed_reminder(args.endpoint, response))  # noqa: T201
-    if args.endpoint in FILE_PATHS and is_no_refusal(response):
+    if args.endpoint in FILE_PATHS and not kept_at_a_file_path(response):
         content_type = response.headers.get("content-type") or "no content type"
         print(  # noqa: T201
             f"not written {path.relative_to(ROOT)}: {args.endpoint} answered HTTP "
-            f"{response.status_code} ({content_type}) with no refusal; a file path is recorded "
-            "only for an error status or CashCtrl's refusal, success false, never a file"
+            f"{response.status_code} ({content_type}), which a file path does not record: "
+            "only an error of HTTP 4xx or 5xx with a text body, or CashCtrl's refusal at "
+            "HTTP 2xx, success false, never a file"
         )
         return 1
     try:
