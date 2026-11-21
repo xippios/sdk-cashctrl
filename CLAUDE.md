@@ -449,7 +449,9 @@ Besides the list under Never above:
 - Never hand-write a fixture, and never commit one without grepping for key patterns
   and for values under `ssn` and every name ending in `iban`.
 - Never record a fixture, run a live test or make a live call against any organisation
-  but `demo`; never set `CASHCTRL_ORGS` with real names in a shell or a test.
+  but `demo`; never set `CASHCTRL_ORGS` with real names anywhere an agent or a test of
+  this repository runs: a shell, an environment file, an MCP client's configuration or a
+  test.
 - Never print, log or commit `CASHCTRL_DEMO_SUBDOMAIN` or any organisation's subdomain.
 - Never add a task, tool or helper that spans organisations.
 - Never point fixtures, live tests or the seeder at an organisation with real data: the
