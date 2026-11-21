@@ -142,6 +142,12 @@ def test_the_documents_point_to_the_notes() -> None:
         ("the tree lacks ``full_name`` (compared on 2026-10-27)", True),
         ("Two organisations answered on 2026-10-23", True),
         ("HTTP 404 (observed 2026-11-17)", True),
+        ("``PAIN`` for the order 26 on 2026-10-29: refused, the fields named", True),
+        ("read after the order's delete on 2026-11-17: upstream answers that it is gone", True),
+        (
+            "Recorded on 2026-10-26: an entry an order booked sends ``attachmentCount`` ``null``",
+            False,
+        ),
         (
             "the seeded orders booked two (``journal_list/order_booked``, recorded on 2026-10-26)",
             False,
@@ -150,7 +156,8 @@ def test_the_documents_point_to_the_notes() -> None:
     ],
 )
 def test_a_probe_in_prose_is_told_from_a_date(text: str, probe: bool) -> None:
-    """The wordings a dated note took, and two a date may stand in: a fixture's and an input."""
+    """The wordings a dated note took, its date before or after the verb, and three a date may
+    stand in: a fixture's provenance, twice, and an input."""
     assert bool(PROBE.search(text)) is probe
 
 
