@@ -37,7 +37,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl
 
-import httpx
 import pytest
 import respx
 from xippios.core import InvalidRequestError, NotFoundError, Result
@@ -116,7 +115,8 @@ def preview_of(result: Result[Any]) -> WritePreview[Any]:
 
 
 def serve_read(respx_mock: respx.MockRouter, path: str, body: dict[str, Any]) -> respx.Route:
-    """Answer ``GET <path>`` with ``body``: a recorded read changed in memory."""
+    """Answer ``GET <path>`` with ``body``, a recorded read changed in memory (conventions
+    §10, kind 4)."""
     return respx_mock.get(f"{BASE}/{path}").respond(200, json=body)
 
 
@@ -799,7 +799,8 @@ def test_clearing_a_flag_sends_false(
     """Clearing a yes/no value means ``false``: the payload sends it, ``changes`` shows it.
 
     The recorded person is a customer (``isCustomer`` true) and not inactive; the
-    confirmed call is answered by a mocked success, not a fixture, to show the form sent.
+    confirmed call is answered by the recorded ``person_update/ok``, served for another
+    form in a test that asserts only what was sent (conventions §10, kind 3).
     """
     replay_fixture("person_read", "for_update")
     preview = preview_of(
@@ -808,9 +809,7 @@ def test_clearing_a_flag_sends_false(
     assert (preview.payload["isCustomer"], preview.payload["isInactive"]) == ("false", "false")
     assert preview.changes == {"isCustomer": "false", "isInactive": "false"}
     assert preview.payload["isVendor"] == "false", "a flag not cleared is carried over"
-    write = respx_mock.post(f"{BASE}/person/update.json").respond(
-        200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
-    )
+    write = replay_fixture("person_update", "ok")
     tasks_write.update_person(DEMO, PERSON, clear=["is_customer"], confirm=True)
     assert sent_bodies(write)[-1]["isCustomer"] == "false"
     assert sent_bodies(write)[-1] == dict(
@@ -934,13 +933,14 @@ IBAN = "CH00 TEST 0000 0000 0000 0"
 """A made-up IBAN: tests only, never sent anywhere."""
 
 
-def test_create_person_never_echoes_ssn_or_iban(respx_mock: respx.MockRouter) -> None:
+def test_create_person_never_echoes_ssn_or_iban(replay_fixture: ReplayFixture) -> None:
     """The values go upstream, but neither the preview nor ``meta.request`` shows them.
 
     The personal identifiers stay out of every result (sdk-core ADR-0017).
 
-    The confirmed call is answered by a mocked success, not a fixture, to show what was
-    sent: a fixture never carries the values.
+    The confirmed call is answered by the recorded ``person_create/ok``, served for a form
+    with the values a fixture never carries, in a test that asserts only what was sent
+    (conventions §10, kind 3).
     """
     arguments: dict[str, Any] = {
         "company": "xippios-live Fixture GmbH",
@@ -952,9 +952,7 @@ def test_create_person_never_echoes_ssn_or_iban(respx_mock: respx.MockRouter) ->
     assert json.loads(preview.payload["bankAccounts"]) == [
         {"iban": "REDACTED", "type": "SALARY", "bic": "TESTCHZZ"}
     ]
-    write = respx_mock.post(f"{BASE}/person/create.json").respond(
-        200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
-    )
+    write = replay_fixture("person_create", "ok")
     result = tasks_write.create_person(DEMO, **arguments, confirm=True)
     sent = sent_bodies(write)[-1]
     assert sent["ssn"] == SSN, "upstream receives the value"
@@ -967,12 +965,14 @@ def test_create_person_never_echoes_ssn_or_iban(respx_mock: respx.MockRouter) ->
 
 
 def test_update_person_shows_no_stored_or_given_ssn(
-    respx_mock: respx.MockRouter, fixtures_dir: Path
+    respx_mock: respx.MockRouter, replay_fixture: ReplayFixture, fixtures_dir: Path
 ) -> None:
     """The recorded read with an ``ssn``, changed in memory: the update sends it back.
 
     The preview's ``payload`` and ``changes`` show ``REDACTED`` and its ``before`` has no
-    ``ssn``; a cleared ``ssn`` shows as empty, which reveals nothing.
+    ``ssn``; a cleared ``ssn`` shows as empty, which reveals nothing. The confirmed call is
+    answered by the recorded ``person_update/ok``, served for another form in a test that
+    asserts only what was sent (conventions §10, kind 3).
     """
     body = recorded_read(fixtures_dir, "person_read", "for_update")
     body["data"]["ssn"] = SSN
@@ -987,9 +987,7 @@ def test_update_person_shows_no_stored_or_given_ssn(
     cleared = preview_of(tasks_write.update_person(DEMO, PERSON, clear=["ssn"]))
     assert cleared.changes == {"ssn": ""}
     assert "ssn" not in cleared.payload
-    write = respx_mock.post(f"{BASE}/person/update.json").respond(
-        200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
-    )
+    write = replay_fixture("person_update", "ok")
     result = tasks_write.update_person(DEMO, PERSON, department="x", confirm=True)
     assert sent_bodies(write)[-1]["ssn"] == SSN, "the stored value is carried over"
     assert result.meta.request["ssn"] == "REDACTED"
@@ -1017,7 +1015,8 @@ def test_update_person_never_echoes_a_given_iban(
 
     The recorded read the update starts from, and for the confirmed call the recorded
     update's answer: a replay never matches the request body, so the form asserted here
-    is the one the task sent, with the made-up value no fixture carries.
+    is the one the task sent, with the made-up value no fixture carries (conventions §10,
+    kind 3).
     """
     accounts = [BankAccountInput(iban=IBAN, type="DEFAULT", bic="TESTCHZZ")]
     shown = [{"iban": "REDACTED", "type": "DEFAULT", "bic": "TESTCHZZ"}]
@@ -2059,7 +2058,8 @@ def test_only_an_entry_booked_by_hand_is_changed_or_deleted(
 ) -> None:
     """``MANUAL`` is the type of an entry booked by hand (``docs/upstream/OBSERVED.md``): any other
     type, or none, is refused after the read, since upstream's answer to a write of it was
-    never observed. The recorded read ``order_bookentry_read/for_update`` changed in memory.
+    never observed. The recorded read ``order_bookentry_read/for_update`` changed in memory
+    (conventions §10, kind 4).
     """
     body = recorded_read(fixtures_dir, "order_bookentry_read", "for_update")
     if kind == "absent":
@@ -2204,18 +2204,15 @@ def test_a_delete_writes_only_when_confirm_is_true(
     ],
 )
 async def test_the_tool_schema_reads_confirm_as_a_boolean(
-    respx_mock: respx.MockRouter, sent: Any, performed: bool
+    replay_fixture: ReplayFixture, sent: Any, performed: bool
 ) -> None:
     """Over MCP the schema converts confirm (pydantic's lax bool) before the task runs.
 
     ``"true"``, ``"yes"``, ``"1"`` and ``1`` become ``True``; ``"false"``, ``"no"``,
     ``"0"`` and ``0`` become ``False``; anything else is refused by the schema.
     """
-    read = json.loads(load_fixture(_FIXTURES / "person_read" / "for_update.json").response.body)
-    respx_mock.get(f"{BASE}/person/read.json").respond(200, json=read)
-    write = respx_mock.post(f"{BASE}/person/delete.json").respond(
-        200, json={"success": True, "message": "1 person deleted"}
-    )
+    replay_fixture("person_read", "for_update")
+    write = replay_fixture("person_delete", "ok")
     arguments = {"org": DEMO, "id": PERSON, "confirm": sent}
     payload = await mcp_call(write_server, "cashctrl_delete_person", arguments)
     assert payload["data"]["performed"] is performed
@@ -2280,6 +2277,7 @@ def test_arguments_are_refused_before_any_request(
 
 
 def test_an_input_model_refuses_an_unknown_key() -> None:
+    """The line is an input of the test, not an answer from CashCtrl: a misspelt key."""
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         JournalItemInput.model_validate({"account_id": 3, "debitt": 1})
 
@@ -2350,6 +2348,8 @@ def test_custom_field_names_and_values_are_checked(custom: Any, message: str) ->
 
 
 def test_merging_custom_fields_keeps_what_is_not_changed() -> None:
+    """The stored value is an input of the test, not an answer from CashCtrl, in the form
+    ``journal.md`` documents for ``custom``."""
     stored = "<values><customField1>A</customField1><customField2>B</customField2></values>"
     assert merge_custom(stored, {}) == stored
     assert merge_custom(None, {}) is None
@@ -2375,6 +2375,8 @@ def test_merging_custom_fields_keeps_what_is_not_changed() -> None:
     ids=["nested", "other-root", "dtd", "unclosed", "text"],
 )
 def test_stored_custom_values_that_cannot_be_carried_are_refused(stored: str) -> None:
+    """Each stored value is an input of the test, not an answer from CashCtrl: forms that
+    ``journal.md`` does not document for ``custom``, which no read was recorded holding."""
     with pytest.raises(InvalidRequestError, match="cannot be carried over"):
         merge_custom(stored, {"customField1": "y"})
 
@@ -2582,13 +2584,11 @@ def test_no_write_task_is_a_route() -> None:
     assert not {f"/cashctrl/{name}" for name in WRITE_TASKS} & paths
 
 
-def test_a_preview_carries_the_form_fields_only_once(respx_mock: respx.MockRouter) -> None:
+def test_a_preview_carries_the_form_fields_only_once(replay_fixture: ReplayFixture) -> None:
     """A preview's ``meta.request`` is ``org``; a performed write's holds the fields."""
     preview = create_the_recorded_journal_entry()
     dumped = preview.model_dump_json()
     assert dumped.count('"title":"xippios-live fixture"') == 1
-    respx_mock.post(f"{BASE}/journal/create.json").mock(
-        return_value=httpx.Response(200, json={"success": True, "insertId": 1, "message": "ok"})
-    )
+    replay_fixture("journal_create", "ok")
     performed = create_the_recorded_journal_entry(confirm=True)
     assert performed.model_dump_json().count('"title":"xippios-live fixture"') == 1

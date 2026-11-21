@@ -34,10 +34,14 @@ def placeholder_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_a_declared_org_without_its_key_fails_on_the_first_request(
     monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter
 ) -> None:
+    """The route serves ``fiscalperiod_list/default``'s recorded answer at this test's host,
+    which no request reaches: the test asserts only what was sent (conventions §10, kind 3).
+    """
     monkeypatch.setenv(TENANTS.list_var, "xa")
     monkeypatch.setenv(TENANTS.var("xa", "SUBDOMAIN"), HIDDEN_SUBDOMAIN)
     route = respx_mock.get(url__startswith=f"https://{HIDDEN_SUBDOMAIN}.cashctrl.com/")
-    route.mock(return_value=httpx.Response(200, json={}))
+    answer = load_fixture(FIXTURES / "fiscalperiod_list" / "default.json").response
+    route.mock(return_value=httpx.Response(answer.status, text=answer.body))
     client = client_for("xa")
     with pytest.raises(ConfigError, match="CASHCTRL_XA_API_KEY"):
         await client.get("/fiscalperiod/list.json")

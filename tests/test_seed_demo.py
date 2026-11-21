@@ -55,10 +55,12 @@ PACE = seeder.PACE_SECONDS  # before the autouse fixture sets it to zero
 
 
 def _list(records: list[dict[str, Any]]) -> httpx.Response:
+    """A list composed in the shape recorded, ``total`` and ``data`` (conventions §10, kind 2)."""
     return httpx.Response(200, json={"total": len(records), "data": records})
 
 
 def _total(total: int) -> httpx.Response:
+    """A count composed in a list's recorded shape, ``data`` empty (conventions §10, kind 2)."""
     return httpx.Response(200, json={"total": total, "data": []})
 
 
@@ -67,7 +69,14 @@ def _localized(de: str, en: str) -> str:
 
 
 class FakeCashCtrl:
-    """Just enough of one organisation for the seeder: lists, creates and their counts."""
+    """Just enough of one organisation for the seeder: lists, creates and their counts.
+
+    NOT RECORDED: each answer is composed from what the snapshot documents, in the shape
+    upstream was recorded answering: a list's ``total`` and ``data``, a read's or a write's
+    ``success`` with ``data``, ``message`` or ``insertId`` (conventions §10, kind 2). Its
+    records, the states its flags set and the subdomain, key and owner's address it writes
+    into names, ids and refusals are inputs of the test, not answers from CashCtrl.
+    """
 
     def __init__(self) -> None:
         self.org_name: str | None = "Muster Handel AG Demo"
@@ -484,6 +493,8 @@ def test_the_orders_of_every_fiscal_period_are_checked(
 
 
 def test_a_missing_total_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
+    """The person list without ``total`` is an input of the test, not an answer from
+    CashCtrl: a form no recording holds, which the seeder refuses."""
     upstream = FakeCashCtrl()
     with respx.mock(assert_all_called=False) as router:
         router.get(f"https://{SUB}.cashctrl.com/api/v1/person/list.json").mock(
@@ -572,6 +583,8 @@ def test_persons_beyond_the_listed_ones_count_as_others(
 def test_a_person_total_below_the_records_listed_is_refused(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """The person list that counts fewer records than it lists is an input of the test, not
+    an answer from CashCtrl: a form no recording holds, which the seeder refuses."""
     upstream = FakeCashCtrl()
     with respx.mock(assert_all_called=False) as router:
         router.get(f"https://{SUB}.cashctrl.com/api/v1/person/list.json").mock(
@@ -1341,6 +1354,8 @@ def test_discovery_refuses_anything_but_two_empty_lists_or_its_own_records(
 def test_discovery_refuses_a_list_it_cannot_confirm_whole(
     capsys: pytest.CaptureFixture[str], path: str, answer: dict[str, Any]
 ) -> None:
+    """Each list is an input of the test, not an answer from CashCtrl: without ``total``, or
+    counting a record it does not list, forms no recording holds, which discovery refuses."""
     upstream = FakeCashCtrl()
     with respx.mock(assert_all_called=False) as router:
         router.get(f"https://{SUB}.cashctrl.com/api/v1/{path}").mock(

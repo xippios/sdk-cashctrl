@@ -26,7 +26,14 @@ import httpx
 import pytest
 import respx
 from xippios.core import AsyncClient, ClientConfig
-from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response, load_fixture
+from xippios.core.testing import (
+    REDACTED,
+    Fixture,
+    Scrub,
+    fixture_from_response,
+    load_fixture,
+    response_from_fixture,
+)
 from xippios.core.testing.replay import replay
 
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
@@ -85,6 +92,8 @@ def test_the_demo_host_becomes_the_replay_host(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """The answer is an input of the test, not an answer from CashCtrl: a refusal that names
+    the organisation's host, which the recorder rewrites."""
     monkeypatch.setenv(TENANTS.list_var, "xa")  # ignored: the recorder sees demo only
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/read.json")
     route.mock(
@@ -110,8 +119,11 @@ def test_the_demo_host_becomes_the_replay_host(
 def test_wrong_key_never_sends_the_real_key(
     recorder: ModuleType, respx_mock: respx.MockRouter
 ) -> None:
+    """``account_list/wrong_key``'s recorded 401, served at the organisation's host, a state
+    upstream answers alike behind one gateway (conventions §10, kind 3)."""
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
-    route.mock(return_value=httpx.Response(401, text="Unauthorized"))
+    wrong_key = load_fixture(FIXTURES / "account_list" / "wrong_key.json")
+    route.mock(return_value=response_from_fixture(wrong_key))
     assert recorder.main(["account/list.json", "wrong_key", "--wrong-key"]) == 0
     token = base64.b64encode(f"{recorder.WRONG_KEY}:".encode()).decode()
     assert route.calls.last.request.headers["Authorization"] == f"Basic {token}"
@@ -135,7 +147,11 @@ def test_the_recording_client_never_retries(recorder: ModuleType, wrong_key: boo
 def test_a_5xx_is_recorded_after_one_request(
     recorder: ModuleType, respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
-    """A GET that the package's client would retry is sent once and recorded as it came."""
+    """A GET that the package's client would retry is sent once and recorded as it came.
+
+    NOT RECORDED: the documented 503 of error-handling.md, composed (conventions §10, kind 2);
+    its text is an input of the test, not an answer from CashCtrl.
+    """
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(return_value=httpx.Response(503, text="Service Unavailable"))
     assert recorder.main(["account/list.json", "unavailable"]) == 0
@@ -152,7 +168,10 @@ def test_the_bare_subdomain_is_never_written(
     capsys: pytest.CaptureFixture[str],
     leak: str,
 ) -> None:
-    """The subdomain without ``.cashctrl.com`` is no host to core: the final check refuses it."""
+    """The subdomain without ``.cashctrl.com`` is no host to core: the final check refuses it.
+
+    The answer is an input of the test, not an answer from CashCtrl: it names the subdomain.
+    """
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(return_value=httpx.Response(200, json={"name": f"{leak} ltd"}))
     assert recorder.main(["account/list.json", "leaky"]) == 1
@@ -174,6 +193,8 @@ def test_the_key_is_never_written(
     """Core's ``Scrub`` redacts the key and its token; the fixture goes to review.
 
     Nothing of the key is left to refuse, but upstream should never send it back.
+
+    The answer is an input of the test, not an answer from CashCtrl: it echoes the key.
     """
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(
@@ -195,7 +216,10 @@ def test_the_key_is_never_written(
 def test_a_response_without_the_key_needs_no_key_review(
     recorder: ModuleType, respx_mock: respx.MockRouter, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The review note is about the response: upstream's own ``REDACTED`` does not trigger it."""
+    """The review note is about the response: upstream's own ``REDACTED`` does not trigger it.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(return_value=httpx.Response(200, json={"name": "REDACTED ltd"}))
     assert recorder.main(["account/list.json", "clean"]) == 0
@@ -212,6 +236,9 @@ def test_a_key_the_scrub_cannot_reach_is_never_written(
 
     Core's verify searches plain values only since 0.3.0 (sdk-core ADR-0042, decision 3), so the
     refusal is the recorder's, in its own words.
+
+    The answer is an input of the test, not an answer from CashCtrl: it carries the key behind
+    an escape.
     """
     escaped = "\\u" + f"{ord(KEY[0]):04x}" + KEY[1:]
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
@@ -230,6 +257,8 @@ def test_a_key_the_scrub_cannot_reach_is_never_written(
 def test_nothing_unscrubbed_touches_disk(
     recorder: ModuleType, respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The answer is an input of the test, not an answer from CashCtrl: a refusal that names
+    the host and the key."""
     writes: list[str] = []
     write_text = Path.write_text
 
@@ -258,7 +287,8 @@ def test_a_binary_body_is_refused(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # A .json endpoint that answers with a file anyway: refused after the request.
+    """A .json endpoint that answers with a file anyway is refused after the request: the
+    file is an input of the test, not an answer from CashCtrl."""
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(
         return_value=httpx.Response(
@@ -282,6 +312,8 @@ def test_key_like_names_need_a_review(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """The answer is an input of the test, not an answer from CashCtrl: key-like names in its
+    body and a header."""
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(
         return_value=httpx.Response(
@@ -322,6 +354,8 @@ def test_e_mail_addresses_become_the_placeholder(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """The answer is an input of the test, not an answer from CashCtrl: a list whose record
+    carries e-mail addresses."""
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     body = {
         "total": 1,
@@ -360,8 +394,9 @@ def test_an_address_the_scrub_cannot_reach_is_never_written(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # An escape right before the address: the raw text is left alone, the decoded body
-    # still shows the address, so the final check refuses the write.
+    """An escape right before the address: the raw text is left alone, the decoded body
+    still shows the address, so the final check refuses the write. The body is an input of
+    the test, not an answer from CashCtrl."""
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(return_value=httpx.Response(200, content=b'{"notes": "\\u00e9mile@corp.example"}'))
     assert recorder.main(["account/list.json", "escaped"]) == 1
@@ -686,7 +721,7 @@ ORDER_WRITE_CASES = [
 
 def order_answer(order_id: int, *, nr: str, description: str | None) -> dict[str, Any]:
     """The recorded read of the marked order 20 (``order_read/for_update``), given another
-    id, ``nr`` and ``description``: a read changed in memory, not a fixture."""
+    id, ``nr`` and ``description``: a read changed in memory (conventions §10, kind 4)."""
     path = Path(__file__).parent / "fixtures" / "order_read" / "for_update.json"
     body: dict[str, Any] = json.loads(json.loads(path.read_text())["response"]["body"])
     body["data"].update(id=order_id, nr=nr, description=description)
@@ -725,6 +760,9 @@ def test_an_order_write_on_marked_orders_reads_them_then_sends_it(
     pairs: list[str],
     marked: dict[str, Any],
 ) -> None:
+    """NOT RECORDED: each order's read is the recorded one changed in memory by order_answer
+    (conventions §10, kind 4), and the write's success is composed in the shape the writes
+    were recorded answering (kind 2)."""
     reads = serve_orders(
         respx_mock, (21, order_answer(21, **marked)), (22, order_answer(22, **marked))
     )
@@ -788,7 +826,13 @@ def test_an_order_write_naming_an_unmarked_or_unreadable_order_is_refused(
     answer: Any,
     reason: str,
 ) -> None:
-    """Fail closed: the first order is marked, the second is not or cannot be read."""
+    """Fail closed: the first order is marked, the second is not or cannot be read.
+
+    NOT RECORDED: the reads are the recorded read changed in memory by order_answer (conventions
+    §10, kind 4) and a refusal composed in the shape account_read/unknown_id recorded (kind 2);
+    the documented 500 and a page that is no JSON are inputs of the test, not answers from
+    CashCtrl.
+    """
     marked = order_answer(21, nr="xippios-live", description="xippios-live test")
     reads = serve_orders(respx_mock, (21, marked), (22, answer))
     write = respx_mock.post(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}")
@@ -861,7 +905,7 @@ BOOK_ENTRY_CASES = [
 
 def entry_answer(entry_id: int, order_id: object) -> dict[str, Any]:
     """The recorded read of the seeded entry 5 (``order_bookentry_read/generated``), given
-    another id and order: a read changed in memory, not a fixture."""
+    another id and order: a read changed in memory (conventions §10, kind 4)."""
     path = Path(__file__).parent / "fixtures" / "order_bookentry_read" / "generated.json"
     body: dict[str, Any] = json.loads(json.loads(path.read_text())["response"]["body"])
     body["data"].update(id=entry_id, orderId=order_id)
@@ -891,6 +935,9 @@ def test_a_book_entry_write_reads_each_entry_and_its_order_then_sends_it(
     ids: str,
     pairs: list[str],
 ) -> None:
+    """NOT RECORDED: the reads are the recorded ones changed in memory by entry_answer and
+    order_answer (conventions §10, kind 4), and the write's success is composed in the shape
+    the writes were recorded answering (kind 2)."""
     named = [int(entry_id) for entry_id in ids.split(",")]
     entries = serve_entries(
         respx_mock, *((entry_id, entry_answer(entry_id, 21)) for entry_id in named)
@@ -972,7 +1019,13 @@ def test_a_book_entry_write_on_an_unmarked_or_unreadable_entry_is_refused(
     order: Any,
     reason: str,
 ) -> None:
-    """Fail closed: the entry 31 cannot be read, names no order, or its order is unmarked."""
+    """Fail closed: the entry 31 cannot be read, names no order, or its order is unmarked.
+
+    NOT RECORDED: the reads are the recorded ones changed in memory by entry_answer and
+    order_answer (conventions §10, kind 4) and refusals composed in the shapes
+    account_read/unknown_id and journal_delete/already_deleted recorded (kind 2); the documented
+    500 and a page that is no JSON are inputs of the test, not answers from CashCtrl.
+    """
     entries = serve_entries(respx_mock, (31, entry))
     if order is not None:
         serve_orders(respx_mock, (22, order))
@@ -1029,7 +1082,11 @@ def test_a_write_is_recorded_with_its_form_body(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The pairs go as a form body, in their order, as the write tools send theirs."""
+    """The pairs go as a form body, in their order, as the write tools send theirs.
+
+    NOT RECORDED: the write's answer, composed in the shape journal_create/ok recorded
+    (conventions §10, kind 2).
+    """
     route = respx_mock.post(f"https://{REAL}.cashctrl.com/api/v1/journal/create.json")
     answer = {"success": True, "insertId": 52, "message": "Buchung gespeichert"}
     route.mock(return_value=httpx.Response(200, json=answer))
@@ -1058,7 +1115,9 @@ def test_a_write_without_insert_id_still_says_the_organisation_changed(
     recorder: ModuleType, respx_mock: respx.MockRouter, capsys: pytest.CaptureFixture[str]
 ) -> None:
     route = respx_mock.post(f"https://{REAL}.cashctrl.com/api/v1/journal/delete.json")
-    route.mock(return_value=httpx.Response(200, json={"success": True, "message": "ok"}))
+    route.mock(
+        return_value=response_from_fixture(load_fixture(FIXTURES / "journal_delete" / "ok.json"))
+    )
     assert recorder.main(["journal/delete.json", "ok", "--method", "POST", "ids=52"]) == 0
     assert route.calls.last.request.content == b"ids=52"
     out = capsys.readouterr().out
@@ -1069,7 +1128,11 @@ def test_a_write_without_insert_id_still_says_the_organisation_changed(
 def test_the_request_body_is_scrubbed_like_the_rest(
     recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter
 ) -> None:
-    """An e-mail address, the demo host and the key in a form body never reach the file."""
+    """An e-mail address, the demo host and the key in a form body never reach the file.
+
+    NOT RECORDED: the write's answer, composed in the shape the writes were recorded answering
+    (conventions §10, kind 2).
+    """
     route = respx_mock.post(f"https://{REAL}.cashctrl.com/api/v1/person/create.json")
     route.mock(return_value=httpx.Response(200, json={"success": True, "insertId": 13}))
     contacts = '[{"type":"EMAIL_WORK","address":"jane@corp.example"}]'
@@ -1146,7 +1209,11 @@ def test_a_key_like_word_in_the_request_body_goes_to_review(recorder: ModuleType
 
 def test_get_may_be_spelt_in_lower_case(recorder: ModuleType, respx_mock: respx.MockRouter) -> None:
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/currency/list.json")
-    route.mock(return_value=httpx.Response(200, json={"total": 0, "data": []}))
+    route.mock(
+        return_value=response_from_fixture(
+            load_fixture(FIXTURES / "currency_list" / "default.json")
+        )
+    )
     assert recorder.main(["currency/list.json", "empty", "--method", "get"]) == 0
     assert route.calls.last.request.method == "GET"
 
@@ -1197,10 +1264,7 @@ JSON_UTF8 = "application/json;charset=utf-8"
 def recorded_404(endpoint: str) -> httpx.Response:
     """The 404 recorded at ``endpoint`` for an id no record has, as upstream sent it."""
     directory, _ = FILE_REFUSALS[endpoint]
-    answer = load_fixture(FIXTURES / directory / "unknown_id.json").response
-    return httpx.Response(
-        answer.status, headers=[(name, value) for name, value in answer.headers], text=answer.body
-    )
+    return response_from_fixture(load_fixture(FIXTURES / directory / "unknown_id.json"))
 
 
 def recorded_404_changed(
@@ -1311,6 +1375,7 @@ ANSWERS_NOT_WRITTEN: dict[str, Callable[[str], httpx.Response]] = {
     "json-success": lambda _: httpx.Response(
         200, content=b'{"success":true,"data":{"id":1}}', headers={"content-type": JSON_UTF8}
     ),
+    # NOT RECORDED: a list's recorded shape, composed (conventions §10, kind 2).
     "json-list": lambda _: httpx.Response(
         200, content=b'{"total":0,"data":[]}', headers={"content-type": "application/json"}
     ),
@@ -1400,7 +1465,11 @@ def test_every_json_get_of_any_module_may_be_recorded(recorder: ModuleType, endp
 def test_amounts_are_recorded(
     recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter
 ) -> None:
-    """Non-zero amounts are recorded as sent: the demo organisation's books are invented."""
+    """Non-zero amounts are recorded as sent: the demo organisation's books are invented.
+
+    The answer is an input of the test, not an answer from CashCtrl: records with the amounts
+    the recorder keeps.
+    """
     record = {"id": 7, "openingAmount": 100000, "endAmount": "4850.00", "targetMax": 12.5}
     entry = {"id": 3, "amount": 4800.0, "debitId": 4, "creditId": 9}
     for endpoint, body in (
@@ -1428,6 +1497,8 @@ def test_amounts_are_recorded(
 def test_html_entities_count_as_at(
     recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter, written: str
 ) -> None:
+    """The answer is an input of the test, not an answer from CashCtrl: an address written
+    with HTML entities."""
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/read.json")
     notes = f"<p>Questions to <a href='mailto:{written}'>{written}</a></p>"
     route.mock(return_value=httpx.Response(200, json={"success": True, "data": {"notes": notes}}))
@@ -1463,7 +1534,11 @@ def test_api_user_tags_become_redacted(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """In ``createdBy`` and ``lastUpdatedBy``, in any case, also right after a JSON escape."""
+    """In ``createdBy`` and ``lastUpdatedBy``, in any case, also right after a JSON escape.
+
+    The answer is an input of the test, not an answer from CashCtrl: a record with live API user
+    tags.
+    """
     record = {
         "id": 2,
         "createdBy": OWN,
@@ -1501,6 +1576,8 @@ def test_a_tag_the_scrub_cannot_reach_is_never_written(
     capsys: pytest.CaptureFixture[str],
     content: bytes,
 ) -> None:
+    """The answer is an input of the test, not an answer from CashCtrl: a tag the scrub
+    cannot reach."""
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/fiscalperiod/list.json")
     route.mock(return_value=httpx.Response(200, content=content))
     assert recorder.main(["fiscalperiod/list.json", "unreachable"]) == 1
@@ -1568,7 +1645,10 @@ def test_a_bare_key_prefix_is_refused_as_a_possible_prefix(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Four characters alone may be a coincidence; nothing is written all the same."""
+    """Four characters alone may be a coincidence; nothing is written all the same.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/fiscalperiod/list.json")
     route.mock(return_value=httpx.Response(200, json={"notes": f"ref {KEY[:4]} only"}))
     assert recorder.main(["fiscalperiod/list.json", "bare_prefix"]) == 1
@@ -1600,6 +1680,9 @@ def test_token_like_fields_become_redacted(
 
     ``hashtag`` keeps its value: it is no token-like name, and as a key-like word it goes
     to review.
+
+    The answer is an input of the test, not an answer from CashCtrl: an order with token-like
+    fields.
     """
     order = {
         "id": 3,
@@ -1632,7 +1715,10 @@ def test_other_token_like_fields_are_redacted(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """``token``, ``secret`` and ``apiKey`` were never seen; scrubbed, they need no review."""
+    """``token``, ``secret`` and ``apiKey`` were never seen; scrubbed, they need no review.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
     body = {
         "token": "t-value",
         "secret": "s-value",  # pragma: allowlist secret
@@ -1664,6 +1750,9 @@ def test_personal_identifiers_become_redacted(
     """``ssn`` and ``iban`` by name, at any depth; scrubbed, they need no review.
 
     They are the documented personal identifiers (sdk-core ADR-0017).
+
+    The answer is an input of the test, not an answer from CashCtrl: a person with an ssn and an
+    iban.
     """
     person = {
         "id": 3,
@@ -1693,7 +1782,11 @@ def test_a_locations_qr_iban_becomes_redacted(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The organisation's QR-IBAN (``location/list.json``, sdk-core ADR-0017), in its spellings."""
+    """The organisation's QR-IBAN (``location/list.json``, sdk-core ADR-0017), in its spellings.
+
+    The answer is an input of the test, not an answer from CashCtrl: a location with an IBAN
+    set.
+    """
     location = {
         "id": 1,
         "iban": "CH00TEST",
@@ -1723,6 +1816,9 @@ def test_every_field_ending_in_iban_becomes_redacted(
 
     ``order/document/read.json`` sends them, only seen ``null`` in demo; the answer is
     set in memory here, not a fixture. Every name that ends in ``iban`` is rewritten.
+
+    The answer is an input of the test, not an answer from CashCtrl: a document with each IBAN
+    set.
     """
     document = {
         "id": 3,
@@ -1765,7 +1861,10 @@ def test_a_compound_iban_the_scrub_cannot_reach_is_never_written(
     content: bytes,
     name: str,
 ) -> None:
-    """A value that survives the rewrite under a name ending in ``iban`` writes nothing."""
+    """A value that survives the rewrite under a name ending in ``iban`` writes nothing.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/order/document/read.json")
     route.mock(return_value=httpx.Response(200, content=content))
     assert recorder.main(["order/document/read.json", "unreachable", "id=3"]) == 1
@@ -1780,6 +1879,8 @@ def test_the_recorder_and_the_tasks_share_one_identifier_rule(recorder: ModuleTy
 
     https://github.com/xippios/sdk-cashctrl/pull/21 gave the recorder's checks and the
     report drop this one predicate.
+
+    The text given to the scrub is an input of the test, not an answer from CashCtrl.
     """
     from xippios.cashctrl import models
 
@@ -1799,7 +1900,11 @@ def test_a_write_that_sends_an_identifier_is_not_recorded(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The form body is checked field by field and inside its JSON values: nothing is written."""
+    """The form body is checked field by field and inside its JSON values: nothing is written.
+
+    NOT RECORDED: the write's answer, composed in the shape the writes were recorded answering
+    (conventions §10, kind 2).
+    """
     route = respx_mock.post(f"https://{REAL}.cashctrl.com/api/v1/person/create.json")
     route.mock(return_value=httpx.Response(200, json={"success": True, "insertId": 15}))
     accounts = json.dumps([{"iban": "CH00TEST", "type": "DEFAULT"}])
@@ -1843,6 +1948,8 @@ def test_a_value_the_scrub_cannot_reach_is_never_written(
 
     An escaped field name hides ``hash`` from the scrub, and an array, an object or a
     number is no text to replace: anything but ``null`` or ``REDACTED`` writes nothing.
+
+    The answer is an input of the test, not an answer from CashCtrl.
     """
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/order/read.json")
     route.mock(return_value=httpx.Response(200, content=content))
@@ -1860,7 +1967,10 @@ def test_a_compound_name_goes_to_review(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """``publicHash`` is not a token-like name to scrub, but ``hash`` is key-like: review."""
+    """``publicHash`` is not a token-like name to scrub, but ``hash`` is key-like: review.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/order/read.json")
     route.mock(return_value=httpx.Response(200, json={"data": {"publicHash": TOKEN}}))
     assert recorder.main(["order/read.json", "compound"]) == 1
@@ -1970,7 +2080,10 @@ def test_the_placeholder_host_leaves_no_trace_of_the_organisation(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """In the URL, the headers and the bodies: any case, percent-encoded, ``\\/`` escaped."""
+    """In the URL, the headers and the bodies: any case, percent-encoded, ``\\/`` escaped.
+
+    The answer is an input of the test, not an answer from CashCtrl: the host in each form.
+    """
     route = respx_mock.post(f"https://{HOST}/api/v1/journal/create.json")
     route.mock(
         return_value=httpx.Response(
@@ -2009,7 +2122,11 @@ def test_the_placeholder_host_leaves_no_trace_of_the_organisation(
 def test_a_recorded_fixture_replays_on_the_placeholder_host(
     recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter
 ) -> None:
-    """Recorded from the organisation's host, replayed on ``demo.cashctrl.com``."""
+    """Recorded from the organisation's host, replayed on ``demo.cashctrl.com``.
+
+    The answer is an input of the test, not an answer from CashCtrl: a list that links to the
+    organisation's host.
+    """
     respx_mock.get(f"https://{HOST}/api/v1/account/list.json").respond(
         200, json={"data": [{"id": 1, "link": f"https://{HOST}/a/1"}]}
     )
@@ -2034,7 +2151,10 @@ def test_a_percent_encoded_key_is_redacted_and_goes_to_review(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Core redacts the key as given only; the recorder's step takes every encoded form."""
+    """Core redacts the key as given only; the recorder's step takes every encoded form.
+
+    The answer is an input of the test, not an answer from CashCtrl: the key percent-encoded.
+    """
     route = respx_mock.get(f"https://{HOST}/api/v1/account/list.json")
     route.mock(
         return_value=httpx.Response(
@@ -2056,7 +2176,10 @@ def test_a_percent_encoded_key_is_redacted_and_goes_to_review(
 
 
 def test_secrets_are_redacted_plain_and_percent_encoded(recorder: ModuleType) -> None:
-    """Core's plain scrub first, then the step: every form ends as ``REDACTED``."""
+    """Core's plain scrub first, then the step: every form ends as ``REDACTED``.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
     secret = "s3cr3t value/x+y"  # pragma: allowlist secret
     request = httpx.Request(
         "POST",
@@ -2087,7 +2210,10 @@ def test_secrets_are_redacted_plain_and_percent_encoded(recorder: ModuleType) ->
 
 
 def test_the_host_then_the_secrets_then_the_rewrite(recorder: ModuleType) -> None:
-    """The rewrite sees the URL, the header values and both bodies after the host and keys."""
+    """The rewrite sees the URL, the header values and both bodies after the host and keys.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
     seen: list[str] = []
 
     def spy(text: str) -> str:
@@ -2133,7 +2259,10 @@ def test_the_verify_finds_what_the_scrub_cannot_see(
     content: bytes,
     kind: str,
 ) -> None:
-    """Behind a JSON escape or percent-encoded, the host and the subdomain are refused."""
+    """Behind a JSON escape or percent-encoded, the host and the subdomain are refused.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
     route = respx_mock.get(f"https://{HOST}/api/v1/account/list.json")
     route.mock(return_value=httpx.Response(200, content=content))
     assert recorder.main(["account/list.json", "hidden"]) == 1
@@ -2149,6 +2278,7 @@ def test_the_verify_finds_what_the_scrub_cannot_see(
 def test_the_verify_names_the_header_a_rewrite_put_a_secret_back_into(
     recorder: ModuleType,
 ) -> None:
+    """The answer is an input of the test, not an answer from CashCtrl."""
     request = httpx.Request("GET", f"https://{HOST}/api/v1/x.json")
     response = httpx.Response(200, headers={"Location": "/next"}, content=b"", request=request)
     scrub_step = step(
@@ -2162,7 +2292,10 @@ def test_the_verify_names_the_header_a_rewrite_put_a_secret_back_into(
 
 
 def test_the_verify_passes_a_clean_fixture(recorder: ModuleType) -> None:
-    """``REDACTED`` and the placeholder are masked first: a secret inside them never counts."""
+    """``REDACTED`` and the placeholder are masked first: a secret inside them never counts.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
     request = httpx.Request("GET", f"https://{HOST}/api/v1/x?next=https://{HOST}/y")
     response = httpx.Response(
         200,
@@ -2208,7 +2341,10 @@ def test_an_own_host_refusal_is_printed_and_nothing_written(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A demo subdomain that is the placeholder's would be written as it is: refused."""
+    """A demo subdomain that is the placeholder's would be written as it is: refused.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
     monkeypatch.setenv(TENANTS.var(DEMO, "SUBDOMAIN"), "DEMO")
     respx_mock.get("https://demo.cashctrl.com/api/v1/account/list.json").respond(200, json={})
     assert recorder.main(["account/list.json", "own_host"]) == 1
