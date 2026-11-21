@@ -213,6 +213,8 @@ class FakeCashCtrl:
             return _list(self.custom_fields)
         if path == "account/costcenter/list.json":
             return _list(self.cost_centres)
+        # NOT RECORDED: the documented 404 of an unknown endpoint, composed with a body of no
+        # shape upstream sends (conventions §10, kinds 2 and 5).
         return httpx.Response(404, text="unknown endpoint")
 
     def post(self, path: str, form: dict[str, str]) -> httpx.Response:
@@ -1476,7 +1478,7 @@ def test_the_document_describes_every_record() -> None:
     for currency in seeder.CURRENCIES:
         assert f"| {currency.code} | {currency.description} | {currency.rate} |" in doc
     assert f"at most {seeder.max_writes()}" in doc
-    assert "## Observed write semantics (filled by the first run)" in doc
+    assert "## The first run" in doc
     prose = " ".join(doc.split())
     for phrase in (
         "Run both commands from the repository root of the sdk-cashctrl checkout",

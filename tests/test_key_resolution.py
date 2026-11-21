@@ -8,11 +8,13 @@ test here can send it.
 """
 
 import base64
+from pathlib import Path
 
 import httpx
 import pytest
 import respx
 from xippios.core import ConfigError
+from xippios.core.testing import load_fixture
 
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
 
@@ -20,6 +22,7 @@ pytestmark = pytest.mark.anyio
 
 HIDDEN_SUBDOMAIN = "xa-hidden-subdomain"
 DEMO_KEY = "demo-key-value"  # pragma: allowlist secret
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -52,7 +55,8 @@ async def test_the_demo_client_sends_its_key_as_the_basic_user_name(
     """Demo's own key, sent as the HTTP basic user name with no password.
 
     The route answers only that header, so a request with any other is no match and fails
-    the test.
+    the test. It serves ``fiscalperiod_list/default``'s recorded answer at this test's host:
+    the test asserts only what was sent (conventions §10, kind 3).
     """
     monkeypatch.setenv(TENANTS.var(DEMO, "SUBDOMAIN"), HIDDEN_SUBDOMAIN)
     monkeypatch.setenv(TENANTS.var(DEMO, "API_KEY"), DEMO_KEY)
@@ -61,6 +65,8 @@ async def test_the_demo_client_sends_its_key_as_the_basic_user_name(
         url__startswith=f"https://{HIDDEN_SUBDOMAIN}.cashctrl.com/",
         headers={"Authorization": basic(DEMO_KEY)},
     )
-    route.mock(return_value=httpx.Response(200, json={}))
+    answer = load_fixture(FIXTURES / "fiscalperiod_list" / "default.json").response
+    headers = [(name, value) for name, value in answer.headers if name.lower() != "content-length"]
+    route.mock(return_value=httpx.Response(answer.status, headers=headers, text=answer.body))
     await client_for(DEMO).get("/fiscalperiod/list.json")
     assert route.call_count == 1

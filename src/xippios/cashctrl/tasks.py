@@ -33,8 +33,8 @@ caller how many there are in all. Without ``limit`` it collects every page from
 documented default for ``limit``, sent explicitly) at a time, and stops after a short
 page or, without a further request, once the next offset reaches the ``total``
 upstream reported; ``meta.total`` is the ``total`` of the last page fetched. A page past
-the end is answered with an empty ``data`` and the same ``total`` (observed on
-2026-10-23). ``meta.request`` holds the parameters as the first request sent them; when
+the end is answered with an empty ``data`` and the same ``total``. ``meta.request`` holds
+the parameters as the first request sent them; when
 every page is collected it leaves out ``limit``, the page size, so the same arguments
 collect the same records again.
 
@@ -459,8 +459,8 @@ async def get_fiscal_period_async(org: str, id: int | None = None) -> Result[Fis
     as ``YYYY-MM``). Without ``id`` upstream reads the API user's current fiscal period,
     the one the lists and balances answer for when given no ``fiscal_period_id``: its
     ``id`` names it. The read itself sends ``is_current`` false and no
-    ``last_entry_date``, the current period's too (observed 2026-11-17);
-    ``list_fiscal_periods`` has both. An id no fiscal period has raises
+    ``last_entry_date``, the current period's too; ``list_fiscal_periods`` has both. An id
+    no fiscal period has raises
     ``NotFoundError``.
 
     Args:
@@ -1026,14 +1026,14 @@ async def list_history_async(
 
     Every entry comes back with ``created`` (when the change was made), ``created_by``
     (who made it: a user's name or ``SYSTEM``; an API user shows as ``API:REDACTED``),
-    ``type`` (the module, e.g. ``ORDER``), ``change_type`` (``CREATE`` and ``STATUS``
-    were seen, ``UPDATE`` too on 2026-10-27, though in no fixture), the record it
+    ``type`` (the module, e.g. ``ORDER``), ``change_type`` (``CREATE``, ``STATUS``,
+    ``UPDATE``), the record it
     concerns (``order_id``, ``person_id``, ``statement_id``) and ``message``, upstream's
     text of the change as upstream writes it (``Rechnung 'EK-2026-001' created.``): it
     names records and may name persons, a customer, a vendor or an employee. Identifiers
     stay out as everywhere: no ``ssn`` or ``iban`` field comes back. ``order_id``,
     ``person_id`` or ``statement_id`` narrow it to one record's history; the history of
-    an order that was deleted is not listed (observed: none, a minute after the delete).
+    an order that was deleted is not listed.
 
     Paging: with ``limit``, one page of at most ``limit`` entries from ``start``; without
     it, every matching entry from ``start`` on, which for a whole organisation is long:
@@ -1647,8 +1647,8 @@ async def download_order_document_async(
     read into a result, kept in memory or cached; no MCP tool or HTTP route serves it
     (``BULK_TASKS``), so where it goes is the caller's choice. ``data`` describes it:
     ``path``, ``bytes``, ``content_type``, ``filename`` and ``retrieved_at``. An id no
-    order has raises ``NotFoundError`` (upstream answers it with HTTP 404, observed on
-    2026-10-29) and a refusal ``RequestRejected``; either way nothing is written, and a
+    order has raises ``NotFoundError`` (upstream answers it with HTTP 404) and a refusal
+    ``RequestRejected``; either way nothing is written, and a
     file already at ``dest`` stays as it was.
 
     Args:
@@ -2116,7 +2116,7 @@ async def download_report_async(
     rendering, and no key is dropped from a file: the identifier drop of
     ``get_report_data`` cannot reach into a PDF or a workbook. An element the tree does
     not list is asked of upstream as given: an id no report has raises
-    ``NotFoundError`` (HTTP 404, observed on 2026-11-17), a refusal ``RequestRejected``;
+    ``NotFoundError`` (HTTP 404), a refusal ``RequestRejected``;
     either way nothing is written, and a file already at ``dest`` stays as it was.
 
     Args:
@@ -2179,7 +2179,7 @@ async def download_report_collection_async(
     holds one, by the types the report tree shows, read right before the download, is
     refused whole. The file is upstream's rendering, and no key is dropped from a file.
     A collection the tree does not list is asked of upstream as given: an id no
-    collection has raises ``NotFoundError`` (HTTP 404, observed on 2026-11-17), a
+    collection has raises ``NotFoundError`` (HTTP 404), a
     refusal ``RequestRejected``; either way nothing is written, and a file already at
     ``dest`` stays as it was.
 
@@ -2226,8 +2226,8 @@ async def download_annual_report_async(
 
     The file is upstream's ``report/collection/download_annualreport.pdf``, by default
     the balance sheet and the profit and loss: the PDF of the collection the report tree
-    marks ``is_system`` (``Jahresbericht``), the same file but for its creation time
-    (observed on 2026-11-17). It is streamed to ``dest``, the path the caller gives,
+    marks ``is_system`` (``Jahresbericht``), the same file but for its creation time. It is
+    streamed to ``dest``, the path the caller gives,
     and is never read into a result, kept in memory or cached; no MCP tool or HTTP route
     serves it (``BULK_TASKS``). ``data`` describes the file: ``path``, ``bytes``,
     ``content_type``, ``filename`` and ``retrieved_at``.
@@ -2237,8 +2237,8 @@ async def download_annual_report_async(
     download, or when the tree marks no collection system, so that what the report
     holds cannot be checked. The file is upstream's rendering, and no key is dropped
     from a file. Without ``fiscal_period_id``, and for an id no fiscal period has,
-    upstream answers with the API user's current period's report (observed on
-    2026-11-17). A refusal raises ``RequestRejected``; nothing is written then, and a
+    upstream answers with the API user's current period's report. A refusal raises
+    ``RequestRejected``; nothing is written then, and a
     file already at ``dest`` stays as it was.
 
     Args:

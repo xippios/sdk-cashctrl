@@ -67,6 +67,7 @@ def test_a_bound_task_keeps_its_name_and_drops_org(name: str) -> None:
 
 
 async def test_a_bound_sync_facade_awaits_its_async_twin(respx_mock: respx.MockRouter) -> None:
+    """NOT RECORDED: an empty list composed in the lists' recorded shape (§10, kind 2)."""
     route = respx_mock.get("https://demo.cashctrl.com/api/v1/currency/list.json")
     route.respond(200, json={"total": 0, "data": []})
     result = await bind_tasks([tasks.list_currencies], LOCK)[0]()
@@ -97,7 +98,8 @@ async def test_the_bound_read_server_reaches_the_bound_organisation_only(
 
     Core's argument check refuses an argument no tool of a bound server declares, ``org``
     among them, and names the ones the tool takes; the call without it reaches the bound
-    organisation alone.
+    organisation alone. NOT RECORDED: an empty list composed in the lists' recorded shape
+    (conventions §10, kind 2).
     """
     monkeypatch.setenv(TENANTS.list_var, "xa")
     monkeypatch.setenv(TENANTS.var("xa", "SUBDOMAIN"), "xa-tenant")

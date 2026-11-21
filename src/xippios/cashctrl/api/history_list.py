@@ -5,7 +5,8 @@ list."). Its documented parameters, all optional: ``dir`` (default ``DESC``),
 ``filter``, ``limit`` ("The number of entries to retrieve. Defaults to 100."),
 ``orderId``, ``personId`` and ``statementId`` (the history of one order, person or
 salary statement), ``query`` and ``start`` ("The starting entry. Defaults to 0."); no
-``sort``. Observed on 2026-10-27: ``{"total": 2, "data": [...]}`` for a seeded order,
+``sort``. Its answer, as ``docs/upstream/OBSERVED.md``
+notes: ``{"total": 2, "data": [...]}`` for a seeded order,
 newest first, and ``{"total": 0, "data": []}`` for an order deleted a minute before,
 whose create and update the history had listed. Pages are the task's business.
 """

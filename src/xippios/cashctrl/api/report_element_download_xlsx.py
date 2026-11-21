@@ -4,7 +4,8 @@ Reference: ``docs/upstream/report.md``, "Download Excel" in "Element" ("Download
 Excel file for a single element by ID and time period."). Its documented parameters are
 those of ``report/element/data.json``, which ``report_element_data_params`` encodes, as
 for ``download.pdf``. The file is written by ``_download.download``, which raises a
-refusal sent as HTTP 200 instead of writing it. Observed on 2026-11-17: the balance sheet
+refusal sent as HTTP 200 instead of writing it. As ``docs/upstream/OBSERVED.md`` notes, the
+balance sheet
 of 2025 came as ``application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;
 charset=UTF-8`` named ``Balance 2025.xlsx``, for a fiscal period and for two dates alike.
 """

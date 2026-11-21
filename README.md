@@ -186,8 +186,7 @@ write server only: never by the read server, never as an HTTP route.
   the rest taken from the record. A parameter left out keeps its value: an order's
   items, too, are sent back as stored, each under the keys the items table documents
   (`account_id`, `name`, `unit_price`, `quantity`, `tax_id`, ...), and `items` given
-  replace them whole; upstream stores the items it is sent anew, so their ids change
-  (observed). `clear` names parameters to send empty (`clear=["tax_id", "notes"]`; a
+  replace them whole; upstream stores the items it is sent anew, so their ids change. `clear` names parameters to send empty (`clear=["tax_id", "notes"]`; a
   flag such as `is_vendor` or `is_display_item_gross` is sent `false`),
   and a parameter both given and cleared is refused, as is `sequence_number_id`, which
   an update sends only when given. Refused with `InvalidRequestError` before anything is
@@ -219,7 +218,7 @@ write server only: never by the read server, never as an HTTP route.
   what they are given, nothing read first. A payment creates no book entry, and
   CashCtrl documents no way to read, list or delete one. `PAIN` needs the sender's and
   the recipient's bank accounts and the sender's BIC and refuses a date in the past;
-  `CASH_PDF` needed none of them (observed on the demo organisation, 2026-10-29). A status id comes from the
+  `CASH_PDF` needs none of them. A status id comes from the
   `status` of the orders' category in `cashctrl_list_order_categories`.
 - **Book entries.** `create_order_book_entry` books an entry against the orders
   `order_ids` names, such as a payment received for an invoice, between `account_id`
@@ -229,15 +228,13 @@ write server only: never by the read server, never as an HTTP route.
   entry by its id from `cashctrl_list_order_book_entries`. Both write only an entry
   booked by hand (`type` `MANUAL`) and refuse any other before anything is sent: the
   entries an order's items book (`GENERATED`) change only with the items
-  (`update_order`). Deleting an order deletes its book entries with it
-  (observed on the demo organisation, 2026-11-17).
+  (`update_order`). Deleting an order deletes its book entries with it.
 - **Custom fields**: `custom` maps upstream's names (`customField1`, `customField<ID>`,
   the ids from `cashctrl_list_custom_fields`) to text, sent as
   `<values><customField1>...</customField1></values>`, values escaped. An update keeps
   every stored value it is not given.
 - **Amounts.** A journal `amount` with a `tax_id` is the gross amount, VAT included, and
-  order items' `unit_price` was read as gross too (observed on the demo organisation,
-  although the tax codes' calculation type reads NET; `docs/demo-org.md`).
+  order items' `unit_price` was read as gross too, although the tax codes' calculation type reads NET.
 - **Ids** come from the read tools: account ids from `cashctrl_list_accounts` (the
   `id`, not the account number), tax codes from `cashctrl_list_tax_codes`, persons from
   `cashctrl_list_persons`, order categories and their statuses from
@@ -411,7 +408,7 @@ answered, so pass `fiscal_period_id` (an id from `list_fiscal_periods`) for a
 reproducible answer. `list_accounts` and `list_cost_centers` take `fiscal_period_id` for
 their balances likewise. `get_fiscal_period` without an `id` reads that current period, and
 its `id` names the period an answer without `fiscal_period_id` came from. The read itself
-sends `is_current` false, the current period's too (observed on 2026-11-17);
+sends `is_current` false, the current period's too;
 `list_fiscal_periods` marks the current one. Without `type` (`SALES`, `PURCHASE`), `list_orders` returns both;
 `list_order_categories` lists `SALES` (upstream's default) unless given `PURCHASE`.
 
@@ -420,7 +417,7 @@ sends `is_current` false, the current period's too (observed on 2026-11-17);
 by hand, such as payments, each with its `rows`; an order in a status that books nothing
 has none. `list_history` is the audit log, newest first: who changed what and when
 (`created_by`, `change_type`, `message`), narrowed with `order_id`, `person_id` or
-`statement_id`; the history of a deleted order is no longer listed (observed).
+`statement_id`; the history of a deleted order is no longer listed.
 
 `get_report_tree` lists the organisation's reports, collections of report elements;
 `get_report_data` reads one element (`element_id`, a balance sheet, a profit and loss
@@ -447,7 +444,8 @@ filters as `list_accounts` does.
 ## Upstream terms and attribution
 
 Data comes from CashCtrl (https://cashctrl.com) under its own terms of use;
-this package adds no rights to it. Documentation snapshot: `docs/upstream/`.
+this package adds no rights to it. Documentation snapshot: `docs/upstream/`; what
+CashCtrl was seen doing beside it, each note with its probe: `docs/upstream/OBSERVED.md`.
 
 ## Documents
 

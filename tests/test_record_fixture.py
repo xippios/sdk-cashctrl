@@ -2,7 +2,8 @@
 
 It also holds to its policies: GET only for a path the snapshot in docs/upstream/ documents
 as a GET, and POST for the write tools' operations only, an
-order write only for orders marked xippios-live, read first; .json only; no e-mail
+order write only for orders marked xippios-live, read first; .json only, and the refusals
+of five file paths; no e-mail
 address, in the request body neither. The demo
 organisation is synthetic, so every module and every amount may be recorded. The key as
 given and binary bodies are core's ``Scrub``; the host, the encoded forms, the JSON-decoded
@@ -16,6 +17,7 @@ import dataclasses
 import importlib.util
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -25,7 +27,7 @@ import httpx
 import pytest
 import respx
 from xippios.core import AsyncClient, ClientConfig
-from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response
+from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response, load_fixture
 from xippios.core.testing.replay import replay
 
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
@@ -71,6 +73,10 @@ def test_fixture_directory_follows_the_endpoint() -> None:
     recorder = load_recorder()
     assert recorder.fixture_endpoint("account/read.json") == "account_read"
     assert recorder.fixture_endpoint("account/bank/list.json") == "account_bank_list"
+    assert recorder.fixture_endpoint("order/document/read.pdf") == "order_document_read_pdf"
+    assert recorder.fixture_endpoint("report/element/download.xlsx") == (
+        "report_element_download_xlsx"
+    ), "a file path's directory is its wrapper's, the extension its last word"
 
 
 def test_the_demo_host_becomes_the_replay_host(
@@ -420,6 +426,11 @@ def test_only_get_and_post_are_recorded(
         "fiscalperiod/delete.json",
         "person/category/create.json",
         "order/category/delete.json",
+        "order/document/read.pdf",
+        "report/element/download.pdf",
+        "report/element/download.xlsx",
+        "report/collection/download.pdf",
+        "report/collection/download.xlsx",
     ],
 )
 def test_a_post_is_recorded_for_the_fourteen_write_paths_only(
@@ -1160,8 +1171,202 @@ def test_only_json_endpoints_are_recorded(
     assert not respx_mock.calls, "refused before any request"
     assert not (tmp_path / "tests" / "fixtures").exists()
     out = capsys.readouterr().out
-    assert out.startswith(f"not recorded: only .json endpoints are recorded, not {endpoint}: ")
+    assert out.startswith(
+        f"not recorded: only .json endpoints and five file paths are recorded, not {endpoint}: "
+    )
     assert "a bare number or a document" in out
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+FILE_REFUSALS = {
+    "report/element/download.pdf": ("report_element_download_pdf", "elementId"),
+    "report/element/download.xlsx": ("report_element_download_xlsx", "elementId"),
+    "report/collection/download.pdf": ("report_collection_download_pdf", "collectionId"),
+    "report/collection/download.xlsx": ("report_collection_download_xlsx", "collectionId"),
+    "order/document/read.pdf": ("order_document_read_pdf", "ids"),
+}
+"""The five file paths whose refusal is recorded, their wrappers' fixture directories and ids."""
+JSON_UTF8 = "application/json;charset=utf-8"
+
+
+def recorded_404(endpoint: str) -> httpx.Response:
+    """The 404 recorded at ``endpoint`` for an id no record has, as upstream sent it."""
+    directory, _ = FILE_REFUSALS[endpoint]
+    answer = load_fixture(FIXTURES / directory / "unknown_id.json").response
+    return httpx.Response(
+        answer.status, headers=[(name, value) for name, value in answer.headers], text=answer.body
+    )
+
+
+def recorded_404_changed(
+    endpoint: str, *, status: int, content_type: str, binary: bool = False, **headers: str
+) -> httpx.Response:
+    """NOT RECORDED: ``endpoint``'s recorded 404 changed in memory (conventions §10, kind 4).
+
+    Served at another status or under another content type, with a header added, and for
+    a binary body its first byte made no UTF-8: a form upstream was not seen to send at
+    these paths, which reaches the recorder's branches as an answer of that form would.
+    """
+    answer = recorded_404(endpoint)
+    content = (b"\xff" + answer.content[1:]) if binary else answer.content
+    kept = [
+        (name, value)
+        for name, value in answer.headers.multi_items()
+        if name.lower() not in ("content-type", "content-length")
+    ]
+    added = [(name.replace("_", "-"), value) for name, value in headers.items()]
+    return httpx.Response(
+        status, headers=[*kept, *added, ("content-type", content_type)], content=content
+    )
+
+
+def test_the_file_paths_are_named_in_one_constant() -> None:
+    """The maintainer's decision of 2026-11-21: these five, and no other."""
+    assert frozenset(FILE_REFUSALS) == load_recorder().FILE_PATHS
+
+
+@pytest.mark.parametrize("endpoint", sorted(FILE_REFUSALS))
+def test_a_file_path_records_the_404_of_an_unknown_id(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+) -> None:
+    """Each path's own recorded 404 is an error with a text body: written in its wrapper's dir."""
+    directory, name = FILE_REFUSALS[endpoint]
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}")
+    route.mock(return_value=recorded_404(endpoint))
+    assert recorder.main([endpoint, "unknown_id", f"{name}=999999999"]) == 0
+    assert route.call_count == 1
+    assert route.calls.last.request.url.params[name] == "999999999"
+    written = tmp_path / "tests" / "fixtures" / directory / "unknown_id.json"
+    recorded = json.loads(written.read_text())
+    assert recorded["response"]["status"] == 404
+    assert recorded["response"]["body"] == "CashCtrl - 404 Not Found"
+    url = f"https://demo.cashctrl.com/api/v1/{endpoint}?{name}=999999999"
+    assert capsys.readouterr().out == f"404 {url}\n"
+
+
+@pytest.mark.parametrize("endpoint", sorted(FILE_REFUSALS))
+def test_a_text_error_under_a_files_content_type_is_written(
+    recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter, endpoint: str
+) -> None:
+    """A 404 labelled as a PDF whose body is text is still an error answer, and is written."""
+    directory, name = FILE_REFUSALS[endpoint]
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}")
+    route.mock(
+        return_value=recorded_404_changed(endpoint, status=404, content_type="application/pdf")
+    )
+    assert recorder.main([endpoint, "labelled", f"{name}=1"]) == 0
+    assert (tmp_path / "tests" / "fixtures" / directory / "labelled.json").is_file()
+
+
+@pytest.mark.parametrize("endpoint", sorted(FILE_REFUSALS))
+def test_a_file_paths_refusal_at_http_200_is_recorded(
+    recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter, endpoint: str
+) -> None:
+    """CashCtrl's refusal, ``success`` false, is no file either, whatever path answers it.
+
+    NOT RECORDED: CashCtrl's documented refusal, composed in the shape
+    ``account_read/missing_id`` recorded (conventions §10, kind 2).
+    """
+    directory, name = FILE_REFUSALS[endpoint]
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}")
+    refusal = b'{"success":false,"errorMessage":"No.","data":null}'
+    route.mock(
+        return_value=httpx.Response(200, content=refusal, headers={"content-type": JSON_UTF8})
+    )
+    assert recorder.main([endpoint, "refused", f"{name}=1"]) == 0
+    assert (tmp_path / "tests" / "fixtures" / directory / "refused.json").is_file()
+
+
+ANSWERS_NOT_WRITTEN: dict[str, Callable[[str], httpx.Response]] = {
+    # The path's recorded 404 changed in memory (``recorded_404_changed``, kind 4).
+    "binary-pdf": lambda endpoint: recorded_404_changed(
+        endpoint, status=200, content_type="application/pdf;charset=UTF-8", binary=True
+    ),
+    "binary-xlsx": lambda endpoint: recorded_404_changed(
+        endpoint, status=200, content_type="application/vnd.ms-excel", binary=True
+    ),
+    "text-pdf": lambda endpoint: recorded_404_changed(
+        endpoint, status=200, content_type="application/pdf"
+    ),
+    "text-labelled-json": lambda endpoint: recorded_404_changed(
+        endpoint, status=200, content_type=JSON_UTF8
+    ),
+    "redirect": lambda endpoint: recorded_404_changed(
+        endpoint, status=302, content_type="text/plain;charset=utf-8", location="/"
+    ),
+    "binary-404-pdf": lambda endpoint: recorded_404_changed(
+        endpoint, status=404, content_type="application/pdf", binary=True
+    ),
+    # NOT RECORDED: shapes recorded at ``.json`` operations, a read's and a list's, composed
+    # (conventions §10, kind 2): JSON that is no refusal.
+    "json-success": lambda _: httpx.Response(
+        200, content=b'{"success":true,"data":{"id":1}}', headers={"content-type": JSON_UTF8}
+    ),
+    "json-list": lambda _: httpx.Response(
+        200, content=b'{"total":0,"data":[]}', headers={"content-type": "application/json"}
+    ),
+}
+"""Answers a file path never writes: a file, JSON that is no refusal, a 3xx, a binary 404."""
+
+
+@pytest.mark.parametrize("kind", sorted(ANSWERS_NOT_WRITTEN))
+@pytest.mark.parametrize("endpoint", sorted(FILE_REFUSALS))
+def test_a_file_path_writes_no_answer_but_an_error_or_a_refusal(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+    kind: str,
+) -> None:
+    """Only an error of HTTP 4xx or 5xx with a text body, or the refusal at HTTP 2xx.
+
+    Any other answer spends its one request and is never written, whatever its content
+    type says: a file, a file whose bytes happen to be text, JSON that is no refusal, a
+    redirect, an error whose body is binary.
+    """
+    _, name = FILE_REFUSALS[endpoint]
+    answer = ANSWERS_NOT_WRITTEN[kind](endpoint)
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}")
+    route.mock(return_value=answer)
+    assert recorder.main([endpoint, "not_kept", f"{name}=1"]) == 1
+    assert route.call_count == 1
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    out = capsys.readouterr().out
+    assert out.startswith("not written tests/fixtures/")
+    content_type = answer.headers["content-type"]
+    assert (
+        f"{endpoint} answered HTTP {answer.status_code} ({content_type}), which a file path" in out
+    )
+    assert REAL not in out
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "report/element/download.csv",
+        "report/element/download.xml",
+        "report/collection/download.csv",
+        "report/collection/download_annualreport.pdf",
+        "order/document/read.zip",
+        "journal/list.pdf",
+    ],
+)
+def test_any_other_file_path_is_still_refused(
+    recorder: ModuleType,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+) -> None:
+    assert recorder.main([endpoint, "not_json", "id=1"]) == 1
+    assert not respx_mock.calls, "refused before any request"
+    assert capsys.readouterr().out.startswith(
+        f"not recorded: only .json endpoints and five file paths are recorded, not {endpoint}: "
+    )
 
 
 @pytest.mark.parametrize(
@@ -1731,7 +1936,7 @@ def test_a_settled_token_like_field_needs_no_review(recorder: ModuleType) -> Non
 def test_every_committed_fixture_passes_the_final_check(recorder: ModuleType) -> None:
     """The recorded fixtures hold no tag, address or credential the check would refuse."""
     fixtures = sorted((Path(__file__).parent / "fixtures").glob("*/*.json"))
-    assert len(fixtures) == 68
+    assert len(fixtures) == 73
     for path in fixtures:
         assert recorder.check(path.read_text(encoding="utf-8"), "demo", "") == ([], []), path.name
 

@@ -22,7 +22,7 @@ conventions §6):
 ``post_form`` sends the fields with ``Content-Type: application/x-www-form-urlencoded;
 charset=UTF-8``, the charset declared as ``scripts/seed_demo.py`` declared it for the
 65 writes that seeded the demo organisation, an umlaut read back byte for byte
-(``docs/demo-org.md``, Observed write semantics). A refusal (HTTP 200 with
+(``docs/upstream/OBSERVED.md``, Writes are form-encoded UTF-8). A refusal (HTTP 200 with
 ``"success": false``) is raised by ``_client.classify`` as ``RequestRejected``; core
 never retries a ``POST`` after a 5xx or a transport failure (sdk-core ADR-0011).
 """

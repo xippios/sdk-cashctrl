@@ -3,8 +3,8 @@
 Reference: ``docs/upstream/person.md``, "Read person" ("Returns a single person by ID."),
 one parameter, ``id`` (mandatory, NUMBER). An unknown id is assumed to be answered with
 HTTP 200 and ``"success": false``, which ``_client.classify`` raises as
-``NotFoundError``: observed for ``account``, ``currency`` and ``journal`` reads on
-2026-10-23, not for ``person``.
+``NotFoundError``: recorded for ``account`` and ``journal`` reads
+(``docs/upstream/OBSERVED.md``), not for ``person``.
 """
 
 from xippios.core import parse

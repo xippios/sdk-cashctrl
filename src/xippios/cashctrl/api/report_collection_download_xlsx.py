@@ -5,7 +5,7 @@ Excel file for a report collection by ID and time period. Each report element is
 worksheet within the Excel file."). Its documented parameters are those of
 ``download.pdf``, which ``report_collection_params`` encodes. The file is written by
 ``_download.download``, which raises a refusal sent as HTTP 200 instead of writing it.
-Observed on 2026-11-17: collection 1 came as the spreadsheet media type with
+As ``docs/upstream/OBSERVED.md`` notes, collection 1 came as the spreadsheet media type with
 ``charset=UTF-8``, named ``Annual report 2025.xlsx``, and a ``collectionId`` no
 collection has was answered with HTTP 404, which ``_client.classify`` raises as
 ``NotFoundError``.
@@ -47,8 +47,7 @@ async def report_collection_download_xlsx(
         start_date: ``startDate``, the first day of the report period.
 
     Raises:
-        NotFoundError: A ``collectionId`` no collection has (HTTP 404, observed
-            2026-11-17).
+        NotFoundError: A ``collectionId`` no collection has (HTTP 404).
         RequestRejected: Upstream refused the download otherwise; ``dest`` is left as it
             was.
     """

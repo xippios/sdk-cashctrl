@@ -1,8 +1,9 @@
 """``GET /api/v1/order/bookentry/read.json``: one book entry of an order by its id.
 
 Reference: ``docs/upstream/order.md``, Book entry, "Read book entry" ("Returns a single
-book entry by ID."), one parameter, ``id`` (mandatory, NUMBER). Observed on 2026-11-17
-for the seeded purchase order 5's entry: ``{"success": true, "data": {...}}``, the entry
+book entry by ID."), one parameter, ``id`` (mandatory, NUMBER). Its answer for the seeded
+purchase order 5's entry, as
+``docs/upstream/OBSERVED.md`` notes: ``{"success": true, "data": {...}}``, the entry
 as ``order/bookentry/list.json`` lists it, ``orderId`` naming its order and ``type``
 ``GENERATED`` for an entry booked from the order's items. The book entry writes read
 it first (``tasks_write``); no read tool serves it.

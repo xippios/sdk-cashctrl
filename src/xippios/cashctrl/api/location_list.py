@@ -1,7 +1,8 @@
 """``GET /api/v1/location/list.json``: every location of an organisation.
 
 Reference: ``docs/upstream/meta.md``, "List locations" ("Returns a list of all
-locations."). The operation documents no parameters. Observed on 2026-10-27:
+locations."). The operation documents no parameters. Its answer, as
+``docs/upstream/OBSERVED.md`` notes:
 ``{"total": 1, "data": [...]}``, the demo organisation's main location.
 """
 

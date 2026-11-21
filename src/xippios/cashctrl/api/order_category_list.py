@@ -6,7 +6,8 @@ of categories per type (sales or purchase)."). Its documented parameters, both o
 (number of orders). Leave empty to use the current fiscal period.") and ``type`` ("The
 type of category (sales orders or purchase orders). Defaults to SALES. Possible values:
 SALES, PURCHASE."). It documents no ``start`` or ``limit``: one answer carries every
-category. Observed on 2026-10-24: ``{"total": 6, "data": [...]}`` without ``type``, the
+category. Its answer without ``type``, as ``docs/upstream/OBSERVED.md`` notes:
+``{"total": 6, "data": [...]}``, the
 six default sales categories, ``total`` equal to the records.
 """
 

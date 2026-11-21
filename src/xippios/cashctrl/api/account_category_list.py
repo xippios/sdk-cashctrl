@@ -1,8 +1,9 @@
 """``GET /api/v1/account/category/list.json``: every account category of an organisation.
 
 Reference: ``docs/upstream/account.md``, "List categories" in "Category" ("Returns a list
-of all categories."). The operation documents no parameters. Observed on 2026-10-27:
-``{"total": 38, "data": [...]}``, CashCtrl's default chart, flat, each category with its
+of all categories."). The operation documents no parameters. Its answer, as
+``docs/upstream/OBSERVED.md``
+notes: ``{"total": 38, "data": [...]}``, CashCtrl's default chart, flat, each category with its
 ``parentId``. The same categories nested are ``account/category/tree.json`` ("Get tree
 of categories"), which is not wrapped: ``AccountCategory`` says why.
 """

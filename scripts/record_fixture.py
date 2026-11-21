@@ -59,17 +59,29 @@ never shows a value, and exits with status 1:
   ``order/bookentry/update.json`` and ``order/bookentry/delete.json`` name book entries
   (``BOOK_ENTRY_WRITES``): each entry is read (``order/bookentry/read.json``), its
   ``orderId`` taken, and that order read and checked the same way, two GETs per entry,
-  since the entry's read names its order but not the order's marker (observed on
-  2026-11-17); an entry that cannot be read or names no order refuses the write too. A
+  since the entry's read names its order but not the order's marker
+  (``docs/upstream/OBSERVED.md``); an entry that cannot be read or names no order refuses
+  the write too. A
   recorded write changes the demo organisation: the recorder says so after the request
   and asks for the matching delete, recorded or run, so that no created record stays
   behind: after a book entry, the entry's delete before its orders'; upstream documents
   no delete of a payment, so after one it asks for the orders' delete, which leaves the
   payment behind.
-- ``.json`` only. An endpoint without the extension answers a bare number or a document
-  (``account/balance``, ``account/costcenter/balance``, ``fiscalperiod/result``,
-  ``setting/get``) and an export (``.pdf``, ``.xlsx``, ``.csv``, ``.zip``) a file; both
-  are refused before a request is sent.
+- ``.json`` only, and five file paths for their refusals. An endpoint without the
+  extension answers a bare number or a document (``account/balance``,
+  ``account/costcenter/balance``, ``fiscalperiod/result``, ``setting/get``) and an export
+  (``.pdf``, ``.xlsx``, ``.csv``, ``.zip``) a file; both are refused before a request is
+  sent. ``FILE_PATHS`` names the five file paths a GET may be recorded for, the downloads
+  whose 404 for an id no record has ``_client.classify`` maps: ``order/document/read.pdf``
+  and the PDF and Excel files of a report element and of a report collection, as the
+  maintainer decided on 2026-11-21, so that the mapping rests on recorded answers. Their
+  answer is written only when it is no file: an error of HTTP 4xx or 5xx whose body is
+  text, or at HTTP 2xx CashCtrl's refusal, a JSON object with ``success`` false. Any other
+  answer, a 1xx or 3xx, any other 2xx and any answer whose body is binary, whatever its
+  content type says, is refused after its one request and nothing is written
+  (``kept_at_a_file_path``), so the recorder never keeps a file. Give such a path an id no
+  record has, ``elementId=999999999``; its fixture lands in its wrapper's directory, the
+  extension the last word: ``tests/fixtures/report_element_download_pdf/unknown_id.json``.
 - No e-mail addresses. Every e-mail-shaped string in the request URL, the request
   body, the response header values and the response body becomes ``user@example.com``,
   with ``@`` written plainly, as ``%40`` or as the HTML entities ``&#64;``, ``&#x40;``
@@ -78,8 +90,8 @@ never shows a value, and exits with status 1:
   ``.example`` addresses, but ``createdBy`` and ``lastUpdatedBy`` may carry the address
   of the user who wrote a record, a real person, so the scrub stays.
 - No API user tags. CashCtrl names an API user in ``createdBy`` and ``lastUpdatedBy`` as
-  ``API:`` and the first four characters of its key (observed on 2026-10-23 on the
-  records ``scripts/seed_demo.py`` wrote). Every such tag becomes ``API:REDACTED``,
+``API:`` and the first four characters of its key (``docs/upstream/OBSERVED.md``). Every
+such tag becomes ``API:REDACTED``,
   whichever key it comes from, with the marker in any case, at the start of a word or
   right after a JSON escape. A tag the scrub cannot reach (glued to a word, or behind a
   Unicode escape) is refused by the final check.
@@ -88,8 +100,8 @@ never shows a value, and exits with status 1:
   ends in ``iban`` (``iban``, ``qrIban``, ``qr_iban``, ``orgIban``, ``orgQrIban``,
   ``recipientIban``), the identifiers this package keeps out of its
   projections (sdk-core ADR-0017), in any case, has its text value replaced by ``REDACTED``.
-  ``order/read.json`` sends ``hash``, an undocumented 32-character text that may be the
-  token of a public link to the order document (observed on 2026-10-23, not verified);
+  ``order/read.json`` sends ``hash``, an undocumented 32-character text that may be the token
+  of a public link to the order document (``docs/upstream/OBSERVED.md``);
   ``person/list.json`` sends ``ssn`` and ``iban``, ``location/list.json`` ``iban`` and
   ``qrIban`` and ``order/document/read.json`` ``orgIban``, ``orgQrIban`` and
   ``recipientIban``, only ever seen ``null``; the others were never seen and are
@@ -106,7 +118,8 @@ fixture in memory with ``Scrub(secrets=[key, its basic-auth token])`` (conventio
 credentials scrubbed, the key and its token made ``REDACTED`` where they appear as given,
 and a plain verify that refuses the exchange when either is still there as given; core
 also refuses a body that is not UTF-8 text, which no scrub can read (exports are out of
-scope for fixtures, which the recorder's message says first). Then the recorder's own
+scope for fixtures, which the recorder's message says first), after the recorder has
+refused any file a file path answered. Then the recorder's own
 step, ``TenantScrub``, runs on the ``Fixture`` core returns (sdk-core ADR-0042, decision 4): the
 demo host (``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``, in any case, IDNA or
 percent-encoded) becomes ``demo.cashctrl.com``, the host offline tests replay against, in
@@ -228,6 +241,22 @@ WRITE_PATHS = frozenset(
     }
 )
 """The endpoints a POST may be recorded for: exactly those the write tools call."""
+FILE_PATHS = frozenset(
+    {
+        "order/document/read.pdf",
+        "report/element/download.pdf",
+        "report/element/download.xlsx",
+        "report/collection/download.pdf",
+        "report/collection/download.xlsx",
+    }
+)
+"""The file paths a GET may be recorded for, its answer only when it is no file.
+
+The downloads whose 404 for an id no record has ``_client.classify`` maps to
+``NotFoundError``, admitted by the maintainer's decision of 2026-11-21 so that the mapping
+rests on recorded answers; only an error of HTTP 4xx or 5xx with a text body or CashCtrl's
+refusal at HTTP 2xx is written (``kept_at_a_file_path``).
+"""
 MARK = "xippios-live"
 """The marker a recorded create must carry in one of its values (title, company, ...)."""
 ORDER_WRITES = {
@@ -314,7 +343,8 @@ API_USER = re.compile(
 )
 """CashCtrl's tag for an API user in ``createdBy``/``lastUpdatedBy``: ``API:`` and key[:4].
 
-Observed on 2026-10-23: the records an API user wrote carry ``"createdBy": "API:<the first
+As ``docs/upstream/OBSERVED.md`` notes, the records an API user wrote carry ``"createdBy":
+"API:<the first
 four characters of its key>"``. The scrub is narrow, as the e-mail scrub is: the marker in
 any case, at the start of a word or right after a JSON escape (``\\n``), never inside a
 JSON escape. What it cannot reach, ``API_USER_ANYWHERE`` finds and the check refuses.
@@ -366,8 +396,12 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def fixture_endpoint(endpoint: str) -> str:
-    """``account/read.json`` → ``account_read``: the fixture directory of an endpoint."""
-    return endpoint.rsplit(".", 1)[0].replace("/", "_")
+    """The fixture directory of an endpoint, its wrapper's name (conventions §2, §10).
+
+    ``account/read.json`` → ``account_read``, and a file path keeps its extension as the
+    last word: ``order/document/read.pdf`` → ``order_document_read_pdf``.
+    """
+    return endpoint.removesuffix(".json").replace("/", "_").replace(".", "_")
 
 
 def unmarked(method: str, endpoint: str, params: dict[str, str]) -> str | None:
@@ -412,10 +446,10 @@ def refusal(method: str, endpoint: str) -> str | None:
     """Why the request must not be sent at all, else ``None``.
 
     Refused: a method other than GET and POST; a POST to anything but ``WRITE_PATHS``;
-    a GET to one of ``WRITE_PATHS``; an endpoint without ``.json``; a GET to any other
-    path the snapshot does not document as a GET alone (``documented_methods``), since
-    whether upstream acts on a GET to a POST path is unverified
-    (https://github.com/xippios/sdk-cashctrl/issues/27).
+    a GET to one of ``WRITE_PATHS``; an endpoint without ``.json`` but ``FILE_PATHS``; a
+    GET to any other path the snapshot does not document as a GET alone
+    (``documented_methods``), since whether upstream acts on a GET to a POST path is
+    unverified (https://github.com/xippios/sdk-cashctrl/issues/27).
     """
     if method.upper() not in ("GET", "POST"):
         return (
@@ -428,10 +462,11 @@ def refusal(method: str, endpoint: str) -> str | None:
             f"a POST is recorded only for one of the fourteen write paths the write tools "
             f"call ({', '.join(sorted(WRITE_PATHS))}), not {endpoint}"
         )
-    if not endpoint.endswith(".json"):
+    if not endpoint.endswith(".json") and endpoint not in FILE_PATHS:
         return (
-            f"only .json endpoints are recorded, not {endpoint}: one without the extension "
-            "answers a bare number or a document, and an export is a file"
+            f"only .json endpoints and five file paths are recorded, not {endpoint}: one "
+            "without the extension answers a bare number or a document, and an export is a "
+            f"file; the file paths are {', '.join(sorted(FILE_PATHS))}, for their refusals"
         )
     if not is_write(method):
         documented = documented_methods(UPSTREAM).get(endpoint, frozenset())
@@ -466,6 +501,24 @@ async def exchange_async(
 
 
 exchange = sync(exchange_async)
+
+
+def kept_at_a_file_path(response: httpx.Response) -> bool:
+    """Whether a file path's answer is written: a text error, or CashCtrl's refusal.
+
+    An error of HTTP 4xx or 5xx whose body is UTF-8 text, whatever its content type says,
+    or at HTTP 2xx a JSON object with ``success`` false. Never a 1xx or 3xx, another 2xx,
+    or an answer whose body is binary: the file an id fetched is never recorded.
+    """
+    if 400 <= response.status_code < 600:
+        return _is_text(response.content)
+    if not response.is_success:
+        return False
+    try:
+        answer = json.loads(response.content)
+    except ValueError:
+        return False
+    return isinstance(answer, dict) and answer.get("success") is False
 
 
 def order_ids(text: str) -> list[int] | None:
@@ -1070,7 +1123,7 @@ def changed_reminder(endpoint: str, response: httpx.Response) -> str:
     """The note after a recorded write: the organisation changed, and the delete is due.
 
     Names the ``insertId`` when the answer carries one (an integer: the new record's id
-    for a create, the record's own for an update, observed on 2026-10-24), and nothing
+    for a create, the record's own for an update, ``docs/upstream/OBSERVED.md``), and nothing
     else of the answer.
     """
     try:
@@ -1136,6 +1189,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     response = exchange(client, method, f"/{args.endpoint}", args.params)
     if method == "POST":
         print(changed_reminder(args.endpoint, response))  # noqa: T201
+    if args.endpoint in FILE_PATHS and not kept_at_a_file_path(response):
+        content_type = response.headers.get("content-type") or "no content type"
+        print(  # noqa: T201
+            f"not written {path.relative_to(ROOT)}: {args.endpoint} answered HTTP "
+            f"{response.status_code} ({content_type}), which a file path does not record: "
+            "only an error of HTTP 4xx or 5xx with a text body, or CashCtrl's refusal at "
+            "HTTP 2xx, success false, never a file"
+        )
+        return 1
     try:
         fixture = scrubbed(response, key, subdomain)
     except ValueError as refused_by_scrub:  # names what and where, never a value

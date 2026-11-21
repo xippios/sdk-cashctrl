@@ -18,6 +18,7 @@ from xippios.core import (
     UpstreamError,
     XippiosError,
 )
+from xippios.core.errors import request_description
 from xippios.core.http import status_for
 from xippios.core.mcp import error_to_text
 from xippios.core.testing import fixture_path, load_fixture, response_from_fixture, sent_query
@@ -82,22 +83,47 @@ def test_a_rejection_is_an_invalid_request_for_both_adapters() -> None:
     assert str(RequestRejected()) == "CashCtrl rejected the request: no reason given"
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "case"),
+    [
+        ("account_read", "unknown_id"),
+        ("journal_read", "unknown_id"),
+        ("order_document_read_pdf", "unknown_id"),
+        ("report_collection_download_xlsx", "unknown_id"),
+    ],
+)
+def test_each_error_classify_words_names_the_request_by_cores_description(
+    fixtures_dir: Path, endpoint: str, case: str
+) -> None:
+    """Conventions §5: the method and the path as core's ``request_description`` gives them.
+
+    Never a description of the package's own, never the query or the host.
+    """
+    answer = recorded(fixtures_dir, endpoint, case)
+    error = classify(answer)
+    assert isinstance(error, NotFoundError)
+    assert str(error).endswith(f" ({request_description(answer)})")
+    assert request_description(answer).startswith("GET /api/v1/")
+
+
 def test_the_observed_unknown_id_is_not_found(fixtures_dir: Path) -> None:
     error = classify(recorded(fixtures_dir, "account_read", "unknown_id"))
     assert isinstance(error, NotFoundError)
-    assert str(error) == "CashCtrl: This account does not exist. (/account/read.json)"
+    assert str(error) == "CashCtrl: This account does not exist. (GET /api/v1/account/read.json)"
 
 
 def test_the_observed_unknown_journal_entry_is_not_found(fixtures_dir: Path) -> None:
     error = classify(recorded(fixtures_dir, "journal_read", "unknown_id"))
     assert isinstance(error, NotFoundError)
-    assert str(error) == "CashCtrl: This book entry does not exist. (/journal/read.json)"
+    assert str(error) == "CashCtrl: This book entry does not exist. (GET /api/v1/journal/read.json)"
 
 
 def test_the_observed_unknown_fiscal_period_is_not_found(fixtures_dir: Path) -> None:
     error = classify(recorded(fixtures_dir, "fiscalperiod_read", "unknown_id"))
     assert isinstance(error, NotFoundError)
-    assert str(error) == ("CashCtrl: This fiscal period does not exist. (/fiscalperiod/read.json)")
+    assert str(error) == (
+        "CashCtrl: This fiscal period does not exist. (GET /api/v1/fiscalperiod/read.json)"
+    )
 
 
 def test_the_observed_missing_id_is_a_rejection_with_a_message(fixtures_dir: Path) -> None:
@@ -143,7 +169,11 @@ def test_a_top_level_message_is_read_when_error_message_is_absent(
     ],
 )
 def test_reading_one_record_by_id_is_not_found(path: str) -> None:
-    """A ``read.json`` by ``id``, and a ``read.pdf`` by ``ids`` (assumed alike, not observed)."""
+    """A ``read.json`` by ``id``, and a ``read.pdf`` by ``ids`` (assumed alike, not observed).
+
+    NOT RECORDED: the refusal is composed in the shape ``account_read/unknown_id`` recorded,
+    a documented error (conventions §10, kind 2).
+    """
     error = classify(refusal(path, {"success": False, "errorMessage": "Gone.", "data": None}))
     assert isinstance(error, NotFoundError)
 
@@ -172,6 +202,10 @@ def test_anything_but_a_read_by_id_is_a_rejection(path: str) -> None:
 
 
 def test_a_refusal_is_classified_whatever_the_content_type() -> None:
+    """NOT RECORDED: a refusal composed in the recorded shape (conventions §10, kind 2).
+
+    Served under a content type upstream was not seen to send with it (kind 4's form).
+    """
     body = b'{"success":false,"errorMessage":"Nope."}'
     error = classify(response("/account/delete.json", 200, body, {"content-type": "text/html"}))
     assert isinstance(error, RequestRejected)
@@ -193,10 +227,20 @@ def test_a_refusal_is_classified_whatever_the_content_type() -> None:
 def test_everything_else_falls_through(
     path: str, status: int, body: bytes, content_type: dict[str, str]
 ) -> None:
+    """NOT RECORDED: bodies composed in the test (conventions §10).
+
+    A list and a read in the shapes recorded (kind 2), and a CSV, a PDF, malformed JSON, a
+    204 and a 302 of no shape upstream sends (kind 5), to show that ``classify`` lets them be.
+    """
     assert classify(response(path, status, body, content_type)) is None
 
 
 def test_a_404_means_the_endpoint_does_not_exist() -> None:
+    """NOT RECORDED: the documented 404 of an unknown endpoint (``error-handling.md``).
+
+    No recording holds its body, so ``Not here``, of no shape upstream sends, stands in
+    (conventions §10, kinds 2 and 5); ``_status_error`` words the error from the status.
+    """
     error = classify(response("/account/nope.json", 404, b"Not here", {}))
     assert isinstance(error, UpstreamError)
     assert not isinstance(error, NotFoundError)
@@ -207,33 +251,55 @@ def test_a_404_means_the_endpoint_does_not_exist() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "path", ["/order/document/read.pdf?ids=999999", "/order/document/read.pdf?ids=3%2C5&lang=de"]
-)
-def test_a_404_on_a_read_pdf_by_ids_is_not_found(path: str) -> None:
-    """Observed on 2026-10-29: an unknown order's PDF is a 404; upstream signals absence."""
-    error = classify(response(path, 404, b"<title>CashCtrl - 404 Not Found</title>", {}))
+FILE_404S = {
+    "/order/document/read.pdf": ("order_document_read_pdf", "unknown_id"),
+    "/report/element/download.pdf": ("report_element_download_pdf", "unknown_id"),
+    "/report/element/download.xlsx": ("report_element_download_xlsx", "unknown_id"),
+    "/report/collection/download.pdf": ("report_collection_download_pdf", "unknown_id"),
+    "/report/collection/download.xlsx": ("report_collection_download_xlsx", "unknown_id"),
+}
+"""The file paths whose 404 for an id no record has is recorded, by path: the fixture."""
+
+
+def recorded_at(fixtures_dir: Path, path: str) -> httpx.Response:
+    """The recorded 404 of the operation of ``path``, served for the request ``path`` names.
+
+    A recorded answer served at another URL of the same operation, for a state upstream
+    answers alike there (conventions §10): an id no record has, with other parameters.
+    """
+    answer = recorded(fixtures_dir, *FILE_404S[path.split("?", 1)[0]])
+    return response(path, answer.status_code, answer.content, dict(answer.headers))
+
+
+@pytest.mark.parametrize("path", sorted(FILE_404S))
+def test_the_recorded_404_of_an_unknown_id_is_not_found(fixtures_dir: Path, path: str) -> None:
+    """Each file path answered an id no record has with HTTP 404 (docs/upstream/OBSERVED.md)."""
+    answer = recorded(fixtures_dir, *FILE_404S[path])
+    assert answer.status_code == 404
+    error = classify(answer)
     assert isinstance(error, NotFoundError)
-    assert str(error) == (
-        "CashCtrl: no record has an id asked, HTTP 404 (/order/document/read.pdf)"
-    ), "the path, never the query or the host"
+    assert str(error) == (f"CashCtrl: no record has an id asked, HTTP 404 (GET /api/v1{path})"), (
+        "the path, never the query or the host"
+    )
 
 
 @pytest.mark.parametrize(
     "path",
     [
+        "/order/document/read.pdf?ids=999999",
+        "/order/document/read.pdf?ids=3%2C5&lang=de",
         "/report/element/download.pdf?elementId=999999&fiscalPeriod=2",
         "/report/element/download.xlsx?elementId=999999&startDate=2025-01-01&language=de",
         "/report/collection/download.pdf?collectionId=999999",
         "/report/collection/download.xlsx?collectionId=999999&fiscalPeriod=2",
     ],
 )
-def test_a_404_on_a_report_download_by_its_id_is_not_found(path: str) -> None:
-    """Observed on 2026-11-17 for an element's PDF and a collection's Excel file."""
-    error = classify(response(path, 404, b"CashCtrl - 404 Not Found", {}))
+def test_a_404_by_the_id_with_other_parameters_is_not_found(fixtures_dir: Path, path: str) -> None:
+    """The recorded 404 served for a request by the id with more parameters, or other ids."""
+    error = classify(recorded_at(fixtures_dir, path))
     assert isinstance(error, NotFoundError)
     assert str(error) == (
-        f"CashCtrl: no record has an id asked, HTTP 404 ({path.split('?', 1)[0]})"
+        f"CashCtrl: no record has an id asked, HTTP 404 (GET /api/v1{path.split('?', 1)[0]})"
     ), "the path, never the query or the host"
 
 
@@ -255,6 +321,12 @@ def test_a_404_on_a_report_download_by_its_id_is_not_found(path: str) -> None:
     ],
 )
 def test_every_other_404_is_an_unknown_endpoint(path: str) -> None:
+    """NOT RECORDED: the documented 404 of an unknown endpoint (``error-handling.md``).
+
+    No recording holds its body, so ``Not here``, of no shape upstream sends, stands in
+    (conventions §10, kinds 2 and 5): ``_status_error`` words every 404 but a file
+    operation's by its id as an unknown endpoint, from the status, whatever the body.
+    """
     error = classify(response(path, 404, b"Not here", {}))
     assert isinstance(error, UpstreamError)
     assert not isinstance(error, NotFoundError)
@@ -262,6 +334,11 @@ def test_every_other_404_is_an_unknown_endpoint(path: str) -> None:
 
 
 def test_core_keeps_mapping_status_retry_after_and_body() -> None:
+    """NOT RECORDED: the documented 403, 429 and 503 of ``error-handling.md``, composed.
+
+    Their bodies are of no shape upstream sends (conventions §10, kinds 2 and 5), to show
+    that core's mapping of status, ``Retry-After`` and body stays.
+    """
     plain = {"content-type": "text/plain"}
     auth = classify(response("/account/list.json", 403, b"Forbidden", plain))
     assert isinstance(auth, AuthError)
@@ -404,7 +481,8 @@ async def test_a_429_is_a_rate_limit_error_with_retry_after(
     """sdk-core ADR-0033, decision 3: core's mapping inside ``classify``, ``Retry-After`` as sent.
 
     CashCtrl documents the 429 and nothing about its window (``error-handling.md``); 120
-    seconds is beyond the retry policy's backoff, so the client raises at once.
+    seconds is beyond the retry policy's backoff, so the client raises at once. NOT
+    RECORDED: the documented 429, composed with a ``Retry-After`` (conventions §10, kind 2).
     """
     route = respx_mock.get(f"{BASE}/account/list.json")
     route.respond(429, headers={"Retry-After": "120"}, text="Too Many Requests")

@@ -42,6 +42,7 @@ from xippios.core import (
     UpstreamError,
     XippiosError,
     error_from_response,
+    request_description,
 )
 
 from xippios.cashctrl._version import __version__
@@ -83,8 +84,9 @@ RATE_LIMIT = RateLimit(per_minute=60, burst=1)
 """Per organisation and self-imposed: upstream documents only a 429 and "add delays".
 
 One request at a time, then one a second: CashCtrl documents no burst either. Every
-response carries ``x-cashctrl-requests-left`` (299 observed on 2026-10-23, a 401
-included); its window and scope are not documented, so nothing here reads it, and no
+response carries ``x-cashctrl-requests-left`` (299, a 401
+included, ``docs/upstream/OBSERVED.md``); its window and scope are not documented, so
+nothing here reads it, and no
 ``QuotaPolicy`` is installed (sdk-core ADR-0037, decision 2): with no documented window, its default
 of an hour would turn one 429 without ``Retry-After`` into an hour of refusals.
 """
@@ -176,11 +178,6 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _api_path(url: httpx.URL) -> str:
-    """The path after ``/api/v1``, e.g. ``/order/document/read.pdf``; never the host or query."""
-    return url.path.rsplit("/api/v1", 1)[-1]
-
-
 def _reads_pdf_by_ids(url: httpx.URL) -> bool:
     """``<...>/read.pdf`` asked for records by non-empty ``ids``, at most ``lang`` besides."""
     return url.path.endswith("/read.pdf") and _reads_by_id(url)
@@ -261,11 +258,11 @@ def _status_error(response: httpx.Response) -> XippiosError | None:
     if isinstance(error, NotFoundError) and (
         _reads_pdf_by_ids(url) or _downloads_report_by_id(url)
     ):
-        # Observed on 2026-10-29: order/document/read.pdf answers an id no order has with
-        # a 404, and on 2026-11-17 a report download an id no report has; upstream
-        # signals absence there (conventions §5).
+        # order/document/read.pdf and a report download answer an id no record has with
+        # a 404 (docs/upstream/OBSERVED.md); upstream signals absence there (conventions §5).
         return NotFoundError(
-            f"CashCtrl: no record has an id asked, HTTP 404 ({_api_path(url)})", source=SOURCE
+            f"CashCtrl: no record has an id asked, HTTP 404 ({request_description(response)})",
+            source=SOURCE,
         )
     if isinstance(error, NotFoundError):
         # error-handling.md: "404 - Not Found: The requested endpoint doesn't exist." An
@@ -293,12 +290,19 @@ def classify(response: httpx.Response) -> XippiosError | None:
     means "The requested endpoint doesn't exist" and raises ``UpstreamError`` with
     ``status=404``: ``NotFoundError`` only ever means an absent record (sdk-core ADR-0028,
     decision 1). One 404 does mean an absent record: on a ``<...>/read.pdf`` asked by
-    non-empty ``ids`` (``order/document/read.pdf``), which answered an id no order has with
-    HTTP 404 ("CashCtrl - 404 Not Found") on 2026-10-29 and served the existing order's PDF
-    in the same run; it raises ``NotFoundError``, upstream signalling absence (conventions
-    §5), its message naming the path only. So does a 404 on a report's ``download.pdf`` or
-    ``download.xlsx`` by ``elementId`` or ``collectionId``, observed on 2026-11-17 for an
-    element and a collection no report has; the annual report's download takes no such id.
+    non-empty ``ids`` (``order/document/read.pdf``), which answers an id no order has with
+    HTTP 404 ("CashCtrl - 404 Not Found") and serves the existing order's PDF; it raises
+    ``NotFoundError``, upstream signalling absence (conventions
+    §5). So does a 404 on a report's ``download.pdf`` or
+    ``download.xlsx`` by ``elementId`` or ``collectionId``, an element or a collection no
+    report has; the annual report's download
+    takes no such id. ``docs/upstream/OBSERVED.md`` notes both, with their recordings.
+
+    The two errors ``classify`` words itself, ``NotFoundError`` for these 404s and for a
+    read by id refused below, name the request as core's ``request_description`` gives
+    it, ``GET /api/v1/account/read.json``: the method and the path, never the host or the
+    query (conventions §5, sdk-core ADR-0030, decision 4). ``RequestRejected`` names the
+    fields and upstream's message.
 
     Documented refusals: validation errors come back as HTTP 200 with
     ``{"success": false, "errors": [{"field": ..., "message": ...}]}``. They raise
@@ -306,11 +310,11 @@ def classify(response: httpx.Response) -> XippiosError | None:
     "either a success or error message", one message instead of a list (e.g. "Delete
     accounts" in ``account.md``).
 
-    On 2026-10-23, observed against the demo organisation, not stated in docs/upstream/:
-    that one message is a top-level ``errorMessage``, HTTP 200
+    Not stated in docs/upstream/ (``docs/upstream/OBSERVED.md``): that one message is a
+    top-level ``errorMessage``, HTTP 200
     ``{"success": false, "errorMessage": "...", "data": null}``. A top-level ``message``
-    is read when ``errorMessage`` is missing, null or empty. On 2026-10-24 the writes
-    showed both other shapes: ``journal/create.json`` without ``debitId`` answers
+    is read when ``errorMessage`` is missing, null or empty. The writes show both other
+    shapes: ``journal/create.json`` without ``debitId`` answers
     ``{"success": false, "message": null, "errors": [{"field": "debitId", "message":
     "This field cannot be empty."}]}``, the documented list; ``journal/delete.json`` for
     an id that no longer exists answers ``{"success": false, "message": "This book entry
@@ -333,8 +337,8 @@ def classify(response: httpx.Response) -> XippiosError | None:
       ``order/category/read_status.json``, ``account/balance`` and
       ``account/costcenter/balance`` also read by ``id`` under other paths, so an unknown
       id there stays a ``RequestRejected``. ``account``, ``currency``, ``journal``
-      (``"This book entry does not exist."``) and ``fiscalperiod`` (2026-11-17) were
-      observed; the other operations are assumed to refuse alike.
+      (``"This book entry does not exist."``) and ``fiscalperiod`` answer so
+      (``docs/upstream/OBSERVED.md``); the other operations are assumed to refuse alike.
     - A ``<...>/read.pdf`` asked for records by non-empty ``ids`` (``order/document/read.pdf``,
       the one this package downloads) reads by id too: a refusal with a message and no
       field list there would raise ``NotFoundError`` (not observed: an unknown id answers
@@ -361,7 +365,9 @@ def classify(response: httpx.Response) -> XippiosError | None:
     message = _text(payload.get("errorMessage")) or _text(payload.get("message"))
     url = response.request.url
     if not errors and message and _reads_by_id(url):
-        return NotFoundError(f"CashCtrl: {message} ({_api_path(url)})", source=SOURCE)
+        return NotFoundError(
+            f"CashCtrl: {message} ({request_description(response)})", source=SOURCE
+        )
     return RequestRejected(errors, upstream_message=message, source=SOURCE)
 
 

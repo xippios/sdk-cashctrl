@@ -5,9 +5,10 @@ centers."). Its documented parameters, all optional: ``categoryId``, ``dir`` ("D
 to 'ASC'."), ``filter``, ``fiscalPeriodId`` ("The ID of the fiscal period, from which we
 retrieve the balances."), ``onlyActive`` and ``onlyNotes`` ("Defaults to false."),
 ``query`` and ``sort`` ("Defaults to 'number'."). It documents no ``start`` or
-``limit``: one answer holds every match. Observed on 2026-10-27: ``{"total": 0, "data":
-[]}``; on 2026-10-28, after ``scripts/seed_demo.py --discovery`` created one, ``{"total":
-1, "data": [...]}``, the record ``CostCenter`` mirrors, its balances included.
+``limit``: one answer holds every match. Its answer, as ``docs/upstream/OBSERVED.md`` notes:
+``{"total": 0, "data": []}``
+on the new demo organisation, and after ``scripts/seed_demo.py --discovery`` created one
+``{"total": 1, "data": [...]}``, the record ``CostCenter`` mirrors, its balances included.
 """
 
 from collections.abc import Sequence
