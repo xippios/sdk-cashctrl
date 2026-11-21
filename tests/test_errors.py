@@ -303,6 +303,11 @@ def test_a_404_by_the_id_with_other_parameters_is_not_found(fixtures_dir: Path, 
     ],
 )
 def test_every_other_404_is_an_unknown_endpoint(path: str) -> None:
+    """NOT RECORDED: ``Not here`` is a body of no shape upstream sends (conventions §10).
+
+    It shows that ``classify`` leaves every 404 but a file operation's by its id to
+    core's mapping, whatever the body; no recording of another operation is served here.
+    """
     error = classify(response(path, 404, b"Not here", {}))
     assert isinstance(error, UpstreamError)
     assert not isinstance(error, NotFoundError)
