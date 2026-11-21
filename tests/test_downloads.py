@@ -487,7 +487,7 @@ def test_an_unknown_orders_404_is_not_found_and_dest_stays(
     replay_fixture: ReplayFixture, tmp_path: Path
 ) -> None:
     """The recorded 404 of an id no order has (docs/upstream/OBSERVED.md), replayed."""
-    route = replay_fixture("order_document_read", "unknown_id_pdf", match_params=["ids"])
+    route = replay_fixture("order_document_read_pdf", "unknown_id", match_params=["ids"])
     dest = tmp_path / "invoice.pdf"
     dest.write_bytes(b"the caller's earlier file")
     with pytest.raises(NotFoundError) as info:
@@ -895,8 +895,7 @@ def test_a_report_the_tree_does_not_list_is_not_found_and_dest_stays(
     of the same operation that upstream answers alike (conventions §10).
     """
     tree = mount_tree(respx_mock, fixtures_dir)
-    directory = endpoint.rsplit(".", 1)[0].replace("/", "_")
-    route = replay_fixture(directory, f"unknown_id_{fmt}")
+    route = replay_fixture(endpoint.replace("/", "_").replace(".", "_"), "unknown_id")
     dest = tmp_path / f"missing.{fmt}"
     dest.write_bytes(b"the caller's earlier file")
     with pytest.raises(NotFoundError) as info:

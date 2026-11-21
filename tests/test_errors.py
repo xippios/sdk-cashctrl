@@ -88,8 +88,8 @@ def test_a_rejection_is_an_invalid_request_for_both_adapters() -> None:
     [
         ("account_read", "unknown_id"),
         ("journal_read", "unknown_id"),
-        ("order_document_read", "unknown_id_pdf"),
-        ("report_collection_download", "unknown_id_xlsx"),
+        ("order_document_read_pdf", "unknown_id"),
+        ("report_collection_download_xlsx", "unknown_id"),
     ],
 )
 def test_each_error_classify_words_names_the_request_by_cores_description(
@@ -234,11 +234,11 @@ def test_a_404_means_the_endpoint_does_not_exist() -> None:
 
 
 FILE_404S = {
-    "/order/document/read.pdf": ("order_document_read", "unknown_id_pdf"),
-    "/report/element/download.pdf": ("report_element_download", "unknown_id_pdf"),
-    "/report/element/download.xlsx": ("report_element_download", "unknown_id_xlsx"),
-    "/report/collection/download.pdf": ("report_collection_download", "unknown_id_pdf"),
-    "/report/collection/download.xlsx": ("report_collection_download", "unknown_id_xlsx"),
+    "/order/document/read.pdf": ("order_document_read_pdf", "unknown_id"),
+    "/report/element/download.pdf": ("report_element_download_pdf", "unknown_id"),
+    "/report/element/download.xlsx": ("report_element_download_xlsx", "unknown_id"),
+    "/report/collection/download.pdf": ("report_collection_download_pdf", "unknown_id"),
+    "/report/collection/download.xlsx": ("report_collection_download_xlsx", "unknown_id"),
 }
 """The file paths whose 404 for an id no record has is recorded, by path: the fixture."""
 
