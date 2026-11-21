@@ -14,7 +14,7 @@ parameters: ``company``, ``firstName`` and ``lastName`` (each marked mandatory: 
 ``titleId``, ``userId`` and ``vatUid``. ``person/update.json`` documents the same ones
 and ``id``, so ``person_fields`` encodes both.
 
-Observed on 2026-10-23 (``docs/demo-org.md``): the answer is ``{"success": true,
+Its answer, as ``docs/upstream/OBSERVED.md`` notes, is ``{"success": true,
 "insertId": <int>, "message": ...}``; an umlaut sent form-encoded with
 ``charset=UTF-8`` was read back byte for byte.
 """

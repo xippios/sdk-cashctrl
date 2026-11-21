@@ -5,8 +5,9 @@ file for a single element by ID and time period."). Its documented parameters ar
 of ``report/element/data.json``, which ``report_element_data_params`` encodes:
 ``elementId`` (mandatory), and, optional, ``endDate``, ``fiscalPeriod``, ``language``,
 ``sort`` and ``startDate``. The file is written by ``_download.download``, which raises a
-refusal sent as HTTP 200 instead of writing it. Observed on 2026-11-17: the balance
-sheet of 2025 came as ``application/pdf;charset=UTF-8`` named ``Balance 2025.pdf``, and
+refusal sent as HTTP 200 instead of writing it. As ``docs/upstream/OBSERVED.md`` notes, the
+balance sheet of 2025 came as ``application/pdf;charset=UTF-8`` named ``Balance 2025.pdf``,
+and
 an ``elementId`` no report has was answered with HTTP 404, which ``_client.classify``
 raises as ``NotFoundError``.
 """
@@ -47,7 +48,7 @@ async def report_element_download_pdf(
         start_date: ``startDate``, the first day of the report period.
 
     Raises:
-        NotFoundError: An ``elementId`` no report has (HTTP 404, observed 2026-11-17).
+        NotFoundError: An ``elementId`` no report has (HTTP 404).
         RequestRejected: Upstream refused the download otherwise; ``dest`` is left as it
             was.
     """

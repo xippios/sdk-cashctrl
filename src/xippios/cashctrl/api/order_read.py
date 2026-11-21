@@ -3,8 +3,8 @@
 Reference: ``docs/upstream/order.md``, "Read order" ("Returns a single order by ID."),
 one parameter, ``id`` (mandatory, NUMBER). An unknown id is assumed to be answered with
 HTTP 200 and ``"success": false``, which ``_client.classify`` raises as
-``NotFoundError``: observed for ``account``, ``currency`` and ``journal`` reads on
-2026-10-23, not for ``order``.
+``NotFoundError``: recorded for ``account`` and ``journal`` reads
+(``docs/upstream/OBSERVED.md``), not for ``order``.
 """
 
 from xippios.core import parse

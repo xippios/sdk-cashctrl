@@ -1476,7 +1476,7 @@ def test_the_document_describes_every_record() -> None:
     for currency in seeder.CURRENCIES:
         assert f"| {currency.code} | {currency.description} | {currency.rate} |" in doc
     assert f"at most {seeder.max_writes()}" in doc
-    assert "## Observed write semantics (filled by the first run)" in doc
+    assert "## The first run" in doc
     prose = " ".join(doc.split())
     for phrase in (
         "Run both commands from the repository root of the sdk-cashctrl checkout",

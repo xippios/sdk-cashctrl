@@ -12,7 +12,7 @@ when neither the request nor the category sets a sequence number), ``previousId`
 ``recurrence``, ``responsiblePersonId``, ``roundingId``, ``sequenceNumberId``,
 ``startDate`` and ``statusId``.
 
-Observed on 2026-10-23 (``docs/demo-org.md``): the answer is ``{"success": true,
+Its answer, as ``docs/upstream/OBSERVED.md`` notes, is ``{"success": true,
 "insertId": <int>, "message": ...}``, and CashCtrl read the items' ``unitPrice`` as gross,
 VAT included (``baseValue`` ``GROSS`` on every item read back).
 """

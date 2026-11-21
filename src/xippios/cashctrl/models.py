@@ -174,7 +174,7 @@ def _mask_api_user(value: object) -> object:
     """``"API:<four key characters>"`` → ``"API:REDACTED"``; any other value as sent.
 
     CashCtrl names the API user that wrote a record as ``API:`` and the first four
-    characters of its key (observed on 2026-10-23), and the fixture recorder writes
+    characters of its key (``docs/upstream/OBSERVED.md``), and the fixture recorder writes
     ``API:REDACTED`` instead. A text that starts with ``API:``, the marker in any letter
     case, is masked whole, whatever follows; ``SYSTEM``, a user's name or e-mail address
     and ``None`` pass.
@@ -207,8 +207,8 @@ ReportFormat = Literal["pdf", "xlsx"]
 class ListResponse[T](UpstreamModel):
     """The answer of a ``list.json`` operation: ``{"total": 3, "data": [...]}``.
 
-    Observed on 2026-10-23 against the demo organisation (``docs/upstream/`` shows no list
-    response): there is no ``success`` key. For ``fiscalperiod``, ``currency``, ``tax`` and
+    ``docs/upstream/`` shows no list response; as ``docs/upstream/OBSERVED.md`` notes, there is
+    no ``success`` key. For ``fiscalperiod``, ``currency``, ``tax`` and
     ``account``, which document no ``start`` or ``limit``, one answer carries the whole
     collection: ``total`` equalled ``len(data)`` for each.
 
@@ -224,7 +224,7 @@ class ListResponse[T](UpstreamModel):
 class ReadResponse[T](UpstreamModel):
     """The answer of a ``read.json`` operation: ``{"success": true, "data": {...}}``.
 
-    Observed on 2026-10-23 against the demo organisation. A refusal (``"success": false``)
+    Undocumented, as ``docs/upstream/OBSERVED.md`` notes. A refusal (``"success": false``)
     never gets here: ``_client.classify`` raises it.
 
     Attributes:
@@ -249,8 +249,8 @@ class FiscalPeriod(UpstreamModel):
     upstream uses for balances when no ``fiscalPeriodId`` is given. On the synthetic demo
     organisation that is 2025, the period ``scripts/seed_demo.py`` created, not 2026, the
     one the organisation was created with. The read sends the same fields, but
-    ``current`` and ``is_current`` false and ``last_entry_date`` null, the current
-    period's too (observed 2026-11-17); the list fills them.
+    ``current`` and ``is_current`` false and ``last_entry_date`` null, the current period's
+    too (``docs/upstream/OBSERVED.md``); the list fills them.
     """
 
     id: int
@@ -477,7 +477,7 @@ class Account(_AccountFields):
 class AccountDetail(_AccountFields):
     """One account as ``account/read.json`` returns it (``docs/upstream/account.md``).
 
-    Observed on 2026-10-23 against the demo organisation: ``read.json`` sends a different
+    As ``docs/upstream/OBSERVED.md`` notes, ``read.json`` sends a different
     set of fields than ``list.json``. It has no balances, no ``category_display``,
     ``tax_code`` or ``target_display``, and no ``bank_account`` or ``in_salary_type``
     flags; it adds the fields below. The fields both send are typed as on ``Account``.
@@ -566,7 +566,7 @@ class _JournalEntryFields(UpstreamModel):
     give parameters only, no response body, and ``attachments`` is an input of create and
     update (lines 199 and 263). It was typed from the manual entries, which send a number;
     the entries an order booked (``type`` ``ORDER``, ``orderId`` set) send ``null`` in the
-    list and the read, seen in the demo organisation on 2026-10-26
+    list and the read
     (``tests/fixtures/journal_list/order_booked.json``,
     ``tests/fixtures/journal_read/order_booked.json``).
     """
@@ -638,7 +638,7 @@ class JournalEntry(_JournalEntryFields):
     ``get_journal_entry``'s ``items``. Kept as sent: ``order_id``, the order's id on an
     entry an order booked, and the list's ``name_singular`` (a localised name) and
     ``order_type`` (``PURCHASE``); ``order_id``, ``name_singular`` and ``order_type`` are
-    filled on such an entry (seen on 2026-10-26) and ``null`` on a manual one; only seen
+    filled on such an entry and ``null`` on a manual one; only seen
     as ``null``: ``order_book_entry_id``, ``salary_book_entry_id``, ``statement_id``,
     ``inventory_id``, ``import_entry_id``, ``imported``, ``imported_by``,
     ``cost_center_ids``, ``cost_center_numbers``, and the list's ``account_id``,
@@ -670,8 +670,8 @@ class PersonAddress(UpstreamModel):
     ``first_name_for_address``, ``last_name_for_address``, ``street_name`` and
     ``street_number`` (``address`` split), ``title_name``, ``canton_code``,
     ``country_code2`` and ``country_code3``. ``title_id``: an address ``titleId`` sent
-    with a create was stored and read back, with ``title_name``, in the live
-    verification of 2026-10-24 (``docs/demo-org.md``, Person reads); it is in neither
+    with a create was stored and read back, with ``title_name``
+    (``docs/upstream/OBSERVED.md``); it is in neither
     ``addresses`` table (``person/create.json``, ``person/update.json``), but reads
     return it, so ``update_person`` refuses to carry it over. Typed as the id of a title,
     an integer, as the person's own ``titleId`` is: "optional, NUMBER", a "Person title"
@@ -728,8 +728,9 @@ class PersonContact(UpstreamModel):
 class _PersonFields(UpstreamModel):
     """The fields ``person/list.json`` and ``person/read.json`` share, but ``ssn``.
 
-    ``read.json`` leaves out every field whose value is ``null`` (observed on 2026-10-23;
-    the list sends them as ``null``), so everything that may be empty defaults to ``None``.
+    ``read.json`` leaves out every field whose value is ``null``
+    (``docs/upstream/OBSERVED.md``; the list sends them as ``null``), so everything that may
+    be empty defaults to ``None``.
     ``ssn``, which both send, is declared on the read models (``Person``,
     ``PersonDetail``) alone, so that the projections tasks return can leave it out
     (sdk-core ADR-0017).
@@ -895,7 +896,7 @@ class _PersonDetailFields(_PersonFields):
 class PersonDetail(_PersonDetailFields):
     """One person as ``person/read.json`` returns it (``docs/upstream/person.md``).
 
-    Observed on 2026-10-23 against the demo organisation: the read leaves out every field
+    As ``docs/upstream/OBSERVED.md`` notes, the read leaves out every field
     whose value is ``null``, and sends a different set than the list. It adds the
     structured lists below and some derived names, and has no ``category_display``,
     ``country_name``, ``children_count`` nor the list's ``null``-only fields. The fields
@@ -972,8 +973,8 @@ class _JournalEntryDetailFields(_JournalEntryFields):
 class JournalEntryDetail(_JournalEntryDetailFields):
     """One journal entry as ``journal/read.json`` returns it (``docs/upstream/journal.md``).
 
-    Observed on 2026-10-23 against the demo organisation: the read sends a different set
-    of fields than the list. It has no ``debit_name``, ``credit_name``, ``recurring`` nor
+    As ``docs/upstream/OBSERVED.md`` notes, the read sends a different set of fields than the list.
+    It has no ``debit_name``, ``credit_name``, ``recurring`` nor
     the list's ``null``-only account fields, and adds the fields below. The fields both
     send are typed as on ``JournalEntry``; ``currency_code`` was ``null`` in the read of
     an entry whose list entry says ``CHF``.
@@ -1194,8 +1195,8 @@ class Order(_OrderFields):
 class OrderDetail(_OrderFields):
     """One order as ``order/read.json`` returns it (``docs/upstream/order.md``).
 
-    Observed on 2026-10-23 against the demo organisation: the read sends a different set
-    of fields than the list. It has no ``account``, ``date_due``, ``date_received``,
+    As ``docs/upstream/OBSERVED.md`` notes, the read sends a different set of fields than the list.
+    It has no ``account``, ``date_due``, ``date_received``,
     ``received`` nor ``recurring``, and adds the fields below. The fields both send are
     typed as on ``Order``; ``currency_code`` was ``null`` in the read of an order whose
     list entry says ``CHF``.
@@ -1809,8 +1810,8 @@ class HistoryEntry(UpstreamModel):
     ``created`` (when the change was made) and ``created_by`` (who made it: an API user,
     which upstream names as ``API:`` and the first four characters of its key, shows as
     ``API:REDACTED``, as on every record), ``type`` (the module, ``ORDER`` seen),
-    ``change_type`` (``CREATE`` and ``STATUS`` in the fixture; ``UPDATE`` seen on
-    2026-10-27, not in a fixture, since the recording that showed it was overwritten),
+    ``change_type`` (``CREATE`` and ``STATUS`` in the fixture, and ``UPDATE``,
+    ``docs/upstream/OBSERVED.md``),
     the record it concerns (``order_id``, ``person_id`` the order's partner,
     ``statement_id`` only seen ``null``) and ``message``, upstream's text of the change,
     kept as sent: it names the record (``Rechnung 'EK-2026-001'
@@ -1882,7 +1883,8 @@ class ReportData(UpstreamModel):
     decision 1): rows under upstream's camelCase names (``endAmount``), amounts as JSON numbers, not
     ``Decimal``.
 
-    Observed on 2026-10-27 for the balance sheet (``BALANCE``) of fiscal period 2025:
+    For the balance sheet (``BALANCE``) of fiscal period 2025, as
+    ``docs/upstream/OBSERVED.md`` notes:
     ``{"total": 2, "data": [...], "properties": {"columns": [...]}}``. ``total`` counts
     the top-level rows (assets, liabilities and equity). Each row is a node with its
     child rows in ``data``: ``text`` (the label, ``1020 Bank account``), ``level``,
@@ -2247,8 +2249,8 @@ class WriteAnswer(UpstreamModel):
     """The answer of a create, update or delete: ``{"success": true, "message": ...}``.
 
     ``docs/upstream/`` says only "Returns either a success or multiple error messages"
-    (or "a success or error message" for a delete). Observed on 2026-10-23 when
-    ``scripts/seed_demo.py`` seeded the demo organisation: ``person/create.json``,
+    (or "a success or error message" for a delete). As ``docs/upstream/OBSERVED.md`` notes,
+    ``person/create.json``,
     ``journal/create.json`` and ``order/create.json`` answer with ``success``,
     ``message`` and ``insertId``, a JSON integer, the new record's id. A refusal
     (``"success": false``) never gets here: ``_client.classify`` raises it.

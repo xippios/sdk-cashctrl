@@ -2,8 +2,8 @@
 
 Reference: ``docs/upstream/journal.md``, "Read journal entry" ("Returns a single journal
 entry by ID."), one parameter, ``id`` (mandatory, NUMBER). An unknown id is answered
-with HTTP 200 and ``"success": false`` ("This book entry does not exist.", observed on
-2026-10-23), which ``_client.classify`` raises as ``NotFoundError``.
+with HTTP 200 and ``"success": false`` ("This book entry does not exist.",
+``docs/upstream/OBSERVED.md``), which ``_client.classify`` raises as ``NotFoundError``.
 """
 
 from xippios.core import parse

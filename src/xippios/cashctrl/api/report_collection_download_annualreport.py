@@ -4,7 +4,7 @@ Reference: ``docs/upstream/report.md``, "Download annual report" ("Downloads the
 for the annual report (balance sheet and profit and loss statement by default)."), one
 optional parameter, ``fiscalPeriodId`` ("The ID of the fiscal period."). The file is
 written by ``_download.download``, which raises a refusal sent as HTTP 200 instead of
-writing it. Observed on 2026-11-17 on the demo organisation: the file was the PDF of the
+writing it. As ``docs/upstream/OBSERVED.md`` notes, the file is the PDF of the
 one collection the report tree marks system, ``Jahresbericht`` (the balance sheet and the
 profit and loss), but for its creation time and document id, named ``Annual report
 2025.pdf``; without ``fiscalPeriodId``, and for an id no fiscal period has, upstream

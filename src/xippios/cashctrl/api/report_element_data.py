@@ -7,8 +7,9 @@ data of a single element by ID for the given time period."). Its documented para
 YYYY-MM-DD"), ``fiscalPeriod`` ("The ID of the fiscal period. This overrides the
 ``startDate`` and ``endDate`` parameter, as these are derived from the fiscal period."),
 ``language`` ("The language of the report.") and ``sort`` ("The column to sort the list
-by."). The documentation gives no response schema. Observed on 2026-10-27 for the balance
-sheet of fiscal period 2025: ``{"total": 2, "data": [...], "properties": {...}}``.
+by."). The documentation gives no response schema. Its answer for the balance sheet of
+fiscal period 2025, as
+``docs/upstream/OBSERVED.md`` notes: ``{"total": 2, "data": [...], "properties": {...}}``.
 """
 
 from datetime import date

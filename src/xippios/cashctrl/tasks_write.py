@@ -607,8 +607,8 @@ async def create_journal_entry_async(
     then ``performed`` true with ``insert_id``, the new entry's id. A simple entry takes
     ``amount``, ``debit_id`` and ``credit_id``; a collective entry takes ``items``, and
     upstream then ignores those three. ``amount`` with a ``tax_id`` is the gross amount,
-    VAT included (observed on the demo organisation, although the tax codes' calculation
-    type reads NET). Account ids come from ``list_accounts`` (the ``id``, not the account
+    VAT included, although the tax codes' calculation
+    type reads NET. Account ids come from ``list_accounts`` (the ``id``, not the account
     number; ``list_account_categories`` gives the ``category_id`` that narrows it), tax
     codes from ``list_tax_codes``, persons from ``list_persons``, currencies from
     ``list_currencies``, cost centers from ``list_cost_centers`` and custom field names
@@ -934,8 +934,8 @@ def _person_values(
 ) -> tuple[dict[str, Any], dict[str, str | None], list[str]]:
     """Every ``update.json`` parameter of ``person``, what it cannot carry or cannot know.
 
-    Observed on 2026-10-24 (a person created with every documented scalar field set, read
-    back, deleted): ``person/read.json`` returns every stored documented field under its
+    As ``docs/upstream/OBSERVED.md`` notes, ``person/read.json`` returns every stored
+    documented field under its
     own name and leaves out the empty ones, so a field the read lacks is empty, and the
     mapping takes each by name. Three fields were not seen come back: ``insuranceNr`` and
     ``insuranceMemberNr`` (not stored for a person who is no insurance, as documented;
@@ -2219,9 +2219,9 @@ BOOK_ENTRY_UPDATE: dict[str, str] = {
 """Every parameter ``order/bookentry/update.json`` documents but ``id``: task to upstream name."""
 
 MANUAL = "MANUAL"
-"""The ``type`` of a book entry booked by hand (observed on 2026-11-17)."""
+"""The ``type`` of a book entry booked by hand (``docs/upstream/OBSERVED.md``)."""
 GENERATED = "GENERATED"
-"""The ``type`` of a book entry an order's items booked (observed on 2026-10-27)."""
+"""The ``type`` of a book entry an order's items booked (``docs/upstream/OBSERVED.md``)."""
 
 
 def _book_entry_values(entry: OrderBookEntry) -> tuple[dict[str, Any], dict[str, str | None]]:

@@ -116,8 +116,7 @@ Decisions 1, 2, 3 and 5 of sdk-core ADR-0033 are adopted; decision 4 is delibera
    `classify`, with `retry_after` from `Retry-After` when upstream sends it; retries
    honour it up to `backoff_max`, beyond which the error reaches the caller
    (`tests/test_errors.py`). CashCtrl documents no fallback, and every answer carries
-   `x-cashctrl-requests-left` (299 on every answer observed on 2026-10-23, a 401
-   included) with an unknown window and scope, so it is not read.
+   `x-cashctrl-requests-left` (299 on every answer, a 401 included) with an unknown window and scope, so it is not read.
 4. **No firing into a spent quota** is deliberately not applied: no `QuotaPolicy` is
    installed. Core's `QuotaPolicy` (sdk-core ADR-0037, decision 2) keeps a long-window quota, and
    CashCtrl documents none, nor a window for
@@ -175,9 +174,10 @@ tests/
   test_record_fixture.py  the recorder never writes the demo host, subdomain or key
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
   test_refresh_upstream.py  the capture script keeps and lists OBSERVED.md, offline
+  test_observed.py  each note of OBSERVED.md ends with its probe
   test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
 docs/
-  upstream/        documentation snapshot and FETCHED.md
+  upstream/        documentation snapshot, FETCHED.md and OBSERVED.md
   demo-org.md      the synthetic demo organisation: why, how to create and seed it, its books
   adr/             this package's design decisions, one NNNN-<slug>.md record each, laid
                    out in its README.md
@@ -240,8 +240,7 @@ The recipe for one more:
    (`_journal_values`, `_person_values`, `_order_values`, `_book_entry_values`),
    applies the arguments given (not `None`), and sends all of them. An order's items go
    back under the keys the items table documents (`_order_items`, in their `pos`), the
-   computed ones left out; upstream stores the items an update sends anew, with new ids
-   (observed 2026-10-27).
+   computed ones left out; upstream stores the items an update sends anew, with new ids.
    A mandatory parameter neither the record nor the call gives raises
    `InvalidRequestError` before any write; so does a stored list whose shape was never
    observed (attachments, allocations, bank accounts, children, service periods,
@@ -250,8 +249,7 @@ The recipe for one more:
    an order item's `attachments` or `isOptional`), and a field whose absence
    from the read is unknown rather than empty (an insurance's `insuranceNr` and
    `insuranceMemberNr`, an employee's `userId`), unless the call gives or clears it.
-   `person/read.json` returns every stored documented field and leaves empty ones out
-   (verified live on 2026-10-24, `docs/demo-org.md`). `clear: list[str] | None` names
+   `person/read.json` returns every stored documented field and leaves empty ones out. `clear: list[str] | None` names
    parameters to send empty, a flag (`_FLAGS`) as `false`, checked against a
    `<RESOURCE>_UPDATE` table of the documented update parameters; one both given and
    cleared is refused, and so is one an update sends only when given (`_UNSENT`:
@@ -268,7 +266,7 @@ The recipe for one more:
    update merges the given values into the stored XML (`merge_custom`) and refuses XML
    it cannot carry over value for value.
 5. **Facts for docstrings.** A journal `amount` with a `tax_id` is gross, and order
-   items' `unitPrice` was read as gross (observed, `docs/demo-org.md`); previews are
+   items' `unitPrice` was read as gross; previews are
    free; `confirm=true` writes; ids come from `list_accounts`, `list_tax_codes`,
    `list_persons`, `list_order_categories`, `list_currencies` and the discovery lists:
    `list_person_categories` (a person's `category_id`), `list_person_titles`
@@ -523,8 +521,7 @@ Upstream's documented error shapes go into `classify` in `_client.py`, once; wra
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
 for an unknown id on a `read.json` by `id`; a 404 is an unknown endpoint
-(`UpstreamError`), on a `read.pdf` by `ids` or a report download by its id an unknown
-id (`NotFoundError`, observed 2026-10-29 and 2026-11-17). Observed shapes say so, with the date, in its docstring.
+(`UpstreamError`), on a `read.pdf` by `ids` or a report download by its id an unknown id (`NotFoundError`). Its probe goes to `docs/upstream/OBSERVED.md`.
 
 Files: the wrappers `<module>_list_csv|xlsx|pdf`,
 `order_document_read_pdf` and `report_*_download_*` (conventions §2) call `api/_download.py`'s `download`, which streams

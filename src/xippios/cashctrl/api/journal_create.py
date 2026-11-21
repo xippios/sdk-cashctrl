@@ -10,7 +10,7 @@ if ``items`` is set"), and optionally ``allocations``, ``associateId``, ``attach
 ``taxId`` and ``title``. ``journal/update.json`` documents the same ones and ``id``, so
 ``journal_fields`` encodes both.
 
-Observed on 2026-10-23 (``docs/demo-org.md``): the answer is ``{"success": true,
+Its answer, as ``docs/upstream/OBSERVED.md`` notes, is ``{"success": true,
 "insertId": <int>, "message": ...}``, and an ``amount`` with a ``taxId`` is the gross
 amount, VAT included, although the tax codes' ``calcType`` is ``NET``.
 """

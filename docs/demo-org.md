@@ -37,7 +37,7 @@ register. `tests/test_seed_demo.py` checks the rule against the data and this do
 2. Enter only fictional data in the organisation creation wizard: a name like the one
    above and a placeholder address, nothing real. A new organisation has no location:
    `location/list.json` lists none until one is created under Settings → Locations,
-   whatever the wizard asked (observed in October 2026). Create the main location (type
+   whatever the wizard asked (`docs/upstream/OBSERVED.md`). Create the main location (type
    `MAIN`) there before seeding, with fictional data only: a company name that contains
    `demo`, a placeholder address such as `Musterhof 1, 8001 Zürich`, no VAT UID, no
    IBAN, no logo. The seeder reads `location/list.json`, and that answer can feed
@@ -89,7 +89,7 @@ no value, and nothing written, unless
    `fiscalPeriodId` is given) report `total` 0, and `person/list.json` (the whole list,
    `onlyActive` left at its default, false) lists no person but the insurance records
    CashCtrl creates itself. A new organisation lists two of them, with `createdBy`
-   `SYSTEM` and `isInsurance` true (observed in October 2026): they are expected, the
+   `SYSTEM` and `isInsurance` true (`docs/upstream/OBSERVED.md`): they are expected, the
    guard tolerates them, and the person `total` after seeding includes them (12, not
    10). Every other person refuses, a `SYSTEM`-created one that is not an insurance
    included, so a copy with system-imported data still fails closed; the refusal says
@@ -226,7 +226,7 @@ a JSON integer, `1` for each) and the two lists again, each reporting `total` 1;
 | --- | --- |
 | Company | Muster Handel AG, Zürich (fictional), a small trading company for office furniture and supplies |
 | Currency | CHF; fiscal year = calendar year |
-| Fiscal periods | 2026 (the one the organisation was created with) and 2025 (created by the seeder); after seeding, the API user's current period is 2025, so balances without `fiscalPeriodId` are 2025's (Observed write semantics, below) |
+| Fiscal periods | 2026 (the one the organisation was created with) and 2025 (created by the seeder); after seeding, the API user's current period is 2025, so balances without `fiscalPeriodId` are 2025's (The first run, below) |
 | Chart of accounts, VAT codes | CashCtrl's defaults, unchanged |
 | Records | 10 persons (4 vendors, 6 customers), 48 manual journal entries (12 in 2025, 36 in 2026, 3 of them collective), 6 orders |
 | Writes | at most 67 (10 persons, 2 currencies, 1 fiscal period, 48 journal entries, 6 orders) |
@@ -243,7 +243,7 @@ The script does not name the organisation: its name is set by hand when it is cr
 | USD | US-Dollar | 0.88 |
 
 Created only if `currency/list.json` lacks the code. A new organisation has both from the
-start: the first run created neither (Observed write semantics, below), so the
+start: the first run created neither (The first run, below), so the
 organisation carries CashCtrl's automatic rates (`auto: true`, created by `SYSTEM`), not
 the 0.95 and 0.88 above, which were never sent. The rates above are fixed and synthetic,
 and `common.md` says CashCtrl ignores `rate` for the currencies it supports (EUR and USD
@@ -422,8 +422,7 @@ the first write:
   no bank-charges account: the first seeding attempt was refused by guard 4 for a
   missing 6940, the SME chart's bank charges, and the default chart's accounts from 6800
   to 6999 are 6800 depreciation, 6801 fixed asset disposals, 6900 financial expenses,
-  6950 financial revenue, 6960 exchange differences and 6961 rounding differences
-  (observed in October 2026). The other eight numbers are in the default chart.
+  6950 financial revenue, 6960 exchange differences and 6961 rounding differences (`docs/upstream/OBSERVED.md`). The other eight numbers are in the default chart.
 - VAT codes `UN1` (VAT due on sales, 8.1 %) and `VN1` (input VAT, 8.1 %): not in the
   documentation; they are the system-created codes the retired demo organisation's
   `tax/list.json` showed. Looked up by `code`; missing ones refuse the run.
@@ -441,7 +440,7 @@ the first write:
   | 2026-09-30 | 4'850.00 | 8'158.85 for 2026 alone, 10'054.25 with 2025 carried forward |
 
   Gross leaves the two open invoices, RE-2026-006 and RE-2026-007, as the only balance.
-  The first run matched the gross reading exactly (Observed write semantics, below).
+  The first run matched the gross reading exactly (The first run, below).
   Whether the balance at 2026-09-30 includes the 2025 closing balance depends on how
   CashCtrl opens a period, which the documentation does not say; under the gross
   reading it does not matter. If the sales orders booked journal entries (journal total
@@ -490,94 +489,39 @@ purchase invoices' status 80 "Payment ordered" (`order_category_list/purchase`);
 documentation names only `CATEGORY_<id>` and `BOOK_TEMPLATE_<id>`, and says that the app
 asks the user first.
 
-Observed on 2026-10-29 CET (2026-10-28 UTC by the fixtures' `recorded_at`), while
-recording (`order_update_status/ok`, `order_payment_create/pain` and `/cash_pdf`, the
-order 26) and in the first live run: `order/update_status.json` answers `{"success":
-true, "message": "Status changed"}` and `order/payment/create.json` `"Payment order
-created"`, neither with an `insertId`. `PAIN` is refused here: "The date cannot be in
-the past." (`date`), and for the order "Sender: Bank account must be set.", "Recipient:
-Bank account must be set." and "Sender: BIC must be set.", since neither the
-organisation nor the vendors hold bank details; `CASH_PDF` for the same order and the
-same past date is created. An order with a payment is deleted like any other ("1
-document deleted"), and none of its journal entries is left. The probe after the delete
-answered HTTP 400 with `text/plain`, recorded as `refusal`: no file is served for the
-payment of a deleted order; whether upstream keeps the payment itself cannot be seen, as
-the API has no payment read or list.
+What upstream answered to the status, the payment and the delete, a pain.001 refused for
+want of bank details and a cash payment created for the same order, and the payment's
+download refused once its order was deleted, is noted with its recordings in
+`docs/upstream/OBSERVED.md`.
 
-## Observed write semantics (filled by the first run)
+## The first run
 
 The first complete `--apply --yes` run, on 2026-10-23 against the new demo organisation,
-printed the following; the balances and totals are quoted as printed.
+sent 88 requests, every one answered HTTP 200: 65 writes (`person/create.json` x10,
+`fiscalperiod/create.json` x1, `journal/create.json` x48 and `order/create.json` x6),
+form-encoded with `charset=UTF-8`, and 23 reads, the guards and lookups, the read-back, the
+fiscal period re-read and the summary. No write was refused, and no currency was created.
+What upstream answered and did, the create answers, the UTF-8 round trip, the gross reading
+of amounts and item prices, what a new organisation holds, the journal entries the purchase
+orders booked and what a person's read returns, is noted with its probe in
+`docs/upstream/OBSERVED.md`. The run left:
 
-- Encoding of the writes: form-encoded, `application/x-www-form-urlencoded;
-  charset=UTF-8`. `--multipart` was not needed.
-- UTF-8 round trip: `person/read.json` answered the company `Muster Büro AG` byte for
-  byte.
-- `calcType` of the components of `UN1` and `VN1`: `NET` for both, read from
-  `tax/list.json` (no `tax/read.json` needed). `common.md` defines `calcType` as the
-  calculation basis of the tax, not as how a journal `amount` is read; the balances below
-  show that reading.
-- Status codes: HTTP 200 for every request, 88 in all. The 65 writes were
-  `person/create.json` x10, `fiscalperiod/create.json` x1, `journal/create.json` x48 and
-  `order/create.json` x6. The 23 reads were the guards and lookups, the read-back, the
-  fiscal period re-read and the summary.
-- Create answers: `person/create.json`, `journal/create.json` and `order/create.json`
-  answer with the keys `insertId`, `message` and `success`, `insertId` a JSON integer.
-  `fiscalperiod/create.json` answers with `message` and `success` only, without
-  `insertId`; the seeder finds the new period by reading `fiscalperiod/list.json` again.
-  Every create answer carries a `message`; the seeder never prints its text.
-- Refusals: none.
-- Currencies: the new organisation already had EUR and USD, so the run sent no
-  `currency/create.json` request. Their rates are CashCtrl's automatic ones (`auto: true`,
-  `createdBy` `SYSTEM`; EUR 0.920261 and USD 0.820845 in the fixture recorded the same
-  day), not the plan's 0.95 and 0.88.
-- Fiscal period 2025: the new organisation had 2026 only. `fiscalperiod/create.json` with
-  `type=EARLIEST` created 2025, and `fiscalperiod/list.json` then listed a period
-  covering the 2025 dates. After the run the API user's current period (`isCurrent`) is
-  2025, the period the run created, not 2026 (seen when the fixtures were recorded the
-  same day): balances without `fiscalPeriodId`, as `account/list.json` sends them, are
-  2025's, account 1020 ending at 101'230.00.
-- Whether order creation booked journal entries: `journal/list.json` reports 38 entries
-  for 2026, two more than the 36 manual entries. The balance of 1100 holds no sales order
-  amount, so the four sales invoices did not book to the debtors. The two extra entries
-  are the ones the two purchase orders booked, verified on 2026-10-26: ids 49 and 50,
-  `type` `ORDER`, `orderId` 5 and 6, recorded as
-  `tests/fixtures/journal_list/order_booked.json` (`onlyPurchase`) and
-  `tests/fixtures/journal_read/order_booked.json`; both carry `attachmentCount` `null`.
-  The order lists recorded the same day as the seeding (`tests/fixtures/order_list/`)
-  fit that: both purchase orders are in their category's first status, Open, with
-  `isBook` true and `open` equal to their total; the four sales invoices are in Draft
-  with `isBook` false.
-- Order item prices: CashCtrl read the seeded `unitPrice` values as gross, VAT included:
-  every item of the order read recorded the same day (`tests/fixtures/order_read/`) has
-  `baseValue` `GROSS` and `taxCalcType` `NET`, and the order `displayItemGross` false.
-  So the "net totals before VAT" of the plan (Orders, above) are the orders' gross
-  `total`s, and `subTotal` is net: RE-2026-104 900.00 with VAT, 832.56 without, 67.44
-  VAT; RE-2026-103 7'750.00 and 7'169.29.
-- Balance of 1100 (`account/balance`): `0.00` at 2025-12-31 and `4850.00` at 2026-09-30,
-  exactly the gross reading in the table above. The `amount` of a manual journal entry
-  with a `taxId` is the gross amount, VAT included, although the tax codes' `calcType` is
-  `NET`.
-- The `total` each list endpoint reported after seeding: `person/list.json` 12 (the ten
-  seeded persons and CashCtrl's two system insurance persons); `journal/list.json` 12 for
-  2025 and 38 for 2026; `order/list.json` 4 `SALES` and 2 `PURCHASE` for 2026;
-  `currency/list.json` 3; `fiscalperiod/list.json` 2.
-- Person reads (verified on 2026-10-24, four requests: a refused create, then a person
-  marked `xippios-live`
-  created with every documented scalar field of `person/create.json` set but `userId`
-  (it links a CashCtrl login) and `sequenceNumberId` (it advances a sequence), one
-  address with a `titleId`, one contact with a `purpose`; read back; deleted). A first
-  attempt with all five roles was refused, nothing created: "Invalid role combination."
-  and "At least one insurance contract must be set."; the second set customer, vendor
-  and employee. `person/read.json` returned every stored documented field under its own
-  name (`dateBirth` as `1990-05-17 00:00:00.0`) and no key with a `null` value: it leaves
-  empty fields out. `insuranceNr` and `insuranceMemberNr` did not come back (the person
-  was no insurance, which the table says they need); `userId` was not tested. The
-  address came back with its `id` and the `titleId` sent (with `titleName`), a key the
-  addresses table does not document; the contact came back with its `id` and
-  `purpose` `null`, so the `purpose` sent was not stored. `update_person` follows this:
-  it takes each field from the read by name, needs an insurance's numbers and an
-  employee's `userId` given or cleared, and refuses a stored address `titleId` or
-  contact `purpose`.
-- `x-cashctrl-requests-left`: the seeder does not record response headers. The read-only
-  freshness check before the run saw the header on every answer (8 of 8, name only).
+- `person/list.json` `total` 12, the ten seeded persons and CashCtrl's two system insurance
+  persons; `journal/list.json` 12 for 2025 and 38 for 2026, the 36 manual entries and the
+  two the purchase orders booked (ids 49 and 50, `type` `ORDER`); `order/list.json` 4
+  `SALES` and 2 `PURCHASE` for 2026, the purchase orders in their first status, Open, which
+  books, the sales invoices in Draft, which does not; `currency/list.json` 3;
+  `fiscalperiod/list.json` 2.
+- 2025 as the API user's current period, so balances without `fiscalPeriodId`, as
+  `account/list.json` sends them, are 2025's, account 1020 ending at 101'230.00.
+- The balance of 1100 (`account/balance`): `0.00` at 2025-12-31 and `4850.00` at
+  2026-09-30, the gross reading in the table above. The "net totals before VAT" of the
+  plan (Orders, above) are the orders' gross `total`s, and `subTotal` is net: RE-2026-104
+  900.00 with VAT, 832.56 without, 67.44 VAT; RE-2026-103 7'750.00 and 7'169.29.
+- EUR and USD with CashCtrl's automatic rates (`auto: true`, `createdBy` `SYSTEM`; EUR
+  0.920261 and USD 0.820845 in `tests/fixtures/currency_list/default.json`), not the plan's
+  0.95 and 0.88.
+
+`update_person` follows what a person's read returns: it takes each field from the read by
+name, needs an insurance's numbers and an employee's `userId` given or cleared, and refuses
+a stored address `titleId` or contact `purpose`.

@@ -7,7 +7,8 @@ document" of its report elements). Its documented parameters: ``collectionId``
 ``language``, ``sort`` and ``startDate``, as an element's; ``report_collection_params``
 encodes them for the PDF and the Excel file alike. The file is written by
 ``_download.download``, which raises a refusal sent as HTTP 200 instead of writing it.
-Observed on 2026-11-17: collection 1 of the demo organisation, ``Jahresbericht``, came as
+As ``docs/upstream/OBSERVED.md`` notes, collection 1 of the demo organisation,
+``Jahresbericht``, came as
 ``application/pdf;charset=UTF-8`` named ``Annual report 2025.pdf``, the annual report's
 file but for its creation time and document id
 (``report_collection_download_annualreport``).
@@ -74,8 +75,7 @@ async def report_collection_download_pdf(
         start_date: ``startDate``, the first day of the report period.
 
     Raises:
-        NotFoundError: A ``collectionId`` no collection has (HTTP 404, observed for the
-            Excel file on 2026-11-17).
+        NotFoundError: A ``collectionId`` no collection has (HTTP 404).
         RequestRejected: Upstream refused the download otherwise; ``dest`` is left as it
             was.
     """

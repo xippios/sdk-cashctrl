@@ -2,7 +2,8 @@
 
 Reference: ``docs/upstream/meta.md``, "Read fiscal period" ("Returns a single fiscal
 period by ID or the current fiscal period."), one parameter, ``id`` (optional, TEXT:
-"Leave empty to read the current fiscal period"). Observed on 2026-11-17: the answer is
+"Leave empty to read the current fiscal period"). Its answer, as
+``docs/upstream/OBSERVED.md`` notes, is
 ``{"success": true, "data": {...}}`` with the fields of a ``fiscalperiod/list.json``
 entry, but ``current`` and ``isCurrent`` are ``false`` and ``lastEntryDate`` is ``null``
 even for the current period, read without an id, which the list marks current and

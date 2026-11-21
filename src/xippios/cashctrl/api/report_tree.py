@@ -2,7 +2,8 @@
 
 Reference: ``docs/upstream/report.md``, "Get tree of reports" ("Returns a tree of all
 instanced reports containing collections and elements."). The operation documents no
-parameters. Observed on 2026-10-27: ``{"total": 8, "data": [...]}``, the eight top-level
+parameters. Its answer, as ``docs/upstream/OBSERVED.md`` notes:
+``{"total": 8, "data": [...]}``, the eight top-level
 nodes of CashCtrl's default reports, each collection's elements nested under ``data``.
 """
 

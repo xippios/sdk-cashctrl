@@ -1,8 +1,9 @@
 """``GET /api/v1/person/title/list.json``: every title of an organisation.
 
 Reference: ``docs/upstream/person.md``, "List titles" in "Title" ("Returns a list of all
-titles."). The operation documents no parameters. Observed on 2026-10-27: ``{"total": 3,
-"data": [...]}``, CashCtrl's three default titles.
+titles."). The operation documents no parameters. Its answer, as
+``docs/upstream/OBSERVED.md`` notes:
+``{"total": 3, "data": [...]}``, CashCtrl's three default titles.
 """
 
 from xippios.core import parse

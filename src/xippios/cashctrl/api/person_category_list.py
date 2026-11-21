@@ -1,7 +1,8 @@
 """``GET /api/v1/person/category/list.json``: every person category of an organisation.
 
 Reference: ``docs/upstream/person.md``, "List categories" in "Category" ("Returns a list
-of all categories."). The operation documents no parameters. Observed on 2026-10-27:
+of all categories."). The operation documents no parameters. Its answer, as
+``docs/upstream/OBSERVED.md`` notes:
 ``{"total": 4, "data": [...]}``, CashCtrl's four default categories, flat, each with its
 ``parentId``.
 """

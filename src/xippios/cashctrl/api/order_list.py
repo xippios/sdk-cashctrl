@@ -8,7 +8,7 @@ number of entries to retrieve. Defaults to 100."), ``onlyCostCenters``, ``onlyNo
 ``start`` ("The starting entry. Defaults to 0."), ``statusId`` and ``type`` ("Possible
 values: SALES, PURCHASE", no default documented).
 
-Observed on 2026-10-23 against the demo organisation: without ``type`` the list holds
+As ``docs/upstream/OBSERVED.md`` notes, without ``type`` the list holds
 both types (the 4 sales and 2 purchase orders of 2026); without ``fiscalPeriodId`` it
 answers for the API user's current fiscal period, which held no order. Pages are the
 task's business.
@@ -112,7 +112,7 @@ async def order_list(
         sort: ``sort``, the column to sort by; upstream's default is ``date``.
         start: ``start``, the offset of the first entry; upstream's default is 0.
         status_id: ``statusId``, an order status.
-        type: ``type``, ``SALES`` or ``PURCHASE``; both when not sent (observed).
+        type: ``type``, ``SALES`` or ``PURCHASE``; both when not sent.
     """
     params = order_list_params(
         category_id=category_id,

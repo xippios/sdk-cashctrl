@@ -3,7 +3,8 @@
 Reference: ``docs/upstream/order.md``, Book entry, "List book entries" ("Returns a list
 of book entries for an order."), one parameter, ``id`` (mandatory, NUMBER), the order's
 id. It documents no ``start`` or ``limit``: one answer carries the order's entries.
-Observed on 2026-10-27 for a seeded purchase order in a status that books: ``{"total":
+Its answer for a seeded purchase order in a status that books, as
+``docs/upstream/OBSERVED.md`` notes: ``{"total":
 1, "data": [...]}``, the one entry its items booked (``type`` ``GENERATED``).
 """
 
