@@ -5,9 +5,9 @@ script neither writes nor checks and ``FETCHED.md`` lists in a row of its own, a
 each note its evidence: the probe that showed it, its date, its operation and its sample, a
 recording under ``tests/fixtures/``, or its request where the probe kept no answer. A note
 here is a ``###`` section, and its last paragraph, ``Probe:``, names them. The package's
-own text, ``CLAUDE.md``, ``README.md``, ``docs/demo-org.md`` and every module under
-``src/xippios/cashctrl/``, keeps what its reader needs and no probe: the probes stand in
-``OBSERVED.md`` alone.
+own text, ``CLAUDE.md``, ``README.md``, ``docs/demo-org.md``, ``docs/write-tools.md`` and
+every module under ``src/xippios/cashctrl/``, keeps what its reader needs and no probe: the
+probes stand in ``OBSERVED.md`` alone.
 """
 
 import json
@@ -37,7 +37,12 @@ PROBE = re.compile(
     re.IGNORECASE,
 )
 """A probe in prose: observed, verified or seen with its date, or a citation ``(observed``."""
-RULES = [ROOT / "CLAUDE.md", ROOT / "README.md", ROOT / "docs" / "demo-org.md"]
+RULES = [
+    ROOT / "CLAUDE.md",
+    ROOT / "README.md",
+    ROOT / "docs" / "demo-org.md",
+    ROOT / "docs" / "write-tools.md",
+]
 """The package's documents, which point to ``OBSERVED.md`` and keep no probe."""
 SCRIPTS = [ROOT / "scripts" / "record_fixture.py"]
 """The scripts whose text states what upstream does, which keep no probe either."""
