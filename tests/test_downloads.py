@@ -517,9 +517,9 @@ def test_an_unknown_orders_404_is_not_found_and_dest_stays(
 def test_an_exports_refusal_is_raised_and_removed(
     respx_mock: respx.MockRouter, tmp_path: Path, content_type: str
 ) -> None:
-    """NOT RECORDED: a documented refusal, a field list, composed in the shape
-    ``journal_create/rejected`` recorded (conventions §10, kind 2); its content type, in any
-    spelling, is an input of the test, not an answer from CashCtrl."""
+    """NOT RECORDED: a documented refusal, a field list as ``error-handling.md``'s example
+    gives it, composed (conventions §10, kind 2), under a JSON content type in any spelling,
+    each a form no recording holds."""
     refusal = {"success": False, "errors": [{"field": "columns", "message": "Invalid."}]}
     mount(respx_mock, "journal/list.csv", json.dumps(refusal).encode(), content_type)
     with pytest.raises(RequestRejected) as info:
@@ -548,8 +548,17 @@ def test_a_refusal_with_a_message_on_an_export_is_no_absence(
     assert files(tmp_path) == []
 
 
+MISSING_ID = load_fixture(Path(__file__).parent / "fixtures" / "account_read" / "missing_id.json")
+"""``account_read/missing_id``, the refusal at HTTP 200 two tests change in memory."""
+
+
 @pytest.mark.parametrize(
-    "body", [b'{"success":true,"data":[]}', b'{"success":false', b"[" + b"1," * 9000 + b"1]"]
+    "body",
+    [
+        b'{"success":true,"data":[]}',
+        MISSING_ID.response.body.encode()[:16],
+        b"[" + b"1," * 9000 + b"1]",
+    ],
 )
 def test_json_that_is_no_refusal_is_raised_too(
     respx_mock: respx.MockRouter, tmp_path: Path, body: bytes
@@ -558,7 +567,9 @@ def test_json_that_is_no_refusal_is_raised_too(
 
     The error names the request as core's ``request_description`` gives it (conventions §5).
     NOT RECORDED: a read's answer composed in its recorded shape (conventions §10, kind 2),
-    and JSON cut short or too long to quote, inputs of the test, not answers from CashCtrl.
+    ``account_read/missing_id`` cut short in memory (kind 4), and an array of no shape
+    upstream sends, too long to quote, whose error core's ``request_description`` words
+    without quoting it (kind 5).
     """
     mount(respx_mock, "account/list.pdf", body, JSON_UTF8)
     with pytest.raises(ValidationError, match="neither a file nor a refusal") as info:
@@ -578,9 +589,10 @@ def test_any_other_content_type_is_kept_as_the_file(
 ) -> None:
     """The content type decides: even a refusal's text under another type is the file.
 
-    The text and its type are inputs of the test, not answers from CashCtrl.
+    NOT RECORDED: ``account_read/missing_id``'s refusal served under another content type,
+    a header replaced in memory (conventions §10, kind 4).
     """
-    body = b'{"success":false}'
+    body = MISSING_ID.response.body.encode()
     mount(respx_mock, "order/list.csv", body, content_type)
     result = tasks.export_orders(DEMO, "csv", tmp_path / "orders.csv")
     assert (tmp_path / "orders.csv").read_bytes() == body
@@ -589,14 +601,23 @@ def test_any_other_content_type_is_kept_as_the_file(
 
 @pytest.mark.parametrize(("status", "error"), [(401, AuthError), (404, UpstreamError)])
 def test_a_status_error_writes_nothing(
-    respx_mock: respx.MockRouter, tmp_path: Path, status: int, error: type[Exception]
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+    tmp_path: Path,
+    status: int,
+    error: type[Exception],
 ) -> None:
     """``classify`` maps the status as for a read: a 404 is an unknown endpoint.
 
-    NOT RECORDED: the documented 401 and 404 of ``error-handling.md``, composed (conventions
-    §10, kind 2); their text, ``no``, is an input of the test, not an answer from CashCtrl.
+    NOT RECORDED: the 401 is ``account_list/wrong_key``'s, served at an export, a state
+    upstream answers alike behind one gateway (conventions §10, kind 3); the documented 404
+    of ``error-handling.md`` is composed as CashCtrl's status pages were recorded (kind 2).
     """
-    route = respx_mock.get(f"{BASE}/journal/list.pdf").respond(status, text="no")
+    wrong_key = load_fixture(fixture_path(fixtures_dir, "account_list", "wrong_key")).response
+    text = wrong_key.body if status == 401 else "CashCtrl - 404 Not Found"
+    route = respx_mock.get(f"{BASE}/journal/list.pdf").respond(
+        status, text=text, headers={"content-type": "text/plain;charset=utf-8"}
+    )
     with pytest.raises(error):
         tasks.export_journal_entries(DEMO, "pdf", tmp_path / "journal.pdf")
     assert route.call_count == 1

@@ -179,8 +179,8 @@ def test_the_observed_missing_id_is_a_rejection_with_a_message(fixtures_dir: Pat
 
 
 def test_a_field_list_on_read_by_id_is_a_rejection_not_absence() -> None:
-    """NOT RECORDED: a documented refusal, a field list, composed in the shape
-    ``journal_create/rejected`` recorded for a read by ``id`` (conventions §10, kind 2)."""
+    """NOT RECORDED: a documented refusal, a field list as ``error-handling.md``'s example
+    gives it, composed for a read by ``id`` (conventions §10, kind 2)."""
     payload = {"success": False, "errors": [{"field": "id", "message": "Invalid."}]}
     error = classify(refusal("/account/read.json?id=7", payload))
     assert isinstance(error, RequestRejected)
@@ -200,9 +200,8 @@ def test_a_top_level_message_is_read_when_error_message_is_absent(
     payload: dict[str, object],
 ) -> None:
     """NOT RECORDED: a refusal composed in the shape ``journal_delete/already_deleted``
-    recorded, ``message`` beside ``success: false`` (conventions §10, kind 2). The
-    ``errorMessage`` beside it that holds no text is an input of the test, not an answer
-    from CashCtrl."""
+    recorded, ``message`` beside ``success: false`` (conventions §10, kind 2), and beside it
+    an ``errorMessage`` that holds no text, a form no recording holds."""
     error = classify(refusal("/account/delete.json", payload))
     assert isinstance(error, RequestRejected)
     assert error.upstream_message == "Nope."
@@ -219,7 +218,8 @@ def test_a_top_level_message_is_read_when_error_message_is_absent(
     ],
 )
 def test_reading_one_record_by_id_is_not_found(path: str) -> None:
-    """A ``read.json`` by ``id``, and a ``read.pdf`` by ``ids`` (assumed alike, not observed).
+    """A ``read.json`` by ``id``, and a ``read.pdf`` by ``ids``, whose unknown id was recorded
+    as a 404 (``order_document_read_pdf/unknown_id``): a refusal at HTTP 200 there as well.
 
     NOT RECORDED: the refusal is composed in the shape ``account_read/unknown_id`` recorded,
     a documented error (conventions §10, kind 2).
@@ -257,10 +257,10 @@ def test_a_refusal_is_classified_whatever_the_content_type() -> None:
     """NOT RECORDED: a refusal composed in the shape ``account_read/missing_id`` recorded, a
     documented error (conventions §10, kind 2).
 
-    Its content type, ``text/html``, is an input of the test, not an answer from CashCtrl:
-    ``classify`` must not read it, and a byte pre-check and a JSON parse decide.
+    Its content type, ``text/html``, is a form no recording holds: ``classify`` must not
+    read it, and a byte pre-check and a JSON parse decide.
     """
-    body = b'{"success":false,"errorMessage":"Nope."}'
+    body = b'{"success":false,"errorMessage":"Nope.","data":null}'
     error = classify(response("/account/delete.json", 200, body, {"content-type": "text/html"}))
     assert isinstance(error, RequestRejected)
 
@@ -428,8 +428,9 @@ def assert_no_tenant(error: XippiosError) -> None:
 
 
 def echoing(status: int, headers: dict[str, str], content: bytes) -> httpx.Response:
-    """NOT RECORDED: a documented status from the tenant host, whose body names that host
-    as an error page may: the body is an input of the test, not an answer from CashCtrl."""
+    """NOT RECORDED: a documented status from the tenant host, whose body, of no shape
+    upstream sends, names that host as an error page may: ``classify`` rewrites the host
+    and leaves the error to core's status mapping (conventions §10, kind 5)."""
     url = f"https://{TENANT}.cashctrl.com/api/v1/account/list.json"
     return httpx.Response(
         status, headers=headers, content=content, request=httpx.Request("GET", url)
@@ -496,8 +497,8 @@ async def test_status_errors_do_not_name_the_subdomain(
 ) -> None:
     """NOT RECORDED: the documented 503, 429 and 404 of ``error-handling.md``, composed as
     CashCtrl's status pages were recorded, a line that starts ``CashCtrl -`` (conventions
-    §10, kind 2). The host it names and ``Retry-After`` are inputs of the test, not answers
-    from CashCtrl."""
+    §10, kind 2), naming the tenant's host and sending a ``Retry-After``, forms no recorded
+    page takes."""
     route = respx_mock.get(f"{tenant}/account/list.json")
     route.respond(status, headers=headers, text=f"CashCtrl - error at {TENANT}.cashctrl.com")
     error = await raised("/account/list.json")
@@ -545,8 +546,8 @@ async def test_a_429_is_a_rate_limit_error_with_retry_after(
     seconds is beyond the retry policy's backoff, so the client raises at once. NOT
     RECORDED: the documented 429, composed as CashCtrl's status pages were recorded,
     ``CashCtrl - 401 Unauthorized`` and ``CashCtrl - 404 Not Found`` under
-    ``text/plain;charset=utf-8`` (conventions §10, kind 2). Its ``Retry-After`` is an input
-    of the test, not an answer from CashCtrl.
+    ``text/plain;charset=utf-8`` (conventions §10, kind 2), with a ``Retry-After`` no
+    recorded page sends.
     """
     route = respx_mock.get(f"{BASE}/account/list.json")
     plain = {"Retry-After": "120", "content-type": "text/plain;charset=utf-8"}

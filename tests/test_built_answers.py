@@ -66,14 +66,32 @@ SCRUB = re.compile(r"^(?:scrub(?:_\w+)?|merge_custom)$")
 REPLAYS = ("replay_fixture", "replay", "mount_fixture")
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+UNFIT = (
+    "a made-up exchange whose written form the test compares: no kind of §10 fits it as "
+    "built, a reshaped body would change an assertion, and no scrubbed recording keeps "
+    "what it carries"
+)
 ALLOWED: dict[tuple[str, str], str] = {
     ("tests/test_tasks.py", "serve_by_start"): (
         "each journal page recorded for its start, served at the URL it was recorded for with "
         "its body as recorded: a recording served where and as recorded, which takes no kind; "
         "one route answers by start, since replay_fixture matches no query a request lacks"
     ),
+    ("tests/test_record_fixture.py", "test_a_percent_encoded_key_is_redacted_and_goes_to_review"): (
+        UNFIT
+    ),
+    ("tests/test_record_fixture.py", "test_a_recorded_fixture_replays_on_the_placeholder_host"): (
+        UNFIT
+    ),
+    (
+        "tests/test_record_fixture.py",
+        "test_the_placeholder_host_leaves_no_trace_of_the_organisation",
+    ): (UNFIT),
+    ("tests/test_record_fixture.py", "test_other_token_like_fields_are_redacted"): UNFIT,
 }
-"""Top-level helpers whose places are neither a kind of §10 nor an input, with the reason."""
+"""Top-level helpers and tests whose places are neither a kind of §10 nor an input, each with
+its reason. The four tests of the recorder are no kind as built and stay listed until a
+recording or a change of their assertions brings them to one."""
 
 
 def is_mark(text: str | None, served: bool = False) -> bool:

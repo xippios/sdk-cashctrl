@@ -64,6 +64,20 @@ def _total(total: int) -> httpx.Response:
     return httpx.Response(200, json={"total": total, "data": []})
 
 
+def recorded_list(fixture: str) -> dict[str, Any]:
+    """The decoded body of a recorded list, ``<wrapper>/<case>``, to change in memory."""
+    path = Path(__file__).parent / "fixtures" / f"{fixture}.json"
+    body: dict[str, Any] = json.loads(load_fixture(path).response.body)
+    return body
+
+
+DISCOVERY_RECORDINGS = {
+    "customfield/list.json": "customfield_list/person",
+    "account/costcenter/list.json": "account_costcenter_list/default",
+}
+"""The recorded list of each path discovery reads."""
+
+
 def _localized(de: str, en: str) -> str:
     return f"<values><de>{de}</de><en>{en}</en></values>"
 
@@ -75,7 +89,7 @@ class FakeCashCtrl:
     upstream was recorded answering: a list's ``total`` and ``data``, a read's or a write's
     ``success`` with ``data``, ``message`` or ``insertId`` (conventions §10, kind 2). Its
     records, the states its flags set and the subdomain, key and owner's address it writes
-    into names, ids and refusals are inputs of the test, not answers from CashCtrl.
+    into names, ids and refusals are made up: no recording holds them.
     """
 
     def __init__(self) -> None:
@@ -493,12 +507,14 @@ def test_the_orders_of_every_fiscal_period_are_checked(
 
 
 def test_a_missing_total_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
-    """The person list without ``total`` is an input of the test, not an answer from
-    CashCtrl: a form no recording holds, which the seeder refuses."""
+    """NOT RECORDED: ``person_list/default`` with its ``total`` removed in memory, a form
+    upstream was not seen to send, which the seeder refuses (conventions §10, kind 4)."""
     upstream = FakeCashCtrl()
+    persons = recorded_list("person_list/default")
+    del persons["total"]
     with respx.mock(assert_all_called=False) as router:
         router.get(f"https://{SUB}.cashctrl.com/api/v1/person/list.json").mock(
-            return_value=httpx.Response(200, json={"data": []})
+            return_value=httpx.Response(200, json=persons)
         )
         router.route(host=f"{SUB}.cashctrl.com").mock(side_effect=upstream)
         status, _, err = run(capsys, "--apply", "--yes")
@@ -583,8 +599,9 @@ def test_persons_beyond_the_listed_ones_count_as_others(
 def test_a_person_total_below_the_records_listed_is_refused(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The person list that counts fewer records than it lists is an input of the test, not
-    an answer from CashCtrl: a form no recording holds, which the seeder refuses."""
+    """NOT RECORDED: the fake upstream's person list, composed in the shape the lists were
+    recorded, counting fewer records than it lists, which the seeder refuses (conventions
+    §10, kind 2)."""
     upstream = FakeCashCtrl()
     with respx.mock(assert_all_called=False) as router:
         router.get(f"https://{SUB}.cashctrl.com/api/v1/person/list.json").mock(
@@ -1350,12 +1367,16 @@ def test_discovery_refuses_anything_but_two_empty_lists_or_its_own_records(
 
 
 @pytest.mark.parametrize("path", ["customfield/list.json", "account/costcenter/list.json"])
-@pytest.mark.parametrize("answer", [{"data": []}, {"total": 2, "data": [OWN_FIELD]}])
+@pytest.mark.parametrize("answer", [None, {"total": 2, "data": [OWN_FIELD]}])
 def test_discovery_refuses_a_list_it_cannot_confirm_whole(
-    capsys: pytest.CaptureFixture[str], path: str, answer: dict[str, Any]
+    capsys: pytest.CaptureFixture[str], path: str, answer: dict[str, Any] | None
 ) -> None:
-    """Each list is an input of the test, not an answer from CashCtrl: without ``total``, or
-    counting a record it does not list, forms no recording holds, which discovery refuses."""
+    """NOT RECORDED: the path's recorded list with its ``total`` removed in memory
+    (conventions §10, kind 4), or a list composed in the shape the lists were recorded that
+    counts a record it does not list (kind 2), forms upstream was not seen to send."""
+    if answer is None:
+        answer = recorded_list(DISCOVERY_RECORDINGS[path])
+        del answer["total"]
     upstream = FakeCashCtrl()
     with respx.mock(assert_all_called=False) as router:
         router.get(f"https://{SUB}.cashctrl.com/api/v1/{path}").mock(

@@ -428,6 +428,9 @@ def test_list_accounts_sends_the_filter_as_upstream_reads_it(
 def test_list_accounts_takes_filters_as_mappings_too(
     replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
 ) -> None:
+    """The second call sends another filter and is answered by account_list/filter_number_eq
+    within the one operation, in a part of the test that asserts only what was sent
+    (conventions §10, kind 3)."""
     route = replay_fixture("account_list", "filter_number_eq")
     item = {"comparison": "eq", "field": "number", "value": "1020"}
     arguments: dict[str, typing.Any] = {"filter": [item]}
@@ -795,6 +798,10 @@ def test_start_without_limit_collects_every_page_from_start(
 def test_the_default_page_size_is_upstreams_100(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
+    """The recorded page at start 10 and limit 5 answers the request at start 0 and limit 100
+    within the one operation, a state upstream answers alike: the twelve entries of 2025 make
+    a page shorter than 100 there too, so one request ends the collection, and the test
+    asserts what was sent (conventions §10, kind 3)."""
     assert tasks.PAGE_SIZE == 100
     route = replay_fixture("journal_list", "fp2025_start_10_limit_5")
     tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
@@ -1552,7 +1559,11 @@ def test_the_history_of_a_deleted_order_is_empty(
 def test_list_history_sends_its_parameters_as_upstream_reads_them(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
-    """What is sent; the answer is the recorded history, which matches any query."""
+    """What is sent; the answer is the recorded history, which matches any query.
+
+    The recorded history answers a request with other parameters within the one operation, in a
+    test that asserts only what was sent (conventions §10, kind 3).
+    """
     route = replay_fixture("history_list", "order")
     result = tasks.list_history(
         DEMO,
@@ -1681,6 +1692,8 @@ async def test_list_order_categories_as_a_tool(
 def test_list_order_categories_as_a_route(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
+    """order_category_list/default, recorded without type, answers type=SALES, which order.md
+    documents as the default, so the operation answers alike there (conventions §10, kind 3)."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -1902,7 +1915,11 @@ def test_list_cost_centers_replays_the_recorded_list(
 def test_list_cost_centers_sends_its_parameters_as_upstream_reads_them(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
-    """What is sent; the answer is the recorded empty list, which matches any query."""
+    """What is sent; the answer is the recorded empty list, which matches any query.
+
+    The recorded list answers a request with every parameter within the one operation, in a test
+    that asserts only what was sent (conventions §10, kind 3).
+    """
     route = replay_fixture("account_costcenter_list", "default")
     result = tasks.list_cost_centers(
         DEMO,
@@ -1983,6 +2000,9 @@ def test_list_cost_centers_refuses_what_upstream_would_ignore(
 def test_list_cost_centers_is_a_post_route(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
+    """account_costcenter_list/default answers a request with onlyActive within the one
+    operation, in a test that asserts only what was sent and a refusal before any request
+    (conventions §10, kind 3)."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -2238,7 +2258,11 @@ def test_get_report_data_drops_every_key_ending_in_iban(
 def test_get_report_data_sends_the_dates_as_upstream_reads_them(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
-    """What is sent; the answer is the recorded one, which matches any query on the path."""
+    """What is sent; the answer is the recorded one, which matches any query on the path.
+
+    The recorded balance sheet answers a request with dates, a language and a sort within the
+    one operation, in a test that asserts only what was sent (conventions §10, kind 3).
+    """
     replay_fixture("report_tree", "default")
     route = replay_fixture("report_element_data", "balance_fp2025")
     result = tasks.get_report_data(
@@ -2451,6 +2475,9 @@ def test_a_payroll_element_retyped_in_the_tree_is_read(
 
     ``WITHHOLDING_TAX_RATES``, a documented type the demo tree lacks, lists rates and no
     persons, so it passes (https://github.com/xippios/sdk-cashctrl/pull/19).
+
+    The recorded balance sheet answers the request for element 24 within the one operation, in a
+    test that asserts only what was sent (conventions §10, kind 3).
     """
     respx_mock.get(TREE_URL).respond(200, json=changed_tree(fixtures_dir, e24=report_type))
     data = replay_fixture("report_element_data", "balance_fp2025")
@@ -2462,7 +2489,11 @@ def test_a_payroll_element_retyped_in_the_tree_is_read(
 def test_every_other_report_is_read_and_the_tree_once(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
-    """The recorded tree's 20 other elements: one tree read for them all (one data answer)."""
+    """The recorded tree's 20 other elements: one tree read for them all (one data answer).
+
+    The recorded balance sheet answers the request for each other element within the one
+    operation, in a test that asserts only what was sent (conventions §10, kind 3).
+    """
     tree = replay_fixture("report_tree", "default")
     data = replay_fixture("report_element_data", "balance_fp2025")
     for element_id in PASSED_ELEMENTS:
@@ -2483,6 +2514,9 @@ def test_the_tree_is_read_once_per_organisation_and_again_after_a_reset(
     NOT RECORDED: xa's tree, composed in the shape ``report_tree/default`` recorded, lists no
     element (conventions §10, kind 2); its report is the recorded balance sheet served at
     xa's host, a request of the same operation that upstream answers alike (kind 3).
+
+    Demo's requests for other elements are answered by the recorded balance sheet in the same
+    way, the test asserting only what was sent (conventions §10, kind 3).
     """
     tree = replay_fixture("report_tree", "default")
     data = replay_fixture("report_element_data", "balance_fp2025")
@@ -2536,6 +2570,10 @@ def test_an_element_the_kept_tree_lacks_reads_the_tree_once_more(
     decision 1); a kept tree that lacks it is read once more, and the element found there
     is judged by its type; one still missing is asked of upstream, the identifier drop the
     guard.
+
+    The recorded balance sheet answers the requests for elements 98 and 97 within the one
+    operation, in a test that asserts only what was sent and the refusals (conventions §10, kind
+    3).
     """
     recorded_tree = recorded_body(fixtures_dir, "report_tree", "default")
     grown = json.loads(json.dumps(recorded_tree))
@@ -2806,6 +2844,10 @@ async def test_a_recorded_list_is_whole(
     """Upstream's ``total`` equals the records in the one answer: nothing is left behind.
 
     The journal pages are not whole by design (``journal_list/fp2025_*``, ``fp2026_*``).
+
+    Each list was recorded with start=0 and limit=100 and answers the wrapper's request without
+    them: the operation answers alike, since person.md and order.md document both as the
+    defaults (conventions §10, kind 3).
     """
     replay_fixture(*case.split("/"))
     wrapper, arguments = call

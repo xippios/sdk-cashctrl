@@ -2459,7 +2459,15 @@ async def test_a_refusal_through_the_write_server(
     rejected = await mcp_call_text(
         write_server,
         "cashctrl_create_journal_entry",
-        {"org": DEMO, "credit_id": 42, "amount": "100.00", "confirm": True},
+        {
+            "org": DEMO,
+            "date_added": "2026-10-24",
+            "credit_id": 42,
+            "amount": "100.00",
+            "title": "xippios-live fixture rejected",
+            "tax_id": 9,
+            "confirm": True,
+        },
     )
     assert rejected == (
         "error: RequestRejected: CashCtrl rejected the request: "
@@ -2565,7 +2573,12 @@ async def test_write_tool_results_carry_snake_case_keys(
     arguments: dict[str, Any],
 ) -> None:
     """``before`` is a read record, snake_case like every read result; the form fields in
-    ``payload`` and ``changes`` keep upstream's names, as ``meta.request`` does."""
+    ``payload`` and ``changes`` keep upstream's names, as ``meta.request`` does.
+
+    Where a case sends another form than its recording, as the order's create does, the recorded
+    answer answers it within the one operation: a create answers any form it takes with the same
+    keys, all the test reads of it (conventions §10, kind 3).
+    """
     for endpoint, case in fixtures:
         replay_fixture(endpoint, case)
     call = dict(arguments)
