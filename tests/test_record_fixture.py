@@ -764,6 +764,25 @@ STATUS_PAGE = load_fixture(
 """CashCtrl's recorded 401 page, ``account_list/wrong_key``, which two tests serve at HTTP 200."""
 
 
+def recorded_text(endpoint: str, case: str) -> str:
+    """The body of the recorded answer ``<endpoint>/<case>``, as written."""
+    return load_fixture(
+        Path(__file__).parent / "fixtures" / endpoint / f"{case}.json"
+    ).response.body
+
+
+def recorded_body(endpoint: str, case: str) -> Any:
+    """The decoded body of the recorded answer ``<endpoint>/<case>``, to change in memory."""
+    return json.loads(recorded_text(endpoint, case))
+
+
+def with_next(link: str) -> Any:
+    """``account_list/only_active_finanz`` with its first account given ``next``, in memory."""
+    body = recorded_body("account_list", "only_active_finanz")
+    body["data"][0]["next"] = link
+    return body
+
+
 def order_answer(order_id: int, *, nr: str, description: str | None) -> dict[str, Any]:
     """The recorded read of the marked order 20 (``order_read/for_update``), given another
     id, ``nr`` and ``description``: a read changed in memory (conventions §10, kind 4)."""
@@ -1788,27 +1807,31 @@ def test_other_token_like_fields_are_redacted(
 ) -> None:
     """``token``, ``secret`` and ``apiKey`` were never seen; scrubbed, they need no review.
 
-    NOT RECORDED: a settings read of no recorded shape, carrying token-like fields, whose
-    written form the test compares: no kind of conventions §10 fits it as built, and
-    setting/read.json has no recording.
+    NOT RECORDED: person_read/by_id changed in memory, its record given token-like fields, a
+    form upstream was not seen to send (conventions §10, kind 4); the written form is that
+    recording with them redacted.
     """
-    body = {
+    tokens = {
         "token": "t-value",
         "secret": "s-value",  # pragma: allowlist secret
         "apiKey": "k-value",  # pragma: allowlist secret
         "api_key": None,
     }
-    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/setting/read.json")
+    body = recorded_body("person_read", "by_id")
+    body["data"].update(tokens)
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/person/read.json")
     route.mock(return_value=httpx.Response(200, json=body))
-    assert recorder.main(["setting/read.json", "tokens"]) == 0
-    text = (tmp_path / "tests" / "fixtures" / "setting_read" / "tokens.json").read_text()
+    assert recorder.main(["person/read.json", "tokens", "id=3"]) == 0
+    text = (tmp_path / "tests" / "fixtures" / "person_read" / "tokens.json").read_text()
     written = json.loads(json.loads(text)["response"]["body"])
-    assert written == {
-        "token": "REDACTED",
-        "secret": "REDACTED",  # pragma: allowlist secret
-        "apiKey": "REDACTED",  # pragma: allowlist secret
-        "api_key": None,
-    }
+    expected = recorded_body("person_read", "by_id")
+    expected["data"].update(
+        token="REDACTED",
+        secret="REDACTED",  # pragma: allowlist secret
+        apiKey="REDACTED",  # pragma: allowlist secret
+        api_key=None,
+    )
+    assert written == expected
     out = capsys.readouterr().out
     assert "review" not in out, "a settled token-like field is no mention to review"
     assert "value" not in out.replace("REDACTED", "")
@@ -2163,9 +2186,9 @@ def test_the_placeholder_host_leaves_no_trace_of_the_organisation(
 ) -> None:
     """In the URL, the headers and the bodies: any case, percent-encoded, ``\\/`` escaped.
 
-    NOT RECORDED: a write's answer of no shape upstream sends, its headers and body naming the
-    host in each form, whose written form the test compares: no kind of conventions §10 fits it
-    as built, and no scrubbed recording keeps the host.
+    NOT RECORDED: journal_create/ok changed in memory, its headers and body given the host in
+    each form, a form no scrubbed recording keeps (conventions §10, kind 4); the written form is
+    that recording with the rewrite applied.
     """
     route = respx_mock.post(f"https://{HOST}/api/v1/journal/create.json")
     route.mock(
@@ -2177,7 +2200,8 @@ def test_the_placeholder_host_leaves_no_trace_of_the_organisation(
                 "Link": f"<https://{HOST}/a>; rel=next",
             },
             content=(
-                f'{{"self": "https://{HOST}/api/v1/x",'
+                recorded_text("journal_create", "ok").removesuffix("}")
+                + f', "self": "https://{HOST}/api/v1/x",'
                 f' "escaped": "https:\\/\\/{HOST}\\/y",'
                 f' "encoded": "https%3A%2F%2F{REAL}%2ecashctrl%2Ecom%2Fz"}}'
             ).encode(),
@@ -2195,6 +2219,7 @@ def test_the_placeholder_host_leaves_no_trace_of_the_organisation(
     assert headers["content-location"] == "https://demo.cashctrl.com/x"
     assert headers["link"] == "<https://demo.cashctrl.com/a>; rel=next"
     assert json.loads(fixture["response"]["body"]) == {
+        **recorded_body("journal_create", "ok"),
         "self": "https://demo.cashctrl.com/api/v1/x",
         "escaped": "https://demo.cashctrl.com/y",
         "encoded": "https%3A%2F%2Fdemo.cashctrl.com%2Fz",
@@ -2207,13 +2232,13 @@ def test_a_recorded_fixture_replays_on_the_placeholder_host(
 ) -> None:
     """Recorded from the organisation's host, replayed on ``demo.cashctrl.com``.
 
-    NOT RECORDED: a list of no shape upstream sends, without its total, linking to the
-    organisation's host, whose written form the test compares: no kind of conventions §10 fits
-    it as built, and no scrubbed recording keeps the host.
+    NOT RECORDED: account_list/only_active_finanz changed in memory, its first account given a
+    link to the organisation's host, a form no scrubbed recording keeps (conventions §10, kind
+    4); the replayed rows are that recording on the placeholder host.
     """
-    respx_mock.get(f"https://{HOST}/api/v1/account/list.json").respond(
-        200, json={"data": [{"id": 1, "link": f"https://{HOST}/a/1"}]}
-    )
+    body = recorded_body("account_list", "only_active_finanz")
+    body["data"][0]["link"] = f"https://{HOST}/a/1"
+    respx_mock.get(f"https://{HOST}/api/v1/account/list.json").respond(200, json=body)
     assert recorder.main(["account/list.json", "one"]) == 0
     written = tmp_path / "tests" / "fixtures" / "account_list" / "one.json"
     assert not {"truncated", "original_bytes", "original_count", "sha256"} & set(
@@ -2225,7 +2250,9 @@ def test_a_recorded_fixture_replays_on_the_placeholder_host(
         source="cashctrl", version="1", base_url="https://demo.cashctrl.com/api/v1"
     )
     rows = recorder.sync(AsyncClient(config).get_json)("/account/list.json")
-    assert rows == {"data": [{"id": 1, "link": "https://demo.cashctrl.com/a/1"}]}
+    expected = recorded_body("account_list", "only_active_finanz")
+    expected["data"][0]["link"] = "https://demo.cashctrl.com/a/1"
+    assert rows == expected
     assert route.call_count == 1
 
 
@@ -2237,15 +2264,16 @@ def test_a_percent_encoded_key_is_redacted_and_goes_to_review(
 ) -> None:
     """Core redacts the key as given only; the recorder's step takes every encoded form.
 
-    NOT RECORDED: a record of no shape upstream sends, it and an X-Echo header carrying the key
-    percent-encoded, whose written form the test compares: no kind of conventions §10 fits it as
-    built, and no recording can carry the key.
+    NOT RECORDED: account_list/only_active_finanz changed in memory, its first account given a
+    link and the answer an X-Echo header that carry the key percent-encoded, a form upstream was
+    not seen to send (conventions §10, kind 4); the written form is that recording with the
+    rewrite applied.
     """
     route = respx_mock.get(f"https://{HOST}/api/v1/account/list.json")
     route.mock(
         return_value=httpx.Response(
             200,
-            json={"next": f"https://x.example/?k={ENCODED_KEY}"},
+            json=with_next(f"https://x.example/?k={ENCODED_KEY}"),
             headers={"X-Echo": ENCODED_KEY.lower()},
         )
     )
@@ -2254,7 +2282,7 @@ def test_a_percent_encoded_key_is_redacted_and_goes_to_review(
     assert ENCODED_KEY not in text
     assert ENCODED_KEY.lower() not in text
     fixture = json.loads(text)
-    assert json.loads(fixture["response"]["body"]) == {"next": f"https://x.example/?k={REDACTED}"}
+    assert json.loads(fixture["response"]["body"]) == with_next(f"https://x.example/?k={REDACTED}")
     assert ["x-echo", REDACTED] in fixture["response"]["headers"]
     out = capsys.readouterr().out
     assert "the response carried the value of CASHCTRL_DEMO_API_KEY" in out
