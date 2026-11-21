@@ -1193,7 +1193,7 @@ def recorded_404(endpoint: str) -> httpx.Response:
     directory, _ = FILE_REFUSALS[endpoint]
     answer = load_fixture(FIXTURES / directory / "unknown_id.json").response
     return httpx.Response(
-        answer.status, headers=[tuple(pair) for pair in answer.headers], text=answer.body
+        answer.status, headers=[(name, value) for name, value in answer.headers], text=answer.body
     )
 
 
