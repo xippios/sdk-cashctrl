@@ -242,9 +242,11 @@ def test_anything_but_a_read_by_id_is_a_rejection(path: str) -> None:
 
 
 def test_a_refusal_is_classified_whatever_the_content_type() -> None:
-    """NOT RECORDED: a refusal composed in the recorded shape (conventions §10, kind 2).
+    """NOT RECORDED: a refusal composed in the shape ``account_read/missing_id`` recorded, a
+    documented error (conventions §10, kind 2).
 
-    Served under a content type upstream was not seen to send with it (kind 4's form).
+    Its content type, ``text/html``, is an input of the test, not an answer from CashCtrl:
+    ``classify`` must not read it, and a byte pre-check and a JSON parse decide.
     """
     body = b'{"success":false,"errorMessage":"Nope."}'
     error = classify(response("/account/delete.json", 200, body, {"content-type": "text/html"}))
