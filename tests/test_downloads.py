@@ -36,6 +36,7 @@ from xippios.core.testing import (
     sent_query,
     sent_urls,
 )
+from xippios.core.testing.replay import replay
 
 from xippios.cashctrl import api, tasks
 from xippios.cashctrl._client import DEMO, SOURCE
@@ -72,7 +73,12 @@ NUMBER_1020 = Filter(comparison="eq", field="number", value="1020")
 def mount(
     router: respx.MockRouter, endpoint: str, body: bytes, content_type: str | None
 ) -> respx.Route:
-    """Answer ``GET <endpoint>``, any query, with ``body`` under ``content_type``."""
+    """Answer ``GET <endpoint>``, any query, with ``body`` under ``content_type``.
+
+    NOT RECORDED: one of ``BODIES``, made up, of no shape upstream sends, which the file
+    tasks leave to core's ``download`` (conventions §10, kind 5), unless the test says what
+    else it serves.
+    """
     headers = {} if content_type is None else {"Content-Type": content_type}
     return router.get(f"{BASE}/{endpoint}").respond(200, content=body, headers=headers)
 
@@ -168,6 +174,8 @@ def test_there_is_a_wrapper_for_every_format_of_every_export() -> None:
 def test_download_order_document_writes_the_pdf_where_the_caller_says(
     respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
+    """NOT RECORDED: ``BODIES``' made-up PDF, of no shape upstream sends, which the task
+    leaves to core's ``download`` (conventions §10, kind 5)."""
     body, content_type = BODIES["pdf"]
     route = respx_mock.get(f"{BASE}/order/document/read.pdf").respond(
         200,
@@ -360,6 +368,9 @@ def test_an_export_sends_every_filter_as_its_list_does(
     name: str,
     case: tuple[Callable[..., typing.Any], Callable[..., typing.Any], str],
 ) -> None:
+    """NOT RECORDED: the list answers an empty list, composed in the shape the lists were
+    recorded (conventions §10, kind 2): a recorded page that counts more records than it
+    holds would page on and change what the test compares, the requests sent."""
     export, listing, module = case
     arguments = EVERY_FILTER[name]
     listed = respx_mock.get(f"{BASE}/{module}/list.json").respond(
@@ -468,7 +479,9 @@ def test_every_export_checks_format_and_columns(
 def test_an_unknown_order_is_not_found_and_nothing_is_written(
     respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
-    """The ``read.json`` refusal's shape, assumed for ``read.pdf`` (not observed)."""
+    """NOT RECORDED: a documented refusal, composed in the shape ``account_read/unknown_id``
+    recorded (conventions §10, kind 2), for ``read.pdf``, whose unknown id was recorded as
+    a 404 (the next test): it reaches the file task's branch for a JSON answer."""
     refusal = {"success": False, "errorMessage": "This order does not exist.", "data": None}
     body = json.dumps(refusal).encode()
     mount(respx_mock, "order/document/read.pdf", body, JSON_UTF8)
@@ -504,6 +517,9 @@ def test_an_unknown_orders_404_is_not_found_and_dest_stays(
 def test_an_exports_refusal_is_raised_and_removed(
     respx_mock: respx.MockRouter, tmp_path: Path, content_type: str
 ) -> None:
+    """NOT RECORDED: a documented refusal, a field list as ``error-handling.md``'s example
+    gives it, composed (conventions §10, kind 2), under a JSON content type in any spelling,
+    each a form no recording holds."""
     refusal = {"success": False, "errors": [{"field": "columns", "message": "Invalid."}]}
     mount(respx_mock, "journal/list.csv", json.dumps(refusal).encode(), content_type)
     with pytest.raises(RequestRejected) as info:
@@ -515,7 +531,11 @@ def test_an_exports_refusal_is_raised_and_removed(
 def test_a_refusal_with_a_message_on_an_export_is_no_absence(
     respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
-    """An export reads no record by id: a refusal with a message is ``RequestRejected``."""
+    """An export reads no record by id: a refusal with a message is ``RequestRejected``.
+
+    NOT RECORDED: composed in the shape ``account_read/missing_id`` recorded (conventions
+    §10, kind 2).
+    """
     body = b'{"success":false,"errorMessage":"Not allowed.","data":null}'
     mount(respx_mock, "person/list.xlsx", body, JSON_UTF8)
     with pytest.raises(RequestRejected) as info:
@@ -528,8 +548,17 @@ def test_a_refusal_with_a_message_on_an_export_is_no_absence(
     assert files(tmp_path) == []
 
 
+MISSING_ID = load_fixture(Path(__file__).parent / "fixtures" / "account_read" / "missing_id.json")
+"""``account_read/missing_id``, the refusal at HTTP 200 two tests change in memory."""
+
+
 @pytest.mark.parametrize(
-    "body", [b'{"success":true,"data":[]}', b'{"success":false', b"[" + b"1," * 9000 + b"1]"]
+    "body",
+    [
+        b'{"success":true,"data":[]}',
+        MISSING_ID.response.body.encode()[:16],
+        b"[" + b"1," * 9000 + b"1]",
+    ],
 )
 def test_json_that_is_no_refusal_is_raised_too(
     respx_mock: respx.MockRouter, tmp_path: Path, body: bytes
@@ -537,6 +566,10 @@ def test_json_that_is_no_refusal_is_raised_too(
     """Whatever JSON stands in for a file, it is never kept as one.
 
     The error names the request as core's ``request_description`` gives it (conventions §5).
+    NOT RECORDED: a read's answer composed in its recorded shape (conventions §10, kind 2),
+    ``account_read/missing_id`` cut short in memory (kind 4), and an array of no shape
+    upstream sends, too long to quote, whose error core's ``request_description`` words
+    without quoting it (kind 5).
     """
     mount(respx_mock, "account/list.pdf", body, JSON_UTF8)
     with pytest.raises(ValidationError, match="neither a file nor a refusal") as info:
@@ -554,8 +587,12 @@ def test_json_that_is_no_refusal_is_raised_too(
 def test_any_other_content_type_is_kept_as_the_file(
     respx_mock: respx.MockRouter, tmp_path: Path, content_type: str | None
 ) -> None:
-    """The content type decides: even a refusal's text under another type is the file."""
-    body = b'{"success":false}'
+    """The content type decides: even a refusal's text under another type is the file.
+
+    NOT RECORDED: ``account_read/missing_id``'s refusal served under another content type,
+    a header replaced in memory (conventions §10, kind 4).
+    """
+    body = MISSING_ID.response.body.encode()
     mount(respx_mock, "order/list.csv", body, content_type)
     result = tasks.export_orders(DEMO, "csv", tmp_path / "orders.csv")
     assert (tmp_path / "orders.csv").read_bytes() == body
@@ -564,10 +601,23 @@ def test_any_other_content_type_is_kept_as_the_file(
 
 @pytest.mark.parametrize(("status", "error"), [(401, AuthError), (404, UpstreamError)])
 def test_a_status_error_writes_nothing(
-    respx_mock: respx.MockRouter, tmp_path: Path, status: int, error: type[Exception]
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+    tmp_path: Path,
+    status: int,
+    error: type[Exception],
 ) -> None:
-    """``classify`` maps the status as for a read: a 404 is an unknown endpoint."""
-    route = respx_mock.get(f"{BASE}/journal/list.pdf").respond(status, text="no")
+    """``classify`` maps the status as for a read: a 404 is an unknown endpoint.
+
+    NOT RECORDED: the 401 is ``account_list/wrong_key``'s, served at an export, a state
+    upstream answers alike behind one gateway (conventions §10, kind 3); the documented 404
+    of ``error-handling.md`` is composed as CashCtrl's status pages were recorded (kind 2).
+    """
+    wrong_key = load_fixture(fixture_path(fixtures_dir, "account_list", "wrong_key")).response
+    text = wrong_key.body if status == 401 else "CashCtrl - 404 Not Found"
+    route = respx_mock.get(f"{BASE}/journal/list.pdf").respond(
+        status, text=text, headers={"content-type": "text/plain;charset=utf-8"}
+    )
     with pytest.raises(error):
         tasks.export_journal_entries(DEMO, "pdf", tmp_path / "journal.pdf")
     assert route.call_count == 1
@@ -642,14 +692,21 @@ def mount_tree(
     fixtures_dir: Path,
     changes: Mapping[str, Mapping[str, typing.Any]] | None = None,
 ) -> respx.Route:
-    """Answer ``report/tree.json`` with the recorded tree, as ``tree_body`` changes it."""
+    """Answer ``report/tree.json`` with the recorded tree, replayed as recorded, or with the
+    nodes ``changes`` names changed in memory by ``tree_body`` (conventions §10, kind 4)."""
+    if changes is None:
+        return replay(router, fixture_path(fixtures_dir, "report_tree", "default"))
     return router.get(TREE).respond(200, json=tree_body(fixtures_dir, changes))
 
 
 def mount_report(
     router: respx.MockRouter, endpoint: str, format: str, filename: str | None = None
 ) -> respx.Route:
-    """Answer ``GET <endpoint>`` with ``format``'s synthetic body under upstream's type."""
+    """Answer ``GET <endpoint>`` with ``format``'s synthetic body under upstream's type.
+
+    NOT RECORDED: the body of ``BODIES``, made up, of no shape upstream sends, which the file
+    tasks leave to core's ``download`` (conventions §10, kind 5).
+    """
     headers = {"Content-Type": REPORT_MEDIA[format]}
     if filename is not None:
         headers["Content-Disposition"] = f'attachment; filename="{filename}"'
@@ -684,9 +741,16 @@ def test_download_report_writes_the_file_where_the_caller_says(
 
 
 def test_a_report_file_takes_and_sends_the_parameters_of_get_report_data(
-    respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path
+    respx_mock: respx.MockRouter,
+    replay_fixture: ReplayFixture,
+    fixtures_dir: Path,
+    tmp_path: Path,
 ) -> None:
-    """``download.pdf`` and ``download.xlsx`` document the parameters of ``data.json``."""
+    """``download.pdf`` and ``download.xlsx`` document the parameters of ``data.json``.
+
+    The report is the recorded balance sheet, served for a request with other parameters in
+    a test that asserts only what was sent (conventions §10, kind 3).
+    """
     arguments: dict[str, typing.Any] = {
         "start_date": date(2025, 1, 1),
         "end_date": date(2025, 6, 30),
@@ -694,9 +758,7 @@ def test_a_report_file_takes_and_sends_the_parameters_of_get_report_data(
         "sort": "text",
     }
     mount_tree(respx_mock, fixtures_dir)
-    data = respx_mock.get(f"{BASE}/report/element/data.json").respond(
-        200, json={"total": 0, "data": []}
-    )
+    data = replay_fixture("report_element_data", "balance_fp2025")
     tasks.get_report_data(DEMO, 1, **arguments)
     route = mount_report(respx_mock, "report/element/download.xlsx", "xlsx")
     result = tasks.download_report(DEMO, 1, "xlsx", tmp_path / "half.xlsx", **arguments)
@@ -827,7 +889,8 @@ def test_every_download_reads_the_tree_as_upstream_lists_it_then(
     """A collection gains a payroll report between two downloads: the second is refused.
 
     The tree each download reads is the one ``get_report_data`` keeps, so its refusal of
-    the changed element needs no request of its own.
+    the changed element needs no request of its own. The first tree is the recorded one,
+    the second the recorded one changed in memory (conventions §10, kind 4).
     """
     tree = respx_mock.get(TREE).mock(
         side_effect=[
@@ -907,7 +970,7 @@ def test_a_report_the_tree_does_not_list_is_not_found_and_dest_stays(
     """Asked of upstream as given, as by ``get_report_data``: the recorded 404, replayed.
 
     Recorded for the id alone and served here for the id with a fiscal period, a request
-    of the same operation that upstream answers alike (conventions §10).
+    of the same operation that upstream answers alike (conventions §10, kind 3).
     """
     tree = mount_tree(respx_mock, fixtures_dir)
     route = replay_fixture(endpoint.replace("/", "_").replace(".", "_"), "unknown_id")
@@ -926,6 +989,8 @@ def test_a_report_the_tree_does_not_list_is_not_found_and_dest_stays(
 def test_a_report_files_refusal_sent_as_http_200_is_raised_and_removed(
     respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path
 ) -> None:
+    """NOT RECORDED: a refusal composed in the shape ``account_read/missing_id`` recorded
+    (conventions §10, kind 2)."""
     mount_tree(respx_mock, fixtures_dir)
     body = b'{"success":false,"errorMessage":"Not allowed.","data":null}'
     mount(respx_mock, "report/collection/download.xlsx", body, JSON_UTF8)

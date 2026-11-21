@@ -399,7 +399,8 @@ def test_list_accounts_replays_a_narrowed_list(
 
 
 def test_an_account_takes_currency_id_as_a_number_a_string_or_null(fixtures_dir: Path) -> None:
-    """The committed entries carry ``null``; a number and a string were seen, never committed."""
+    """The recorded entry, its ``currencyId`` changed in memory to a number and a string, forms
+    no committed entry carries: they carry ``null`` (conventions §10, kind 4)."""
     fixture = fixture_path(fixtures_dir, "account_list", "only_active_finanz")
     entry = json.loads(load_fixture(fixture).response.body)["data"][0]
     assert entry["currencyId"] is None
@@ -427,6 +428,9 @@ def test_list_accounts_sends_the_filter_as_upstream_reads_it(
 def test_list_accounts_takes_filters_as_mappings_too(
     replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
 ) -> None:
+    """The second call sends another filter and is answered by account_list/filter_number_eq
+    within the one operation, in a part of the test that asserts only what was sent
+    (conventions §10, kind 3)."""
     route = replay_fixture("account_list", "filter_number_eq")
     item = {"comparison": "eq", "field": "number", "value": "1020"}
     arguments: dict[str, typing.Any] = {"filter": [item]}
@@ -794,6 +798,10 @@ def test_start_without_limit_collects_every_page_from_start(
 def test_the_default_page_size_is_upstreams_100(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
+    """The recorded page at start 10 and limit 5 answers the request at start 0 and limit 100
+    within the one operation, a state upstream answers alike: the twelve entries of 2025 make
+    a page shorter than 100 there too, so one request ends the collection, and the test
+    asserts what was sent (conventions §10, kind 3)."""
     assert tasks.PAGE_SIZE == 100
     route = replay_fixture("journal_list", "fp2025_start_10_limit_5")
     tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
@@ -808,8 +816,8 @@ def test_collecting_stops_at_upstreams_total_without_a_further_request(
 ) -> None:
     """Pages of four end exactly at the 12 upstream counts: no fourth, empty request.
 
-    The answers are cut from the recorded 2025 entries by each request's ``start`` and
-    ``limit``, as upstream cuts them.
+    The answers are the recorded 2025 pages changed in memory, cut by each request's
+    ``start`` and ``limit`` as upstream cuts them (conventions §10, kind 4).
     """
     entries = [entry for start in (0, 5, 10) for entry in journal_2025_pages[start]["data"]]
     monkeypatch.setattr(tasks, "PAGE_SIZE", 4)
@@ -829,7 +837,8 @@ def test_the_count_kept_is_the_last_pages_and_never_corrected(
     journal_2025_pages: dict[int, dict[str, typing.Any]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Conventions §4: a mismatch with ``len(data)`` is upstream's and stays."""
+    """Conventions §4: a mismatch with ``len(data)`` is upstream's and stays: the recorded
+    pages, the last one's ``total`` changed in memory (conventions §10, kind 4)."""
     monkeypatch.setattr(tasks, "PAGE_SIZE", 5)
     pages = {**journal_2025_pages, 10: {**journal_2025_pages[10], "total": 11}}
     serve_by_start(respx_mock, pages)
@@ -1116,7 +1125,8 @@ async def test_the_person_list_wrapper_stays_faithful(
 
 
 def person_with_identifiers(fixtures_dir: Path) -> dict[str, typing.Any]:
-    """The recorded person read with an ``ssn`` and a bank account, changed in memory."""
+    """The recorded person read with an ``ssn`` and a bank account, changed in memory
+    (conventions §10, kind 4)."""
     body = recorded_body(fixtures_dir, "person_read", "by_id")
     body["data"]["ssn"] = SSN
     body["data"]["bankAccounts"] = [{"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"}]
@@ -1126,7 +1136,8 @@ def person_with_identifiers(fixtures_dir: Path) -> dict[str, typing.Any]:
 def test_the_person_projection_itself_drops_each_iban(fixtures_dir: Path) -> None:
     """sdk-core ADR-0017 enforced by the type: ``project`` alone, no task, carries no IBAN.
 
-    The recorded person read with bank accounts, changed in memory; the key in any case.
+    The recorded person read with bank accounts, changed in memory (conventions §10, kind
+    4); the key in any case.
     """
     body = person_with_identifiers(fixtures_dir)
     body["data"]["bankAccounts"] = [
@@ -1150,9 +1161,9 @@ def test_the_person_projection_itself_drops_each_iban(fixtures_dir: Path) -> Non
 async def test_get_person_leaves_out_ssn_and_each_iban(
     respx_mock: respx.MockRouter, fixtures_dir: Path
 ) -> None:
-    """A read changed in memory, not a fixture: no fixture carries the values (sdk-core ADR-0017).
+    """A recorded read changed in memory (conventions §10, kind 4): no fixture has the values.
 
-    The wrapper keeps them; the task, its tool and its route show neither.
+    The wrapper keeps them (sdk-core ADR-0017); the task, its tool and its route show neither.
     """
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -1185,7 +1196,7 @@ async def test_get_person_leaves_out_ssn_and_each_iban(
 def test_get_journal_entry_projects_the_persons_it_names(
     respx_mock: respx.MockRouter, fixtures_dir: Path
 ) -> None:
-    """A read changed in memory: an associate's ``ssn`` and ``iban`` stay out.
+    """A read changed in memory (conventions §10, kind 4): ``ssn`` and ``iban`` stay out.
 
     The personal identifiers stay out of what a task returns (sdk-core ADR-0017).
     """
@@ -1390,7 +1401,7 @@ async def test_the_order_document_wrapper_stays_faithful(
 async def test_a_live_iban_on_an_order_document_never_reaches_a_result(
     respx_mock: respx.MockRouter, fixtures_dir: Path
 ) -> None:
-    """On the recorded answer changed in memory: the three numbers set to a made-up IBAN.
+    """The recorded answer, its three numbers set to a made-up IBAN (conventions §10, kind 4).
 
     The recorder rewrites every name ending in ``iban``, as
     https://github.com/xippios/sdk-cashctrl/pull/21 has it, so no fixture holds a set
@@ -1548,7 +1559,11 @@ def test_the_history_of_a_deleted_order_is_empty(
 def test_list_history_sends_its_parameters_as_upstream_reads_them(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
-    """What is sent; the answer is the recorded history, which matches any query."""
+    """What is sent; the answer is the recorded history, which matches any query.
+
+    The recorded history answers a request with other parameters within the one operation, in a
+    test that asserts only what was sent (conventions §10, kind 3).
+    """
     route = replay_fixture("history_list", "order")
     result = tasks.list_history(
         DEMO,
@@ -1650,9 +1665,11 @@ def test_list_order_categories_replays_the_purchase_categories(
     ], "Open, then Payment ordered with an action the documentation does not list"
 
 
-def test_list_order_categories_sends_type_and_period(respx_mock: respx.MockRouter) -> None:
-    route = respx_mock.get("https://demo.cashctrl.com/api/v1/order/category/list.json")
-    route.respond(200, json={"total": 0, "data": []})
+def test_list_order_categories_sends_type_and_period(replay_fixture: ReplayFixture) -> None:
+    """The recorded purchase categories, served for a request with a fiscal period too: a
+    request of the same operation, in a test that asserts only what was sent (conventions
+    §10, kind 3)."""
+    route = replay_fixture("order_category_list", "purchase")
     result = tasks.list_order_categories(DEMO, type="PURCHASE", fiscal_period_id=1)
     assert sent_query(route) == {"fiscalPeriodId": "1", "type": "PURCHASE"}
     assert result.meta.request == {"org": DEMO, "fiscalPeriodId": 1, "type": "PURCHASE"}
@@ -1675,6 +1692,8 @@ async def test_list_order_categories_as_a_tool(
 def test_list_order_categories_as_a_route(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
+    """order_category_list/default, recorded without type, answers type=SALES, which order.md
+    documents as the default, so the operation answers alike there (conventions §10, kind 3)."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -1896,7 +1915,11 @@ def test_list_cost_centers_replays_the_recorded_list(
 def test_list_cost_centers_sends_its_parameters_as_upstream_reads_them(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
-    """What is sent; the answer is the recorded empty list, which matches any query."""
+    """What is sent; the answer is the recorded empty list, which matches any query.
+
+    The recorded list answers a request with every parameter within the one operation, in a test
+    that asserts only what was sent (conventions §10, kind 3).
+    """
     route = replay_fixture("account_costcenter_list", "default")
     result = tasks.list_cost_centers(
         DEMO,
@@ -1977,6 +2000,9 @@ def test_list_cost_centers_refuses_what_upstream_would_ignore(
 def test_list_cost_centers_is_a_post_route(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
+    """account_costcenter_list/default answers a request with onlyActive within the one
+    operation, in a test that asserts only what was sent and a refusal before any request
+    (conventions §10, kind 3)."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -2169,7 +2195,7 @@ def test_get_report_data_drops_identifier_keys_at_any_depth(
     respx_mock: respx.MockRouter,
     fixtures_dir: Path,
 ) -> None:
-    """On the recorded balance sheet changed in memory: no recorded report holds them.
+    """The recorded balance sheet changed in memory (conventions §10, kind 4): no report has them.
 
     A report the type rule lets through may still carry ``ssn`` or ``iban`` in its rows
     (sdk-core ADR-0017; one the tree does not list, or a type the rule does not name), so the
@@ -2206,7 +2232,8 @@ def test_get_report_data_drops_every_key_ending_in_iban(
 
     ``orgIban`` two levels down, ``recipient_iban`` in a top-level row and ``ORG-QR-IBAN``
     in ``properties`` are dropped, as the recorder rewrites every name ending in
-    ``iban``; ``ibanCount``, which only starts with it, and ``ssnLabel`` stay.
+    ``iban``; ``ibanCount``, which only starts with it, and ``ssnLabel`` stay. The recorded
+    answer is changed so (conventions §10, kind 4).
     """
     original = recorded_body(fixtures_dir, "report_element_data", "balance_fp2025")
     changed = json.loads(json.dumps(original))
@@ -2231,7 +2258,11 @@ def test_get_report_data_drops_every_key_ending_in_iban(
 def test_get_report_data_sends_the_dates_as_upstream_reads_them(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
-    """What is sent; the answer is the recorded one, which matches any query on the path."""
+    """What is sent; the answer is the recorded one, which matches any query on the path.
+
+    The recorded balance sheet answers a request with dates, a language and a sort within the
+    one operation, in a test that asserts only what was sent (conventions §10, kind 3).
+    """
     replay_fixture("report_tree", "default")
     route = replay_fixture("report_element_data", "balance_fp2025")
     result = tasks.get_report_data(
@@ -2388,13 +2419,12 @@ def test_the_rule_over_every_documented_report_type() -> None:
 )
 def test_a_payroll_or_people_report_is_refused_before_any_data_request(
     replay_fixture: Callable[[str, str], respx.Route],
-    respx_mock: respx.MockRouter,
     element_id: int,
     report_type: str,
 ) -> None:
     """On the recorded tree: the message names the element, its type and the rule, no row."""
     tree = replay_fixture("report_tree", "default")
-    data = respx_mock.get(DATA_URL).respond(200, json={"total": 0, "data": []})
+    data = replay_fixture("report_element_data", "balance_fp2025")
     with pytest.raises(InvalidRequestError) as refused:
         tasks.get_report_data(DEMO, element_id, fiscal_period=FP2025)
     assert refused.value.message == (
@@ -2416,13 +2446,17 @@ def test_a_payroll_or_people_report_is_refused_before_any_data_request(
     ],
 )
 def test_the_refusal_reads_the_type_from_the_tree_by_pattern(
-    respx_mock: respx.MockRouter, fixtures_dir: Path, element_id: int, report_type: str
+    replay_fixture: ReplayFixture,
+    respx_mock: respx.MockRouter,
+    fixtures_dir: Path,
+    element_id: int,
+    report_type: str,
 ) -> None:
-    """On the recorded tree changed in memory: a documented type the demo tree lacks, a made-up
-    one the pattern still names, a type in lower case."""
+    """The recorded tree changed in memory (conventions §10, kind 4): a documented type the
+    demo tree lacks, a made-up one the pattern still names, a type in lower case."""
     body = changed_tree(fixtures_dir, **{f"e{element_id}": report_type})
     respx_mock.get(TREE_URL).respond(200, json=body)
-    data = respx_mock.get(DATA_URL).respond(200, json={"total": 0, "data": []})
+    data = replay_fixture("report_element_data", "balance_fp2025")
     with pytest.raises(InvalidRequestError, match=re.escape(f"is of type {report_type}:")):
         tasks.get_report_data(DEMO, element_id, fiscal_period=FP2025)
     assert not data.called
@@ -2437,8 +2471,13 @@ def test_a_payroll_element_retyped_in_the_tree_is_read(
 ) -> None:
     """The rule follows the tree, not the id: element 24 retyped is read.
 
+    The tree is the recorded one, changed in memory (conventions §10, kind 4).
+
     ``WITHHOLDING_TAX_RATES``, a documented type the demo tree lacks, lists rates and no
     persons, so it passes (https://github.com/xippios/sdk-cashctrl/pull/19).
+
+    The recorded balance sheet answers the request for element 24 within the one operation, in a
+    test that asserts only what was sent (conventions §10, kind 3).
     """
     respx_mock.get(TREE_URL).respond(200, json=changed_tree(fixtures_dir, e24=report_type))
     data = replay_fixture("report_element_data", "balance_fp2025")
@@ -2450,7 +2489,11 @@ def test_a_payroll_element_retyped_in_the_tree_is_read(
 def test_every_other_report_is_read_and_the_tree_once(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
-    """The recorded tree's 20 other elements: one tree read for them all (one data answer)."""
+    """The recorded tree's 20 other elements: one tree read for them all (one data answer).
+
+    The recorded balance sheet answers the request for each other element within the one
+    operation, in a test that asserts only what was sent (conventions §10, kind 3).
+    """
     tree = replay_fixture("report_tree", "default")
     data = replay_fixture("report_element_data", "balance_fp2025")
     for element_id in PASSED_ELEMENTS:
@@ -2462,11 +2505,19 @@ def test_every_other_report_is_read_and_the_tree_once(
 
 
 def test_the_tree_is_read_once_per_organisation_and_again_after_a_reset(
-    replay_fixture: Callable[[str, str], respx.Route],
+    replay_fixture: ReplayFixture,
     respx_mock: respx.MockRouter,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Kept per organisation's client: ``TENANTS.reset()`` drops it, another org reads its own."""
+    """Kept per organisation's client: ``TENANTS.reset()`` drops it, another org reads its own.
+
+    NOT RECORDED: xa's tree, composed in the shape ``report_tree/default`` recorded, lists no
+    element (conventions §10, kind 2); its report is the recorded balance sheet served at
+    xa's host, a request of the same operation that upstream answers alike (kind 3).
+
+    Demo's requests for other elements are answered by the recorded balance sheet in the same
+    way, the test asserting only what was sent (conventions §10, kind 3).
+    """
     tree = replay_fixture("report_tree", "default")
     data = replay_fixture("report_element_data", "balance_fp2025")
     tasks.get_report_data(DEMO, 1, fiscal_period=FP2025)
@@ -2484,10 +2535,10 @@ def test_the_tree_is_read_once_per_organisation_and_again_after_a_reset(
     monkeypatch.setenv(TENANTS.var("xa", "SUBDOMAIN"), "xa-books")
     other_host = "https://xa-books.cashctrl.com/api/v1"
     other = respx_mock.get(f"{other_host}/report/tree.json").respond(
-        200, json={"total": 1, "data": []}
-    )
-    respx_mock.get(f"{other_host}/report/element/data.json").respond(
         200, json={"total": 0, "data": []}
+    )
+    replay_fixture(
+        "report_element_data", "balance_fp2025", url=f"{other_host}/report/element/data.json"
     )
     tasks.get_report_data("xa", 24, fiscal_period=FP2025)
     assert other.call_count == 1, "xa's own tree, which lists no element 24: upstream answers"
@@ -2496,11 +2547,10 @@ def test_the_tree_is_read_once_per_organisation_and_again_after_a_reset(
 
 def test_get_report_tree_keeps_the_types_it_returns(
     replay_fixture: Callable[[str, str], respx.Route],
-    respx_mock: respx.MockRouter,
 ) -> None:
     """An agent reads the tree, then a report: no second tree read."""
     tree = replay_fixture("report_tree", "default")
-    data = respx_mock.get(DATA_URL).respond(200, json={"total": 0, "data": []})
+    data = replay_fixture("report_element_data", "balance_fp2025")
     tasks.get_report_tree(DEMO)
     with pytest.raises(InvalidRequestError, match="is of type SETTLEMENT"):
         tasks.get_report_data(DEMO, 28, fiscal_period=FP2025)
@@ -2512,12 +2562,18 @@ def test_an_element_the_kept_tree_lacks_reads_the_tree_once_more(
     respx_mock: respx.MockRouter,
     fixtures_dir: Path,
 ) -> None:
-    """The miss path, on the recorded tree with an element 99 added in memory.
+    """The miss path, on the recorded tree, then with an element 99 added in memory.
+
+    The tree with element 99 is the recorded one changed so (conventions §10, kind 4).
 
     A cold read that lacks the element asks upstream (fidelity, sdk-core ADR-0028,
     decision 1); a kept tree that lacks it is read once more, and the element found there
     is judged by its type; one still missing is asked of upstream, the identifier drop the
     guard.
+
+    The recorded balance sheet answers the requests for elements 98 and 97 within the one
+    operation, in a test that asserts only what was sent and the refusals (conventions §10, kind
+    3).
     """
     recorded_tree = recorded_body(fixtures_dir, "report_tree", "default")
     grown = json.loads(json.dumps(recorded_tree))
@@ -2544,10 +2600,9 @@ def test_an_element_the_kept_tree_lacks_reads_the_tree_once_more(
 @pytest.mark.anyio
 async def test_a_refused_report_is_an_error_text_for_the_tool(
     replay_fixture: Callable[[str, str], respx.Route],
-    respx_mock: respx.MockRouter,
 ) -> None:
     replay_fixture("report_tree", "default")
-    data = respx_mock.get(DATA_URL).respond(200, json={"total": 0, "data": []})
+    data = replay_fixture("report_element_data", "balance_fp2025")
     arguments = {"org": DEMO, "element_id": 35, "fiscal_period": FP2025}
     text = await mcp_call_text(server, "cashctrl_get_report_data", arguments)
     assert text == (
@@ -2789,6 +2844,10 @@ async def test_a_recorded_list_is_whole(
     """Upstream's ``total`` equals the records in the one answer: nothing is left behind.
 
     The journal pages are not whole by design (``journal_list/fp2025_*``, ``fp2026_*``).
+
+    Each list was recorded with start=0 and limit=100 and answers the wrapper's request without
+    them: the operation answers alike, since person.md and order.md document both as the
+    defaults (conventions §10, kind 3).
     """
     replay_fixture(*case.split("/"))
     wrapper, arguments = call
@@ -3050,6 +3109,8 @@ async def test_every_model_family_masks_a_live_api_user_tag(
 ) -> None:
     """On the recorded answer changed in memory: every author put back as a live tag.
 
+    The answer is the recorded one changed so (conventions §10, kind 4).
+
     The task's result and the tool's carry ``API:REDACTED`` wherever the answer carried
     the tag, nested records (a journal entry's ``associates``, an order category's
     statuses) included, and the tag nowhere.
@@ -3087,7 +3148,11 @@ async def test_every_model_family_masks_a_live_api_user_tag(
     ],
 )
 def test_the_mask_rewrites_an_api_user_tag_and_nothing_else(sent: str | None, kept: str) -> None:
-    """A text starting with ``API:``, in any letter case, is masked whole; the rest passes."""
+    """A text starting with ``API:``, in any letter case, is masked whole; the rest passes.
+
+    The two records are inputs of the test, not answers from CashCtrl: the author is the
+    one field the mask reads.
+    """
     by_alias = models.HistoryEntry.model_validate({"id": 1, "createdBy": sent})
     by_name = models.Currency.model_validate(
         {

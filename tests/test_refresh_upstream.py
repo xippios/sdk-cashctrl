@@ -51,6 +51,8 @@ def page(*labels: str) -> BeautifulSoup:
 
 
 def fetched(script: ModuleType, *, observed: bool) -> str:
+    """``FETCHED.md`` as the script renders it for a made-up page of one entry: the page
+    and its answer are inputs of the test, not answers from CashCtrl."""
     parts = script.split_page(page("Introduction"))
     files = {part.file: "Source: <x>\n" for part in parts}
     response = script.Response(status=200, body=b"<html></html>", etag=None, last_modified=None)
@@ -104,6 +106,8 @@ def committed_fetched(script: ModuleType, monkeypatch: pytest.MonkeyPatch) -> tu
     count, sha256, ETag and the run's time are read from the committed file and given to
     the renderer, the digest through a stand-in for ``hashlib`` that answers the committed
     one; every file's row and note come from the committed snapshot's files themselves.
+    The answer handed to the renderer is an input of the test, not an answer from CashCtrl:
+    its size and ETag are the committed file's, its body that many zero bytes.
     """
     out = SCRIPT.parents[1] / "docs" / "upstream"
     committed = (out / "FETCHED.md").read_text(encoding="utf-8")
