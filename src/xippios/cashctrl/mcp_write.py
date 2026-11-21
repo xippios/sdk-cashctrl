@@ -1,20 +1,26 @@
 """Write server for CashCtrl.
 
-``tasks_write.__all__`` as confirm-gated tools, behind a separate entry point,
-``xippios-cashctrl-mcp-write``, so read-only clients never see write tools
-(conventions §8). ``--org <name>`` binds it to one organisation (``_cli``); ``--http``
-serves it on a loopback ``--host`` only, unless ``--allow-remote`` is passed, since it
-carries no authentication. No logic lives here (ADR-0001).
+``tasks_write.__all__`` as confirm-gated tools, behind an entry point of their own,
+``xippios-cashctrl-mcp-write``, so a client of the read server never sees a write
+tool (conventions §8). Core registers them as a write server (``read_only=False``): every task
+takes ``confirm: bool = False``, checked before anything is registered, and ``--http``
+serves on a loopback ``--host`` only, unless ``--allow-remote`` is passed, since it
+carries no authentication. No logic lives here (sdk-core ADR-0001).
+``--org <name>`` binds it to one tenant (core's ``serve_tenants``).
+
+The package contract (conventions §8; sdk-core ADR-0026, amendment 2026-11-18, points c and d):
+``build()`` returns the write tool set, with the caps and the option hooks
+``tasks_write.py`` defines, and ``server`` is built from it.
 """
 
-from mcp.server.mcpserver import MCPServer
-from xippios.core.mcp import build_server
+from xippios.core import TenantLock, bind_tasks, tenant_instructions
+from xippios.core.mcp import ToolSet, build_server, serve_tenants, tool_functions
 
 from xippios.cashctrl import tasks_write
-from xippios.cashctrl._cli import serve
-from xippios.cashctrl._client import SOURCE
-from xippios.cashctrl._org_lock import OrgLock, bind_tasks, instructions
+from xippios.cashctrl._client import ENV_VARS, SOURCE, TENANTS, check_org
 from xippios.cashctrl._version import __version__
+
+__all__ = ["ENV_VARS", "SOURCE", "build", "run", "server"]
 
 INSTRUCTIONS = (
     "CashCtrl write tools via xippios. "
@@ -22,24 +28,34 @@ INSTRUCTIONS = (
     "Every tool returns a preview unless confirm=true is passed. "
     "Call it once without confirm, show the preview, then confirm."
 )
+BOUND_INSTRUCTIONS = (
+    "CashCtrl write tools via xippios. "
+    "Every tool returns a preview unless confirm=true is passed. "
+    "Call it once without confirm, show the preview, then confirm."
+)
+"""The text of a server ``lock`` binds, whose tools take no tenant: core's sentence names it."""
 
 
-def build(lock: OrgLock | None = None) -> MCPServer:
-    """The write server, bound to one organisation when ``lock`` is given."""
-    return build_server(
+def build(lock: TenantLock | None = None) -> ToolSet:
+    """The write tool set, bound to one tenant when ``lock`` is given."""
+    return ToolSet(
         SOURCE,
-        bind_tasks([getattr(tasks_write, name) for name in tasks_write.__all__], lock),
-        name="xippios-cashctrl-write",
-        version=__version__,
-        instructions=instructions(INSTRUCTIONS, lock),
+        bind_tasks(tool_functions(tasks_write), lock),
         caps=getattr(tasks_write, "MCP_CAPS", None),
+        instructions=tenant_instructions(INSTRUCTIONS, lock, bound=BOUND_INSTRUCTIONS),
+        version=__version__,
+        add_options=getattr(tasks_write, "mcp_add_options", None),
+        apply_options=getattr(tasks_write, "mcp_apply_options", None),
         read_only=False,
     )
 
 
-server = build()
+server = build_server(build(), name="xippios-cashctrl-write")
 
 
 def run() -> None:
-    """Run the write server: stdio by default, ``--http`` for HTTP, ``--org`` to bind it."""
-    serve(server, build)
+    """Run the write server: stdio by default, ``--http`` on loopback.
+
+    ``--org <name>`` binds it to one tenant.
+    """
+    serve_tenants(server, build, TENANTS, noun="organisation", check=check_org)

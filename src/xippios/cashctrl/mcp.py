@@ -1,19 +1,25 @@
 """MCP server for CashCtrl.
 
 Every task in ``tasks.__all__`` is a read-only tool, but those ``tasks.BULK_TASKS``
-names, which core skips: the server is passed ``tasks.__all__`` whole (ADR-0019). No
-logic lives here (ADR-0001). Entry point: ``xippios-cashctrl-mcp-read``; ``--org <name>``
-binds it to one organisation (``_cli``, ``_org_lock``).
+names (``tool_functions``, sdk-core ADR-0040). No logic lives here (sdk-core ADR-0001). Entry point:
+``xippios-cashctrl-mcp-read``.
+``--org <name>`` binds it to one tenant (core's ``serve_tenants``).
+
+The package contract (conventions §8; sdk-core ADR-0026, amendment 2026-11-18, points c and d):
+``build()`` returns the tool set a host serves as this entry point does, with the caps
+and the option hooks ``tasks.py`` defines, ``MCP_CAPS``, ``mcp_add_options`` and
+``mcp_apply_options``; ``server`` is built from it, and ``ENV_VARS`` beside ``SOURCE``
+names the variables the package reads.
 """
 
-from mcp.server.mcpserver import MCPServer
-from xippios.core.mcp import build_server
+from xippios.core import TenantLock, bind_tasks, tenant_instructions
+from xippios.core.mcp import ToolSet, build_server, serve_tenants, tool_functions
 
 from xippios.cashctrl import tasks
-from xippios.cashctrl._cli import serve
-from xippios.cashctrl._client import SOURCE
-from xippios.cashctrl._org_lock import OrgLock, bind_tasks, instructions
+from xippios.cashctrl._client import ENV_VARS, SOURCE, TENANTS, check_org
 from xippios.cashctrl._version import __version__
+
+__all__ = ["ENV_VARS", "SOURCE", "build", "run", "server"]
 
 INSTRUCTIONS = (
     "CashCtrl via xippios. "
@@ -22,25 +28,33 @@ INSTRUCTIONS = (
     "with the declared ones. "
     "Call the list tools (cashctrl_list_*) first to find valid ids, then query."
 )
+BOUND_INSTRUCTIONS = (
+    "CashCtrl via xippios. "
+    "Tools are read-only. "
+    "Call the list tools (cashctrl_list_*) first to find valid ids, then query."
+)
+"""The text of a server ``lock`` binds, whose tools take no tenant: core's sentence names it."""
 
 
-def build(lock: OrgLock | None = None) -> MCPServer:
-    """The read-only server, bound to one organisation when ``lock`` is given."""
-    return build_server(
+def build(lock: TenantLock | None = None) -> ToolSet:
+    """The read-only tool set, bound to one tenant when ``lock`` is given."""
+    return ToolSet(
         SOURCE,
-        bind_tasks([getattr(tasks, name) for name in tasks.__all__], lock),
-        version=__version__,
-        instructions=instructions(INSTRUCTIONS, lock),
+        bind_tasks(tool_functions(tasks), lock),
         caps=getattr(tasks, "MCP_CAPS", None),
+        instructions=tenant_instructions(INSTRUCTIONS, lock, bound=BOUND_INSTRUCTIONS),
+        version=__version__,
+        add_options=getattr(tasks, "mcp_add_options", None),
+        apply_options=getattr(tasks, "mcp_apply_options", None),
     )
 
 
-server = build()
+server = build_server(build())
 
 
 def run() -> None:
-    """Run the server: stdio by default, ``--http`` for streamable HTTP, ``--org`` to bind it."""
-    # Command-line options of the source's own reach core's parser through its hooks
-    # (ADR-0014): _cli.serve calls main(server, add_options=add_org, apply_options=<returns
-    # the server, bound to the organisation --org names>).
-    serve(server, build)
+    """Run the server: stdio by default, ``--http`` for streamable HTTP.
+
+    ``--org <name>`` binds it to one tenant.
+    """
+    serve_tenants(server, build, TENANTS, noun="organisation", check=check_org)

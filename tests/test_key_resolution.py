@@ -1,9 +1,10 @@
 """Keys resolved as in production: core's placeholder pin is lifted in this module.
 
 Core's plugin pins ``PLACEHOLDER_KEY`` on every auth object in every test not marked
-``live`` (ADR-0013), so a test of how a key is resolved overrides ``placeholder_api_key``
-at module level with a fixture that pins nothing (conventions §15, item 5). The shell's
-demo key, which direnv may have loaded, is removed instead, so no test here can send it.
+``live`` (sdk-core ADR-0035, decision 3), so a test of how a key is resolved overrides
+``placeholder_api_key`` at module level with a fixture that pins nothing (conventions §15,
+item 5). The shell's demo key, which direnv may have loaded, is removed instead, so no
+test here can send it.
 """
 
 import base64
@@ -11,22 +12,19 @@ import base64
 import httpx
 import pytest
 import respx
-from xippios.core import ConfigError, InvalidRequestError
+from xippios.core import ConfigError
 
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
 
 pytestmark = pytest.mark.anyio
 
 HIDDEN_SUBDOMAIN = "xa-hidden-subdomain"
-SCAFFOLD_KEY_ENV = "CASHCTRL_API_KEY"  # pragma: allowlist secret
-"""The template's key variable, which live.yml passes from its secret beside the demo pair."""
-SCAFFOLD_KEY = "scaffold-key-value"  # pragma: allowlist secret
 DEMO_KEY = "demo-key-value"  # pragma: allowlist secret
 
 
 @pytest.fixture
 def placeholder_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pins nothing (ADR-0013); the shell's demo key is removed instead."""
+    """Pins nothing (sdk-core ADR-0035, decision 3); the shell's demo key is removed instead."""
     monkeypatch.delenv(TENANTS.var(DEMO, "API_KEY"), raising=False)
 
 
@@ -48,17 +46,14 @@ def basic(key: str) -> str:
     return "Basic " + base64.b64encode(f"{key}:".encode()).decode("ascii")
 
 
-@pytest.mark.parametrize("scaffold_key", ["", SCAFFOLD_KEY])
-async def test_the_scaffold_key_is_no_organisations_key(
-    monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter, scaffold_key: str
+async def test_the_demo_client_sends_its_key_as_the_basic_user_name(
+    monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter
 ) -> None:
-    """The live run's ``CASHCTRL_API_KEY``, empty or set, leaves demo's key as it is.
+    """Demo's own key, sent as the HTTP basic user name with no password.
 
-    live.yml passes it from its secret beside the demo pair; the registry declares no
-    organisation from it, and the demo client sends its own key. The route answers only
-    that key, so a request with any other is no match and fails the test.
+    The route answers only that header, so a request with any other is no match and fails
+    the test.
     """
-    monkeypatch.setenv(SCAFFOLD_KEY_ENV, scaffold_key)
     monkeypatch.setenv(TENANTS.var(DEMO, "SUBDOMAIN"), HIDDEN_SUBDOMAIN)
     monkeypatch.setenv(TENANTS.var(DEMO, "API_KEY"), DEMO_KEY)
     assert TENANTS.names() == (DEMO,)
@@ -69,12 +64,3 @@ async def test_the_scaffold_key_is_no_organisations_key(
     route.mock(return_value=httpx.Response(200, json={}))
     await client_for(DEMO).get("/fiscalperiod/list.json")
     assert route.call_count == 1
-
-
-def test_the_scaffold_key_declares_no_organisation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without the demo pair, ``CASHCTRL_API_KEY`` stands in for no organisation."""
-    monkeypatch.setenv(SCAFFOLD_KEY_ENV, SCAFFOLD_KEY)
-    monkeypatch.delenv(TENANTS.var(DEMO, "SUBDOMAIN"), raising=False)
-    assert TENANTS.names() == ()
-    with pytest.raises(InvalidRequestError, match="unknown tenant"):
-        client_for(DEMO)

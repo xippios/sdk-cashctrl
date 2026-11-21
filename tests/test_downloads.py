@@ -84,7 +84,10 @@ def test_the_file_tasks_are_the_bulk_tasks() -> None:
 
 @pytest.mark.anyio
 async def test_the_file_tasks_are_no_tools_and_no_routes() -> None:
-    """ADR-0019 decision 4: core's adapters skip ``BULK_TASKS``; no tool hands out a path."""
+    """Core's adapters skip ``BULK_TASKS``: no tool hands out a path.
+
+    A file task is Python only (sdk-core ADR-0040, decision 4).
+    """
     from fastapi.routing import APIRoute
 
     from xippios.cashctrl.http import router
@@ -404,12 +407,12 @@ def test_the_person_export_names_the_projections_columns_without_identifiers(
 def test_a_caller_who_names_the_identifiers_gets_them(
     respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
-    """ADR-0017: a task that fetches them deliberately may, and its docstring says so."""
+    """sdk-core ADR-0017: a task that fetches them deliberately may, and its docstring says so."""
     route = mount(respx_mock, "person/list.csv", *BODIES["csv"])
     tasks.export_persons(DEMO, "csv", tmp_path / "bank.csv", columns=["nr", "ssn", "iban"])
     assert sent_query(route)["columns"] == "nr,ssn,iban"
     doc = " ".join((inspect.getdoc(tasks.export_persons) or "").split())
-    assert "fetches them deliberately and gets them in the file (ADR-0017)" in doc
+    assert "fetches them deliberately and gets them in the file (sdk-core ADR-0017)" in doc
 
 
 @pytest.mark.parametrize(
@@ -583,7 +586,8 @@ REPORT_MEDIA = {"pdf": "application/pdf;charset=UTF-8", "xlsx": f"{XLSX};charset
 TREE = f"{BASE}/report/tree.json"
 RULE = (
     "payroll and people reports, every type that starts with SALARY_ or contains PERSON, "
-    "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART (personal data, ADR-0017)"
+    "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART "
+    "(personal data, sdk-core ADR-0017)"
 )
 PAYROLL_TYPES = (
     "SALARY_BOOK_ENTRIES, SALARY_LIST, SALARY_TYPES, SALARY_TYPE_RECAP, SETTLEMENT, "

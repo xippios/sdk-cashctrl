@@ -56,7 +56,7 @@ write was performed, and ``org`` alone for a preview, whose ``payload`` holds th
 the payload never appears twice. ``tests/test_tasks.py`` checks every name in
 ``__all__``.
 
-Personal identifiers (ADR-0017): ``create_person`` and ``update_person`` take ``ssn``
+Personal identifiers (sdk-core ADR-0017): ``create_person`` and ``update_person`` take ``ssn``
 and, in ``bank_accounts``, each account's ``iban``, and send them as given, but no
 result echoes them: a preview's ``payload`` and ``changes`` and a performed write's
 ``meta.request`` show ``REDACTED`` instead (``_shown``), and the record a preview shows
@@ -138,7 +138,7 @@ PAYMENT_TYPES: tuple[str, ...] = get_args(PaymentType)
 
 
 IDENTIFIERS = frozenset({"ssn"})
-"""Form fields that hold a documented personal identifier (ADR-0017), by upstream name."""
+"""Form fields that hold a documented personal identifier (sdk-core ADR-0017), by upstream name."""
 IDENTIFIERS_IN_LISTS = {"bankAccounts": "iban"}
 """JSON list fields whose items hold one, by upstream name: the list and the item's key.
 
@@ -167,7 +167,7 @@ def _redacted_items(text: str, key: str) -> str:
 
 
 def _shown(fields: Mapping[str, str]) -> dict[str, str]:
-    """``fields`` as a result may show them: no personal identifier's value (ADR-0017).
+    """``fields`` as a result may show them: no personal identifier's value (sdk-core ADR-0017).
 
     ``ssn`` and the ``iban`` of each item of ``bankAccounts`` become ``REDACTED``; every
     other field, and an identifier sent empty (a cleared ``ssn``, which reveals nothing),
@@ -276,8 +276,8 @@ def _check_status(status_id: object, problems: list[str], *, required: bool) -> 
         return
     if not _whole(status_id) or status_id < 1:
         problems.append(
-            f"status_id must be a status id from list_order_categories, a whole number of "
-            f"at least 1, not {status_id!r}"
+            "status_id must be a status id from list_order_categories (over MCP, the tool "
+            f"cashctrl_list_order_categories), a whole number of at least 1, not {status_id!r}"
         )
 
 
@@ -286,7 +286,8 @@ def _check_associate(associate_id: object, problems: list[str]) -> None:
     if associate_id is not None and not _whole(associate_id):
         problems.append(
             f"associate_id must be a person's id, a whole number, not {associate_id!r}; "
-            "create a new person with create_person first"
+            "create a new person with create_person (over MCP, the tool "
+            "cashctrl_create_person) first"
         )
 
 
@@ -2260,7 +2261,7 @@ def _not_manual(entry: OrderBookEntry, write: str) -> InvalidRequestError | None
         reason = (
             f"was booked from its order's items (type {GENERATED}); upstream documents "
             f"that such entries cannot be {write}d directly, only by changing the order's "
-            "items with update_order"
+            "items with update_order (over MCP, the tool cashctrl_update_order)"
         )
     else:
         shown = "no type" if entry.type is None else f"type {entry.type}"
@@ -2355,7 +2356,11 @@ async def update_order_book_entry_async(
     merged = {**values, **given}
     merged.update(_cleared(cleared))
     if merged["account_id"] is None:
-        raise _missing("book entry", ["accountId"], "pass account_id, an id from list_accounts")
+        raise _missing(
+            "book entry",
+            ["accountId"],
+            "pass account_id, an id from list_accounts (over MCP, the tool cashctrl_list_accounts)",
+        )
     fields = api.order_bookentry_fields(id=entry.id, **merged)
     changes = _changes(api.order_bookentry_fields, BOOK_ENTRY_UPDATE, given, cleared, None)
     endpoint = "order/bookentry/update.json"

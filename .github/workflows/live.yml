@@ -1,9 +1,9 @@
 # Nightly live smoke tests (conventions §10): every test marked `live` against the real
 # upstream, on a schedule and on demand, never on a pull request.
 # Rendered by the template (the one workflow that is): the secrets it names are the key
-# variables of the answers api_key_env and source_dependencies (ADR-0021), then the other
-# variables its live tests read, from the answer live_secrets, and its start time derives
-# from the slug.
+# variables of the answers api_key_env and source_dependencies (sdk-core ADR-0021), then the
+# other variables its live tests read, from the answer live_secrets, and its start time
+# derives from the slug.
 name: Live
 
 on:
@@ -39,6 +39,5 @@ jobs:
         # same name, for this step only: checkout, setup-uv and uv sync never see them.
         env:
           XIPPIOS_LIVE_TESTS: "1"
-          CASHCTRL_API_KEY: ${{ secrets.CASHCTRL_API_KEY }}
-          CASHCTRL_DEMO_SUBDOMAIN: ${{ secrets.CASHCTRL_DEMO_SUBDOMAIN }}
           CASHCTRL_DEMO_API_KEY: ${{ secrets.CASHCTRL_DEMO_API_KEY }}
+          CASHCTRL_DEMO_SUBDOMAIN: ${{ secrets.CASHCTRL_DEMO_SUBDOMAIN }}

@@ -6,8 +6,8 @@ order write only for orders marked xippios-live, read first; .json only; no e-ma
 address, in the request body neither. The demo
 organisation is synthetic, so every module and every amount may be recorded. The key as
 given and binary bodies are core's ``Scrub``; the host, the encoded forms, the JSON-decoded
-verify and the rest are the recorder's own (``TenantScrub``, ADR-0024), whose tests below
-follow core's at sdk-core ``cb8ecdf`` (``tests/testing/test_scrub.py``,
+verify and the rest are the recorder's own (``TenantScrub``, sdk-core ADR-0042, decision
+3), whose tests below follow core's at sdk-core ``cb8ecdf`` (``tests/testing/test_scrub.py``,
 ``test_fixtures.py``, ``test_record_replay.py``).
 """
 
@@ -38,7 +38,9 @@ TOKEN_OF_KEY = base64.b64encode(f"{KEY}:".encode()).decode()
 
 @pytest.fixture
 def placeholder_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keys are resolved as the recorder resolves them: core's pin is lifted (ADR-0013).
+    """Keys are resolved as the recorder resolves them: core's pin is lifted.
+
+    The pin is the plugin's placeholder key (sdk-core ADR-0035, decision 3).
 
     ``--wrong-key`` must send its own key, and the scrub must see the one in the
     environment. The shell's demo key is removed; ``recorder`` sets a made-up one.
@@ -199,7 +201,7 @@ def test_a_key_the_scrub_cannot_reach_is_never_written(
 ) -> None:
     """Behind a JSON escape the key escapes the scrub; the recorder's verify decodes it.
 
-    Core's verify searches plain values only since 0.3.0 (ADR-0024, decision 3), so the
+    Core's verify searches plain values only since 0.3.0 (sdk-core ADR-0042, decision 3), so the
     refusal is the recorder's, in its own words.
     """
     escaped = "\\u" + f"{ord(KEY[0]):04x}" + KEY[1:]
@@ -1449,7 +1451,10 @@ def test_personal_identifiers_become_redacted(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """``ssn`` and ``iban`` by name, at any depth (ADR-0017); scrubbed, they need no review."""
+    """``ssn`` and ``iban`` by name, at any depth; scrubbed, they need no review.
+
+    They are the documented personal identifiers (sdk-core ADR-0017).
+    """
     person = {
         "id": 3,
         "ssn": "756.0000.0000.00",
@@ -1478,7 +1483,7 @@ def test_a_locations_qr_iban_becomes_redacted(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The organisation's QR-IBAN (``location/list.json``, ADR-0017), in its spellings."""
+    """The organisation's QR-IBAN (``location/list.json``, sdk-core ADR-0017), in its spellings."""
     location = {
         "id": 1,
         "iban": "CH00TEST",
@@ -1731,7 +1736,8 @@ def test_every_committed_fixture_passes_the_final_check(recorder: ModuleType) ->
         assert recorder.check(path.read_text(encoding="utf-8"), "demo", "") == ([], []), path.name
 
 
-# The recorder's own step: the host, the encoded forms, the JSON-decoded verify (ADR-0024).
+# The recorder's own step: the host, the encoded forms, the JSON-decoded verify
+# (sdk-core ADR-0042, decision 3).
 
 HOST = f"{REAL}.cashctrl.com"
 ENCODED_KEY = "".join(f"%{ord(char):02X}" for char in KEY)

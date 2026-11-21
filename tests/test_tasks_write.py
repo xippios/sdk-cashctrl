@@ -39,13 +39,16 @@ from urllib.parse import parse_qsl
 import httpx
 import pytest
 import respx
-from fastapi import APIRouter
-from mcp.server.mcpserver import MCPServer
 from xippios.core import InvalidRequestError, NotFoundError, Result
-from xippios.core.http import router_from_tasks
-from xippios.core.mcp import build_server, tool_name
-from xippios.core.mcp.server import is_write_server, register_tasks
-from xippios.core.testing import ReplayFixture, load_fixture, mcp_call, mcp_call_text
+from xippios.core.mcp import tool_name
+from xippios.core.testing import (
+    ReplayFixture,
+    assert_write_tools,
+    load_fixture,
+    mcp_call,
+    mcp_call_text,
+    sent_bodies,
+)
 
 from xippios.cashctrl import api, tasks_write
 from xippios.cashctrl._client import DEMO, SOURCE
@@ -95,11 +98,6 @@ def recorded_body(fixtures_dir: Path, endpoint: str, case: str) -> list[tuple[st
     body = load_fixture(fixtures_dir / endpoint / f"{case}.json").request.body
     assert body is not None, f"{endpoint}/{case} recorded no request body"
     return parse_qsl(body, keep_blank_values=True, strict_parsing=True)
-
-
-def sent_body(route: respx.Route) -> list[tuple[str, str]]:
-    """The form fields the last call of ``route`` sent, decoded, in their order."""
-    return parse_qsl(route.calls.last.request.content.decode(), keep_blank_values=True)
 
 
 def recorded_read(fixtures_dir: Path, endpoint: str, case: str) -> dict[str, Any]:
@@ -158,99 +156,6 @@ def test_every_write_task_returns_a_preview_or_a_result(task: Callable[..., Any]
 
 
 # The write server --------------------------------------------------------------------
-# assert_write_tools, _tool_names and _serves are copied from xippios-core, which removed
-# them in 0.3.0 for this package to carry (ADR-0024; sdk-core cb8ecdf,
-# src/xippios/core/testing/adapters.py), with _confirm_problem from its
-# src/xippios/core/mcp/server.py, and extended with the check that confirm is the last
-# parameter (queue row 26 f). The family check no longer tests a write server; this does.
-# Async here: core listed the tools on its private background loop.
-
-
-def _confirm_problem(fn: Callable[..., Any]) -> str | None:
-    """Why ``fn`` does not take ``confirm: bool = False`` last, or ``None`` when it does.
-
-    The annotation is resolved with ``typing.get_type_hints``, so a string annotation
-    and ``Annotated[bool, ...]`` count as ``bool``; ``bool | None`` does not.
-    """
-    parameters = inspect.signature(fn).parameters
-    parameter = parameters.get("confirm")
-    if parameter is None:
-        return "no parameter confirm"
-    annotation = typing.get_type_hints(fn).get("confirm", parameter.annotation)
-    if annotation is inspect.Parameter.empty:
-        return "confirm is not annotated"
-    if annotation is not bool:
-        return f"confirm is annotated {annotation!r}, not bool"
-    if parameter.default is inspect.Parameter.empty:
-        return "confirm has no default"
-    if parameter.default is not False:
-        return f"confirm defaults to {parameter.default!r}, not False"
-    if list(parameters)[-1] != "confirm":
-        return "confirm is not the last parameter"
-    return None
-
-
-async def _tool_names(server: MCPServer) -> set[str]:
-    return {tool.name for tool in await server.list_tools()}
-
-
-def _serves(route: Any, source: str, fn: Callable[..., Any]) -> bool:
-    """True when ``route`` is the one ``router_from_tasks`` builds for ``fn``.
-
-    ``router_from_tasks`` names it ``<source>_<function>`` and puts it at
-    ``<prefix>/<function>``; either is enough, so a custom prefix is caught too.
-    """
-    named = getattr(route, "name", None) == f"{source}_{fn.__name__}"
-    return named or str(getattr(route, "path", "")).endswith(f"/{fn.__name__}")
-
-
-async def assert_write_tools(
-    write_server: MCPServer,
-    write_tasks: list[Callable[..., Any]],
-    *,
-    source: str,
-    read_server: MCPServer | None = None,
-    router: APIRouter | None = None,
-) -> None:
-    """Check a write server against its write tasks (conventions §8).
-
-    Fails the test, naming the offending tool, unless all of these hold:
-
-    - the write server was registered with ``read_only=False`` (``is_write_server``),
-      which ``main``'s loopback rule for ``--http`` depends on;
-    - the write server's tools are exactly ``tool_name(source, fn)`` for the write
-      tasks, no more and no fewer;
-    - every write task takes ``confirm: bool = False`` as its last parameter, so a call
-      without it is a dry run;
-    - no write tool is on ``read_server``, and no route of ``router`` serves a write
-      task (matched by the route name and path ``router_from_tasks`` gives it), when
-      given.
-
-    A write server exposes write tools only: reference tools, the organisation list
-    among them, stay on the read server.
-    """
-    assert is_write_server(write_server), (
-        "the write server was not registered with read_only=False; the loopback rule depends on it"
-    )
-    expected = {tool_name(source, fn): fn for fn in write_tasks}
-    listed = await _tool_names(write_server)
-    unexpected = sorted(listed - expected.keys())
-    assert not unexpected, f"write server tools that are not write tasks: {unexpected}"
-    missing = sorted(expected.keys() - listed)
-    assert not missing, f"write tasks missing from the write server: {missing}"
-    for name, fn in expected.items():
-        problem = _confirm_problem(fn)
-        assert problem is None, f"{name}: {problem}; a write tool takes confirm: bool = False last"
-    if read_server is not None:
-        on_read = sorted(expected.keys() & await _tool_names(read_server))
-        assert not on_read, f"write tools on the read server: {on_read}"
-    if router is not None:
-        for name, fn in expected.items():
-            for route in router.routes:
-                path = str(getattr(route, "path", ""))
-                methods = " ".join(sorted(getattr(route, "methods", None) or ()))
-                served = _serves(route, source, fn)
-                assert not served, f"{name}: a write task has an HTTP route, {methods} {path}"
 
 
 @pytest.mark.anyio
@@ -276,151 +181,6 @@ async def test_the_write_server_serves_write_tasks_only() -> None:
         read_server=read_server,
         router=router,
     )
-
-
-def create_thing(name: str, confirm: bool = False) -> dict[str, str]:
-    """Create a thing; without confirm, return a preview.
-
-    Args:
-        name: The thing's name, e.g. ``"Corn"``.
-        confirm: ``True`` writes, ``False`` previews.
-    """
-    return {"name": name, "written": str(confirm)}
-
-
-def delete_thing(thing_id: int, confirm: typing.Annotated[bool, "write"] = False) -> dict[str, int]:
-    """Delete a thing; without confirm, return a preview.
-
-    Args:
-        thing_id: The thing's id, e.g. ``4``.
-        confirm: ``True`` deletes, ``False`` previews.
-    """
-    return {"id": thing_id}
-
-
-def list_things() -> list[str]:
-    """List the things."""
-    return ["a"]
-
-
-WRITE: list[Callable[..., Any]] = [create_thing, delete_thing]
-READ: list[Callable[..., Any]] = [list_things]
-
-
-@pytest.mark.anyio
-async def test_assert_write_tools_accepts_a_separate_write_server() -> None:
-    await assert_write_tools(
-        build_server("example", WRITE, read_only=False),
-        WRITE,
-        source="example",
-        read_server=build_server("example", READ),
-        router=router_from_tasks("example", READ),
-    )
-
-
-@pytest.mark.anyio
-async def test_assert_write_tools_wants_a_server_registered_as_a_write_server() -> None:
-    read_only = build_server("example", [])
-    register_tasks(read_only, "example", WRITE)  # the write tasks, registered read-only
-    with pytest.raises(
-        AssertionError,
-        match=(
-            r"^the write server was not registered with read_only=False; "
-            r"the loopback rule depends on it"
-        ),
-    ):
-        await assert_write_tools(read_only, WRITE, source="example")
-
-
-@pytest.mark.anyio
-async def test_assert_write_tools_wants_exactly_the_write_tasks() -> None:
-    # build_server refuses a write task without confirm (conventions §8); a read-only
-    # registration on the write server is how a stray tool would get there.
-    write = build_server("example", WRITE, read_only=False)
-    register_tasks(write, "example", [list_things])
-    with pytest.raises(AssertionError, match=r"not write tasks: \['example_list_things'\]"):
-        await assert_write_tools(write, WRITE, source="example")
-    write = build_server("example", [create_thing], read_only=False)
-    with pytest.raises(AssertionError, match=r"missing .*: \['example_delete_thing'\]"):
-        await assert_write_tools(write, WRITE, source="example")
-
-
-def no_confirm(name: str) -> None:
-    """No confirm at all."""
-
-
-def confirm_true(confirm: bool = True) -> None:
-    """Writes unless told not to."""
-
-
-def confirm_required(confirm: bool) -> None:
-    """Must be told."""
-
-
-def confirm_unannotated(confirm=False):  # type: ignore[no-untyped-def]
-    """Not annotated."""
-
-
-def confirm_optional(confirm: bool | None = False) -> None:
-    """Optional."""
-
-
-def confirm_zero(confirm: int = 0) -> None:
-    """An int."""
-
-
-def confirm_first(confirm: bool = False, name: str = "") -> None:
-    """Confirm before the other parameters."""
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("task", "problem"),
-    [
-        (no_confirm, "no parameter confirm"),
-        (confirm_true, "confirm defaults to True, not False"),
-        (confirm_required, "confirm has no default"),
-        (confirm_unannotated, "confirm is not annotated"),
-        (confirm_optional, r"confirm is annotated bool \| None, not bool"),
-        (confirm_zero, "confirm is annotated <class 'int'>, not bool"),
-        (confirm_first, "confirm is not the last parameter"),
-    ],
-)
-async def test_assert_write_tools_wants_confirm_false_last(
-    task: Callable[..., Any], problem: str
-) -> None:
-    write = build_server("example", [create_thing], read_only=False)
-    register_tasks(write, "example", [task])  # build_server(read_only=False) refuses most
-    with pytest.raises(AssertionError, match=f"^example_{task.__name__}: {problem}; "):
-        await assert_write_tools(write, [create_thing, task], source="example")
-
-
-@pytest.mark.anyio
-async def test_assert_write_tools_keeps_write_tools_off_the_read_adapters() -> None:
-    write = build_server("example", WRITE, read_only=False)
-    read = build_server("example", [list_things, delete_thing])
-    with pytest.raises(AssertionError, match=r"on the read server: \['example_delete_thing'\]"):
-        await assert_write_tools(write, WRITE, source="example", read_server=read)
-    with_write = router_from_tasks("example", [list_things, create_thing])
-    with pytest.raises(
-        AssertionError,
-        match=r"^example_create_thing: a write task has an HTTP route, GET /example/create_thing",
-    ):
-        await assert_write_tools(write, WRITE, source="example", router=with_write)
-    prefixed = router_from_tasks("example", [delete_thing], prefix="/v1")
-    with pytest.raises(AssertionError, match=r"^example_delete_thing: .* GET /v1/delete_thing"):
-        await assert_write_tools(write, WRITE, source="example", router=prefixed)
-
-
-@pytest.mark.anyio
-async def test_assert_write_tools_names_tools_with_the_underscored_source() -> None:
-    write = build_server("usda-nass", WRITE, read_only=False)
-    await assert_write_tools(
-        write, WRITE, source="usda-nass", router=router_from_tasks("usda-nass", READ)
-    )
-    with_write = router_from_tasks("usda-nass", WRITE)
-    with pytest.raises(AssertionError, match=r"^usda_nass_create_thing: "):
-        await assert_write_tools(write, WRITE, source="usda-nass", router=with_write)
 
 
 @pytest.mark.anyio
@@ -476,7 +236,7 @@ def test_create_journal_entry_with_confirm_replays_the_recorded_create(
     sent = route.calls.last.request
     assert sent.method == "POST"
     assert sent.headers["Content-Type"] == FORM_CONTENT_TYPE
-    assert sent_body(route) == recorded_body(fixtures_dir, "journal_create", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "journal_create", "ok"))
     written = result.data
     assert isinstance(written, WriteResult)
     assert (written.performed, written.insert_id, written.message) == (
@@ -558,7 +318,7 @@ def test_update_journal_entry_with_confirm_reads_then_sends_the_whole_record(
         DEMO, JOURNAL_ENTRY, title="xippios-live fixture updated", confirm=True
     )
     assert (read.call_count, update.call_count) == (1, 1)
-    assert sent_body(update) == recorded_body(fixtures_dir, "journal_update", "ok")
+    assert sent_bodies(update)[-1] == dict(recorded_body(fixtures_dir, "journal_update", "ok"))
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (JOURNAL_ENTRY, "Book entry saved")
     assert result.meta.request["id"] == str(JOURNAL_ENTRY)
@@ -706,7 +466,11 @@ def test_update_journal_entry_refuses_an_entry_another_module_booked(
 
 
 def test_a_create_takes_a_persons_id_only(respx_mock: respx.MockRouter) -> None:
-    with pytest.raises(InvalidRequestError, match="create a new person with create_person"):
+    with pytest.raises(
+        InvalidRequestError,
+        match=r"create a new person with create_person \(over MCP, the tool "
+        r"cashctrl_create_person\) first",
+    ):
         tasks_write.create_journal_entry(DEMO, associate_id="Neu AG")  # type: ignore[arg-type]
     with pytest.raises(InvalidRequestError, match=r"items\[0\]\.associate_id"):
         tasks_write.create_journal_entry(
@@ -748,7 +512,7 @@ def test_delete_journal_entry_with_confirm_reads_then_deletes(
     route = replay_fixture("journal_delete", "ok")
     result = tasks_write.delete_journal_entry(DEMO, JOURNAL_ENTRY, confirm=True)
     assert (read.call_count, route.call_count) == (1, 1)
-    assert sent_body(route) == recorded_body(fixtures_dir, "journal_delete", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "journal_delete", "ok"))
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (None, "1 book entry deleted")
     assert result.meta.request == {"org": DEMO, "ids": str(JOURNAL_ENTRY)}
@@ -883,7 +647,7 @@ def test_create_person_with_confirm_replays_the_recorded_create(
 ) -> None:
     route = replay_fixture("person_create", "ok")
     result = create_the_recorded_person(confirm=True)
-    assert sent_body(route) == recorded_body(fixtures_dir, "person_create", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "person_create", "ok"))
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (PERSON, "Person saved")
     assert result.meta.tenant == DEMO
@@ -912,7 +676,7 @@ def test_update_person_with_confirm_reads_then_sends_the_whole_record(
     result = tasks_write.update_person(
         DEMO, PERSON, company="xippios-live Fixture AG", confirm=True
     )
-    assert sent_body(update) == recorded_body(fixtures_dir, "person_update", "ok")
+    assert sent_bodies(update)[-1] == dict(recorded_body(fixtures_dir, "person_update", "ok"))
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (PERSON, "Person saved")
 
@@ -1041,9 +805,9 @@ def test_clearing_a_flag_sends_false(
         200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
     )
     tasks_write.update_person(DEMO, PERSON, clear=["is_customer"], confirm=True)
-    assert ("isCustomer", "false") in sent_body(write)
-    assert sent_body(write) == list(
-        preview_of(tasks_write.update_person(DEMO, PERSON, clear=["is_customer"])).payload.items()
+    assert sent_bodies(write)[-1]["isCustomer"] == "false"
+    assert sent_bodies(write)[-1] == dict(
+        preview_of(tasks_write.update_person(DEMO, PERSON, clear=["is_customer"])).payload
     )
 
 
@@ -1152,7 +916,7 @@ def test_delete_person_previews_then_deletes(
     assert (preview.before.id, preview.payload) == (PERSON, {"ids": str(PERSON)})
     route = replay_fixture("person_delete", "ok")
     result = tasks_write.delete_person(DEMO, PERSON, confirm=True)
-    assert sent_body(route) == recorded_body(fixtures_dir, "person_delete", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "person_delete", "ok"))
     assert isinstance(result.data, WriteResult)
     assert result.data.message == "1 person deleted"
 
@@ -1164,7 +928,9 @@ IBAN = "CH00 TEST 0000 0000 0000 0"
 
 
 def test_create_person_never_echoes_ssn_or_iban(respx_mock: respx.MockRouter) -> None:
-    """ADR-0017: the values go upstream, but neither the preview nor ``meta.request`` shows them.
+    """The values go upstream, but neither the preview nor ``meta.request`` shows them.
+
+    The personal identifiers stay out of every result (sdk-core ADR-0017).
 
     The confirmed call is answered by a mocked success, not a fixture, to show what was
     sent: a fixture never carries the values.
@@ -1183,7 +949,7 @@ def test_create_person_never_echoes_ssn_or_iban(respx_mock: respx.MockRouter) ->
         200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
     )
     result = tasks_write.create_person(DEMO, **arguments, confirm=True)
-    sent = dict(sent_body(write))
+    sent = sent_bodies(write)[-1]
     assert sent["ssn"] == SSN, "upstream receives the value"
     assert json.loads(sent["bankAccounts"])[0]["iban"] == IBAN
     assert result.meta.request["ssn"] == "REDACTED"
@@ -1218,7 +984,7 @@ def test_update_person_shows_no_stored_or_given_ssn(
         200, json={"success": True, "insertId": PERSON, "message": "Person saved"}
     )
     result = tasks_write.update_person(DEMO, PERSON, department="x", confirm=True)
-    assert dict(sent_body(write))["ssn"] == SSN, "the stored value is carried over"
+    assert sent_bodies(write)[-1]["ssn"] == SSN, "the stored value is carried over"
     assert result.meta.request["ssn"] == "REDACTED"
 
 
@@ -1240,7 +1006,7 @@ def test_a_previewed_record_leaves_out_ssn_and_iban(
 def test_update_person_never_echoes_a_given_iban(
     replay_fixture: ReplayFixture, fixtures_dir: Path
 ) -> None:
-    """ADR-0017: an ``iban`` given to ``update_person`` goes upstream, never into a result.
+    """sdk-core ADR-0017: an ``iban`` given to ``update_person`` goes upstream, never into a result.
 
     The recorded read the update starts from, and for the confirmed call the recorded
     update's answer: a replay never matches the request body, so the form asserted here
@@ -1257,7 +1023,7 @@ def test_update_person_never_echoes_a_given_iban(
     update = replay_fixture("person_update", "ok")
     result = tasks_write.update_person(DEMO, PERSON, bank_accounts=accounts, confirm=True)
     assert read.call_count == 2, "the confirmed call reads again"
-    sent = dict(sent_body(update))
+    sent = sent_bodies(update)[-1]
     assert json.loads(sent["bankAccounts"]) == [
         {"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"}
     ], "upstream receives the value"
@@ -1329,7 +1095,7 @@ def test_create_order_with_confirm_replays_the_recorded_create(
 ) -> None:
     route = replay_fixture("order_create", "ok")
     result = create_the_recorded_order(confirm=True)
-    assert sent_body(route) == recorded_body(fixtures_dir, "order_create", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "order_create", "ok"))
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (ORDER, "Rechnung saved")
     assert result.meta.endpoint == "order/create.json"
@@ -1387,7 +1153,7 @@ def test_update_order_with_confirm_reads_then_sends_the_whole_order(
     assert (read.call_count, update.call_count) == (1, 1)
     sent = update.calls.last.request
     assert sent.headers["Content-Type"] == FORM_CONTENT_TYPE
-    assert sent_body(update) == recorded_body(fixtures_dir, "order_update", "ok")
+    assert sent_bodies(update)[-1] == dict(recorded_body(fixtures_dir, "order_update", "ok"))
     written = result.data
     assert isinstance(written, WriteResult)
     assert (written.performed, written.insert_id, written.message) == (
@@ -1648,7 +1414,7 @@ def test_delete_order_previews_the_order_then_deletes(
     assert (preview.before.nr, preview.payload) == ("RE-2026-103", {"ids": "3"})
     route = replay_fixture("order_delete", "ok")
     result = tasks_write.delete_order(DEMO, ORDER, confirm=True)
-    assert sent_body(route) == recorded_body(fixtures_dir, "order_delete", "ok")
+    assert sent_bodies(route)[-1] == dict(recorded_body(fixtures_dir, "order_delete", "ok"))
     assert isinstance(result.data, WriteResult)
     assert result.data.message == "1 document deleted"
 
@@ -1726,7 +1492,7 @@ def test_update_order_status_with_confirm_replays_the_recorded_update(
     assert route.call_count == 1
     assert len(respx_mock.calls) == 1, "no read before the write"
     assert route.calls.last.request.headers["Content-Type"] == FORM_CONTENT_TYPE
-    assert sent_body(route) == recorded
+    assert sent_bodies(route)[-1] == dict(recorded)
     assert isinstance(result.data, WriteResult)
     assert (result.data.performed, result.data.insert_id, result.data.message) == (
         True,
@@ -1783,7 +1549,7 @@ def test_create_order_payment_with_confirm_replays_the_recorded_payment(
     result = tasks_write.create_order_payment(DEMO, PAY_DAY, [PAID], type="CASH_PDF", confirm=True)
     assert len(respx_mock.calls) == 1, "no read before the write"
     assert route.calls.last.request.headers["Content-Type"] == FORM_CONTENT_TYPE
-    assert sent_body(route) == recorded
+    assert sent_bodies(route)[-1] == dict(recorded)
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (None, "Payment order created")
     assert result.meta.endpoint == "order/payment/create.json"
@@ -1800,7 +1566,7 @@ def test_a_refused_payment_names_the_date_and_the_bank_accounts(
     route = replay_fixture("order_payment_create", "pain")
     with pytest.raises(RequestRejected) as refused:
         tasks_write.create_order_payment(DEMO, PAY_DAY, [PAID], type="PAIN", confirm=True)
-    assert sent_body(route) == recorded
+    assert sent_bodies(route)[-1] == dict(recorded)
     assert [(error.field, error.message) for error in refused.value.errors] == [
         ("date", "The date cannot be in the past."),
         (None, "Rechnung xippios-live: Sender: Bank account must be set."),
@@ -1830,7 +1596,8 @@ def test_a_refused_payment_names_the_date_and_the_bank_accounts(
         ),
         (
             lambda: tasks_write.update_order_status(DEMO, [ORDER], 0),
-            "status_id must be a status id from list_order_categories",
+            "status_id must be a status id from list_order_categories (over MCP, the tool "
+            "cashctrl_list_order_categories), a whole number of at least 1, not 0",
         ),
         (
             lambda: tasks_write.update_order_status(DEMO, [ORDER], None),  # type: ignore[arg-type]
@@ -1989,7 +1756,8 @@ def test_an_entry_booked_from_the_items_is_refused_after_one_read(
     assert str(refused.value) == (
         f"book entry {GENERATED_ENTRY} was booked from its order's items (type GENERATED); "
         f"upstream documents that such entries cannot be {write}d directly, only by changing "
-        "the order's items with update_order. Nothing was sent"
+        "the order's items with update_order (over MCP, the tool cashctrl_update_order). "
+        "Nothing was sent"
     )
     assert read.call_count == 1, "one read, confirmed or not"
     assert not sent.called
@@ -2019,9 +1787,13 @@ def test_update_order_book_entry_refuses_an_entry_without_its_account(
     body["data"].update(type="MANUAL", accountId=None)
     serve_read(respx_mock, "order/bookentry/read.json", body)
     write = respx_mock.post(f"{BASE}/order/bookentry/update.json")
-    with pytest.raises(InvalidRequestError, match="the book entry gives no accountId"):
+    refusal = re.escape(
+        "the book entry gives no accountId, which update.json requires; pass account_id, an "
+        "id from list_accounts (over MCP, the tool cashctrl_list_accounts). Nothing was sent"
+    )
+    with pytest.raises(InvalidRequestError, match=refusal):
         tasks_write.update_order_book_entry(DEMO, GENERATED_ENTRY, description="x")
-    with pytest.raises(InvalidRequestError, match="the book entry gives no accountId"):
+    with pytest.raises(InvalidRequestError, match=refusal):
         tasks_write.update_order_book_entry(DEMO, GENERATED_ENTRY, clear=["account_id"])
     preview = preview_of(tasks_write.update_order_book_entry(DEMO, GENERATED_ENTRY, account_id=3))
     assert preview.payload["accountId"] == "3", "given, it is sent"
@@ -2149,7 +1921,7 @@ def test_create_order_book_entry_with_confirm_replays_the_recorded_create(
     result = book_the_recorded_entry(confirm=True)
     assert len(respx_mock.calls) == 1, "no read before a create"
     assert route.calls.last.request.headers["Content-Type"] == FORM_CONTENT_TYPE
-    assert sent_body(route) == recorded
+    assert sent_bodies(route)[-1] == dict(recorded)
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (BOOK_ENTRY, "null saved"), (
         "upstream's message, as it was sent"
@@ -2184,7 +1956,7 @@ def test_update_order_book_entry_with_confirm_reads_then_sends_the_whole_entry(
     result = update_the_recorded_entry(confirm=True)
     assert (read.call_count, route.call_count) == (1, 1), "one read, then the write"
     recorded = recorded_body(fixtures_dir, "order_bookentry_update", "ok")
-    assert sent_body(route) == recorded
+    assert sent_bodies(route)[-1] == dict(recorded)
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (BOOK_ENTRY, "Book entry saved")
     assert result.meta.request == {"org": DEMO, **dict(recorded)}
@@ -2236,7 +2008,9 @@ def test_delete_order_book_entry_reads_the_entry_then_deletes(
     )
     result = tasks_write.delete_order_book_entry(DEMO, BOOK_ENTRY, confirm=True)
     assert (read.call_count, write.call_count) == (2, 1)
-    assert sent_body(write) == recorded_body(fixtures_dir, "order_bookentry_delete", "ok")
+    assert sent_bodies(write)[-1] == dict(
+        recorded_body(fixtures_dir, "order_bookentry_delete", "ok")
+    )
     assert isinstance(result.data, WriteResult)
     assert (result.data.insert_id, result.data.message) == (None, "1 book entry deleted")
 
@@ -2650,7 +2424,7 @@ async def test_an_order_update_through_the_write_server(
     assert not update.called
     done = await mcp_call(write_server, "cashctrl_update_order", {**arguments, "confirm": True})
     assert (done["data"]["performed"], done["data"]["insert_id"]) == (True, ORDER)
-    assert sent_body(update) == recorded_body(fixtures_dir, "order_update", "ok")
+    assert sent_bodies(update)[-1] == dict(recorded_body(fixtures_dir, "order_update", "ok"))
     assert done["meta"]["tenant"] == DEMO
 
 

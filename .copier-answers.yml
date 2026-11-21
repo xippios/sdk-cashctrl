@@ -1,18 +1,17 @@
 # Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
-_commit: v0.3.4
+_commit: v0.4.0
 _src_path: https://github.com/xippios/sdk-template.git
 api_base_url: https://example.cashctrl.com/api/v1
 api_key_env: CASHCTRL_API_KEY
-api_key_location: header
-api_key_name: X-Api-Key
+api_key_location: basic
 core_git_ref: ''
-core_version: 0.3.0
+core_version: 0.4.0
 gateway: none
 has_files: false
 has_reference_data: false
 human: jdidaskalu
 import_path: cashctrl
-live_secrets: '[CASHCTRL_DEMO_SUBDOMAIN, CASHCTRL_DEMO_API_KEY]'
+live_secrets: '[CASHCTRL_DEMO_SUBDOMAIN]'
 rate_limit_burst: 1
 rate_limit_per_minute: 60
 rate_limit_provenance: self-imposed

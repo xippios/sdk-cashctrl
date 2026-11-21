@@ -576,7 +576,7 @@ def marked(text: str | None, nr: str | None = None) -> bool:
 def journal_values(entry: JournalEntryDetailProjection) -> dict[str, Any]:
     """The parameters ``update_journal_entry`` derives from ``entry``, as a task returned it.
 
-    The tasks return projections (ADR-0017), and ``_journal_values`` takes the read
+    The tasks return projections (sdk-core ADR-0017), and ``_journal_values`` takes the read
     model, so it is rebuilt from the projection: only its persons lack ``ssn`` and
     ``iban``, which no journal parameter reads.
     """
@@ -588,7 +588,7 @@ def person_values(person: PersonDetailProjection) -> dict[str, Any]:
     """The parameters ``update_person`` derives from ``person``, as a task returned it.
 
     Rebuilt as the read model from the projection, which leaves out ``ssn`` and each bank
-    account's ``iban`` (ADR-0017): the test person holds neither, so ``ssn`` compares as
+    account's ``iban`` (sdk-core ADR-0017): the test person holds neither, so ``ssn`` compares as
     empty on both sides.
     """
     values, _, _ = tasks_write._person_values(PersonDetail.model_validate(person.model_dump()))

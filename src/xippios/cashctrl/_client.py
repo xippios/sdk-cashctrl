@@ -6,9 +6,9 @@ there is no single client here: every task takes ``org``, the name of an organis
 declared in the environment, and ``client_for(org)`` returns that organisation's own
 client, with its own base URL, its own key, its own token bucket and no shared cache.
 
-The registry is the package's own ``Tenants`` (``_tenants.py``, copied from xippios-core
-when 0.3.0 left it to this package, ADR-0024), ``TENANTS`` below; the environment is the
-contract (conventions §7):
+The registry is core's ``Tenants`` (``xippios.core.tenants``, sdk-core ADR-0042, decision 1),
+``TENANTS`` below, whose ``param`` declares ``org`` as the parameter that names an organisation; the
+environment is the contract (conventions §7):
 
 - ``CASHCTRL_ORGS``: comma-separated names matching ``^[a-z0-9_]+$``, e.g. ``acme,acme_test``;
 - per name, ``CASHCTRL_<NAME>_SUBDOMAIN`` and ``CASHCTRL_<NAME>_API_KEY``, the name
@@ -35,41 +35,58 @@ from xippios.core import (
     AsyncClient,
     BasicKeyAuth,
     ClientConfig,
+    EnvVar,
     NotFoundError,
     RateLimit,
+    Tenants,
     UpstreamError,
     XippiosError,
     error_from_response,
 )
 
-from xippios.cashctrl._tenants import Tenants
 from xippios.cashctrl._version import __version__
 from xippios.cashctrl.errors import FieldError, RequestRejected
 
 __all__ = [
     "BASE_URL_TEMPLATE",
     "DEMO",
+    "ENV_VARS",
     "NEUTRAL_HOST",
     "RATE_LIMIT",
     "SOURCE",
     "TENANTS",
+    "check_org",
     "check_subdomain",
     "classify",
     "client_for",
 ]
 
 SOURCE = "cashctrl"
+ENV_VARS: tuple[EnvVar, ...] = (
+    EnvVar("CASHCTRL_ORGS", secret=False, required=False),
+    EnvVar("CASHCTRL_<NAME>_API_KEY", secret=True, required=True),
+    EnvVar("CASHCTRL_<NAME>_SUBDOMAIN", secret=True, required=True),
+)
+"""The variables the package reads, for a host (conventions §7; sdk-core ADR-0026, amendment
+2026-11-18, point c).
+
+``CASHCTRL_ORGS`` lists the organisations and is not needed for the reserved ``demo``,
+which its own ``CASHCTRL_DEMO_SUBDOMAIN`` and ``CASHCTRL_DEMO_API_KEY`` declare; every
+declared organisation needs its key and its subdomain, and the subdomain is kept as a key
+is, never in a file, a log line or a report. An ``EnvVar`` reads nothing.
+"""
 BASE_URL_TEMPLATE = "https://{subdomain}.cashctrl.com/api/v1"
 """Base URL of one organisation; ``subdomain`` is the organisation's (introduction.md)."""
-# A self-imposed pace: upstream documents no per-second or per-minute limit (ADR-0010 decision 1).
+# A self-imposed pace: upstream documents no per-second or per-minute limit (sdk-core ADR-0033,
+# decision 1).
 RATE_LIMIT = RateLimit(per_minute=60, burst=1)
 """Per organisation and self-imposed: upstream documents only a 429 and "add delays".
 
 One request at a time, then one a second: CashCtrl documents no burst either. Every
 response carries ``x-cashctrl-requests-left`` (299 observed on 2026-10-23, a 401
 included); its window and scope are not documented, so nothing here reads it, and no
-``QuotaPolicy`` is installed (ADR-0015): with no documented window, its default of an
-hour would turn one 429 without ``Retry-After`` into an hour of refusals.
+``QuotaPolicy`` is installed (sdk-core ADR-0037, decision 2): with no documented window, its default
+of an hour would turn one 429 without ``Retry-After`` into an hour of refusals.
 """
 DEMO = "demo"
 """The reserved organisation, declared by its own two variables and never listed."""
@@ -82,7 +99,7 @@ def check_subdomain(value: str) -> str:
 
     The label before ``.cashctrl.com``: letters, digits and inner hyphens, at most 63
     characters. CashCtrl's hosts are lower-case, so the value is lower-cased first, as
-    the upstream would read it (ADR-0024).
+    the upstream would read it (sdk-core ADR-0036, decision 1).
 
     Raises:
         ValueError: ``value`` is not one label; the message never quotes it, and core's
@@ -97,12 +114,28 @@ def check_subdomain(value: str) -> str:
 TENANTS = Tenants(
     SOURCE,
     list_var="CASHCTRL_ORGS",
+    param="org",
     fields=("SUBDOMAIN", "API_KEY"),
     reserved=(DEMO,),
     validate={"SUBDOMAIN": check_subdomain},
     hints={"SUBDOMAIN": "set the subdomain alone, one DNS label: acme for acme.cashctrl.com"},
 )
-"""CashCtrl's organisations, declared in the environment (ADR-0024)."""
+"""CashCtrl's organisations, declared in the environment (sdk-core ADR-0036, decision 1)."""
+
+
+def check_org(org: str) -> None:
+    """Check a declared organisation's subdomain at a bound server's startup.
+
+    Core's ``serve_tenants`` calls it after ``TENANTS.require(org)``, before the server
+    bound to ``org`` is built, so a missing or malformed subdomain stops the server at
+    startup, exit status 2, rather than on its first call. It reads the subdomain as
+    ``client_for(org)`` would.
+
+    Raises:
+        ConfigError: ``CASHCTRL_<NAME>_SUBDOMAIN`` is not set or holds no valid subdomain;
+            the message names the variable, never its value.
+    """
+    TENANTS.field(org, "SUBDOMAIN")
 
 
 NEUTRAL_HOST = "cashctrl.com"
@@ -247,7 +280,9 @@ def _status_error(response: httpx.Response) -> XippiosError | None:
 
 
 def classify(response: httpx.Response) -> XippiosError | None:
-    """CashCtrl's error shapes, mapped once (ADR-0008); the client calls it on every response.
+    """CashCtrl's error shapes, mapped once; the client calls it on every response.
+
+    One classifier per source maps upstream's error shapes (sdk-core ADR-0031, decision 2).
 
     HTTP status codes (``docs/upstream/error-handling.md``): every 4xx and 5xx is mapped
     by core's ``error_from_response`` (401/403 ``AuthError``, 429 ``RateLimitError``,
@@ -256,15 +291,14 @@ def classify(response: httpx.Response) -> XippiosError | None:
     ``cashctrl.com`` instead of the organisation's host, so neither the quoted snippet
     nor ``UpstreamError.body`` carries an organisation's subdomain. A 404
     means "The requested endpoint doesn't exist" and raises ``UpstreamError`` with
-    ``status=404``: ``NotFoundError`` only ever means an absent record (ADR-0003). One
-    404 does mean an absent record: on a ``<...>/read.pdf`` asked by non-empty ``ids``
-    (``order/document/read.pdf``), which answered an id no order has with HTTP 404
-    ("CashCtrl - 404 Not Found") on 2026-10-29 and served the existing order's PDF in
-    the same run; it raises ``NotFoundError``, upstream signalling absence (conventions
-    §5), its message naming the path only. So does a 404 on a report's
-    ``download.pdf`` or ``download.xlsx`` by ``elementId`` or ``collectionId``, observed
-    on 2026-11-17 for an element and a collection no report has; the annual report's
-    download takes no such id.
+    ``status=404``: ``NotFoundError`` only ever means an absent record (sdk-core ADR-0028,
+    decision 1). One 404 does mean an absent record: on a ``<...>/read.pdf`` asked by
+    non-empty ``ids`` (``order/document/read.pdf``), which answered an id no order has with
+    HTTP 404 ("CashCtrl - 404 Not Found") on 2026-10-29 and served the existing order's PDF
+    in the same run; it raises ``NotFoundError``, upstream signalling absence (conventions
+    §5), its message naming the path only. So does a 404 on a report's ``download.pdf`` or
+    ``download.xlsx`` by ``elementId`` or ``collectionId``, observed on 2026-11-17 for an
+    element and a collection no report has; the annual report's download takes no such id.
 
     Documented refusals: validation errors come back as HTTP 200 with
     ``{"success": false, "errors": [{"field": ..., "message": ...}]}``. They raise

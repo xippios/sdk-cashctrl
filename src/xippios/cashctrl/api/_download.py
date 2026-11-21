@@ -5,7 +5,7 @@ Every file operation this package wraps (the list exports ``<module>/list.csv``,
 ``download.pdf``, ``download.xlsx`` and ``download_annualreport.pdf``) is a ``GET`` whose query
 is the operation's parameters under upstream's names, as for a ``.json`` read.
 ``download`` sends it through the organisation's client with core's
-``AsyncClient.download`` (ADR-0019 decision 1): the body streams to a file, never held in
+``AsyncClient.download`` (sdk-core ADR-0040, decision 1): the body streams to a file, never held in
 memory and never cached, and the limiter, ``classify`` and the retry rule apply as they
 do to ``get``.
 
@@ -94,8 +94,7 @@ def check_dest(dest: str | os.PathLike[str]) -> Path:
 
     Raises:
         InvalidRequestError: ``dest`` is a directory, or its directory does not exist,
-            a bad argument (conventions §5) where core's ``download`` raises
-            ``ValueError``.
+            a bad argument (conventions §5).
     """
     target = Path(dest)
     if target.is_dir():
@@ -126,8 +125,7 @@ async def download(
 
     Raises:
         InvalidRequestError: ``dest`` is a directory, or its directory does not exist,
-            a bad argument (conventions §5) where core's ``download`` raises
-            ``ValueError``; nothing is sent.
+            a bad argument (conventions §5); nothing is sent.
         RequestRejected: Upstream answered HTTP 200 with ``"success": false``.
         NotFoundError: An id no record has, on a read by ids (``order/document/read.pdf``
             answers it with HTTP 404, ``classify``).

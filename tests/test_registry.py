@@ -1,9 +1,8 @@
 """The organisation registry: declaration, lookup and one isolated client per organisation.
 
-``TENANTS`` is the package's own ``Tenants`` (``_tenants.py``, copied from core when 0.3.0
-left it to this package, ADR-0024), declared in ``_client.py``; these tests pin cashctrl's
-declaration and what ``client_for`` builds from it, and ``tests/test_tenants.py`` tests the
-copied machinery itself on a fictitious source.
+``TENANTS`` is core's ``Tenants`` (sdk-core ADR-0042, decision 1), declared in
+``_client.py``; these tests pin cashctrl's declaration and what ``client_for`` builds from
+it, and core tests the machinery itself.
 """
 
 import os

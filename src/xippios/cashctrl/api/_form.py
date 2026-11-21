@@ -3,7 +3,8 @@
 Upstream "accepts form-encoded request bodies" (``docs/upstream/introduction.md``), and
 every create, update and delete operation is a ``POST`` with form fields named as the
 parameter tables name them. This module turns task values into those fields and posts
-them through core's form bodies (``AsyncClient.request(..., data=...)``, conventions §6):
+them through core's write call with a form body (``AsyncClient.post_json(..., data=...)``,
+conventions §6):
 
 - ``True``/``False`` become ``true``/``false`` ("Possible values: true, false");
 - a ``Decimal`` or an ``int`` becomes its plain digits (``125.50``, never ``1.255E+2``);
@@ -23,7 +24,7 @@ charset=UTF-8``, the charset declared as ``scripts/seed_demo.py`` declared it fo
 65 writes that seeded the demo organisation, an umlaut read back byte for byte
 (``docs/demo-org.md``, Observed write semantics). A refusal (HTTP 200 with
 ``"success": false``) is raised by ``_client.classify`` as ``RequestRejected``; core
-never retries a ``POST`` after a 5xx or a transport failure (ADR-0011).
+never retries a ``POST`` after a 5xx or a transport failure (sdk-core ADR-0011).
 """
 
 import json
@@ -36,7 +37,7 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from pydantic import BaseModel
-from xippios.core import BODY_LIMIT, InvalidRequestError, ValidationError
+from xippios.core import InvalidRequestError
 
 from xippios.cashctrl._client import SOURCE, client_for
 
@@ -237,19 +238,11 @@ async def post_form(org: str, path: str, fields: Mapping[str, str]) -> Any:
 
     Raises:
         RequestRejected: Upstream answered HTTP 200 with ``"success": false``.
-        ValidationError: The answer is not JSON.
+        ValidationError: The answer is not JSON; core's decoder names ``path`` and why.
     """
-    response = await client_for(org).request(
-        "POST", path, data=fields, headers={"Content-Type": FORM_CONTENT_TYPE}
+    return await client_for(org).post_json(
+        path, data=fields, headers={"Content-Type": FORM_CONTENT_TYPE}
     )
-    try:
-        return response.json()
-    except ValueError as exc:
-        raise ValidationError(
-            f"{SOURCE}: response from {path} is not JSON",
-            raw=response.text[:BODY_LIMIT],
-            source=SOURCE,
-        ) from exc
 
 
 def ids_csv(ids: Sequence[int]) -> str:
