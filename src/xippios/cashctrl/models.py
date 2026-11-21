@@ -2037,9 +2037,8 @@ class OrderItemInput(_Input):
         account_id: ``accountId``, the revenue account for sales, the expense account for
             purchase (an id from ``list_accounts``).
         name: ``name``, the item's name.
-        unit_price: ``unitPrice``, the price of one unit. Observed on the demo
-            organisation: CashCtrl read the seeded unit prices as gross, VAT included
-            (``baseValue`` ``GROSS``, ``docs/demo-org.md``).
+        unit_price: ``unitPrice``, the price of one unit, read as gross, VAT included
+            (``baseValue`` ``GROSS``; ``docs/upstream/OBSERVED.md``).
         allocations: ``allocations``, the item's allocations to cost centers.
         article_nr: ``articleNr``, the article number.
         description: ``description``, a description of the item.

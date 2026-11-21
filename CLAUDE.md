@@ -95,8 +95,7 @@ any amount; it still scrubs e-mail addresses, API user tags, token-like body fie
 fixture), and refuses any method but GET and POST, a POST to anything but the fourteen
 write paths, a GET to a path `docs/upstream/` does not document as a GET, a create
 without the marker `xippios-live`, an order write naming an unmarked order or a book
-entry's update or delete whose order is unmarked, and any endpoint but `.json` and the
-five `FILE_PATHS`, whose refusals alone it writes. Writes
+entry's update or delete whose order is unmarked, and any endpoint but `.json` or `FILE_PATHS`. Writes
 against demo create a record marked `xippios-live`, update it and delete it again,
 nothing else but a payment of a deleted order (see Write tools). The demo subdomain is
 treated like a key: never in a file, a commit, a log line or a report. The repository is
@@ -116,7 +115,7 @@ Decisions 1, 2, 3 and 5 of sdk-core ADR-0033 are adopted; decision 4 is delibera
    `classify`, with `retry_after` from `Retry-After` when upstream sends it; retries
    honour it up to `backoff_max`, beyond which the error reaches the caller
    (`tests/test_errors.py`). CashCtrl documents no fallback, and every answer carries
-   `x-cashctrl-requests-left` (299 on every answer, a 401 included) with an unknown window and scope, so it is not read.
+   `x-cashctrl-requests-left` (299 on every answer) with an unknown window and scope, so it is not read.
 4. **No firing into a spent quota** is deliberately not applied: no `QuotaPolicy` is
    installed. Core's `QuotaPolicy` (sdk-core ADR-0037, decision 2) keeps a long-window quota, and
    CashCtrl documents none, nor a window for
@@ -174,10 +173,10 @@ tests/
   test_record_fixture.py  the recorder never writes the demo host, subdomain or key
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
   test_refresh_upstream.py  the capture script keeps and lists OBSERVED.md, offline
-  test_observed.py  each note of OBSERVED.md ends with its probe
+  test_observed.py  OBSERVED.md's notes and probes
   test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
 docs/
-  upstream/        documentation snapshot, FETCHED.md and OBSERVED.md
+  upstream/        documentation snapshot, FETCHED.md, OBSERVED.md
   demo-org.md      the synthetic demo organisation: why, how to create and seed it, its books
   adr/             this package's design decisions, one NNNN-<slug>.md record each, laid
                    out in its README.md
@@ -521,7 +520,7 @@ Upstream's documented error shapes go into `classify` in `_client.py`, once; wra
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
 for an unknown id on a `read.json` by `id`; a 404 is an unknown endpoint
-(`UpstreamError`), on a `read.pdf` by `ids` or a report download by its id an unknown id (`NotFoundError`). Its probe goes to `docs/upstream/OBSERVED.md`.
+(`UpstreamError`), on a `read.pdf` by `ids` or a report download by its id an unknown id (`NotFoundError`). Probes: `docs/upstream/OBSERVED.md`.
 
 Files: the wrappers `<module>_list_csv|xlsx|pdf`,
 `order_document_read_pdf` and `report_*_download_*` (conventions §2) call `api/_download.py`'s `download`, which streams
@@ -540,7 +539,7 @@ its docstring holds the recorder's use and policies in full: one request through
 client that never retries, core's `Scrub` (conventions §10) and its own `TenantScrub`
 (sdk-core ADR-0042, decision 4), the final check before the one write, and the delete it
 asks for after a write. The demo-only rule above names what it scrubs and refuses.
-Before committing, run the grep block at the end of that docstring; its last two greps
+On `FILE_PATHS` it writes an error status or a refusal, `success` false, alone. Before committing, run the grep block at the end of that docstring; its last two greps
 print `0`. Fixtures are never typed in by hand.
 
 ### Never

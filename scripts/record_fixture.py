@@ -59,8 +59,9 @@ never shows a value, and exits with status 1:
   ``order/bookentry/update.json`` and ``order/bookentry/delete.json`` name book entries
   (``BOOK_ENTRY_WRITES``): each entry is read (``order/bookentry/read.json``), its
   ``orderId`` taken, and that order read and checked the same way, two GETs per entry,
-  since the entry's read names its order but not the order's marker (observed on
-  2026-11-17); an entry that cannot be read or names no order refuses the write too. A
+  since the entry's read names its order but not the order's marker
+  (``docs/upstream/OBSERVED.md``); an entry that cannot be read or names no order refuses
+  the write too. A
   recorded write changes the demo organisation: the recorder says so after the request
   and asks for the matching delete, recorded or run, so that no created record stays
   behind: after a book entry, the entry's delete before its orders'; upstream documents
@@ -88,8 +89,8 @@ never shows a value, and exits with status 1:
   ``.example`` addresses, but ``createdBy`` and ``lastUpdatedBy`` may carry the address
   of the user who wrote a record, a real person, so the scrub stays.
 - No API user tags. CashCtrl names an API user in ``createdBy`` and ``lastUpdatedBy`` as
-  ``API:`` and the first four characters of its key (observed on 2026-10-23 on the
-  records ``scripts/seed_demo.py`` wrote). Every such tag becomes ``API:REDACTED``,
+``API:`` and the first four characters of its key (``docs/upstream/OBSERVED.md``). Every
+such tag becomes ``API:REDACTED``,
   whichever key it comes from, with the marker in any case, at the start of a word or
   right after a JSON escape. A tag the scrub cannot reach (glued to a word, or behind a
   Unicode escape) is refused by the final check.
@@ -98,8 +99,8 @@ never shows a value, and exits with status 1:
   ends in ``iban`` (``iban``, ``qrIban``, ``qr_iban``, ``orgIban``, ``orgQrIban``,
   ``recipientIban``), the identifiers this package keeps out of its
   projections (sdk-core ADR-0017), in any case, has its text value replaced by ``REDACTED``.
-  ``order/read.json`` sends ``hash``, an undocumented 32-character text that may be the
-  token of a public link to the order document (observed on 2026-10-23, not verified);
+  ``order/read.json`` sends ``hash``, an undocumented 32-character text that may be the token
+  of a public link to the order document (``docs/upstream/OBSERVED.md``);
   ``person/list.json`` sends ``ssn`` and ``iban``, ``location/list.json`` ``iban`` and
   ``qrIban`` and ``order/document/read.json`` ``orgIban``, ``orgQrIban`` and
   ``recipientIban``, only ever seen ``null``; the others were never seen and are
@@ -341,7 +342,8 @@ API_USER = re.compile(
 )
 """CashCtrl's tag for an API user in ``createdBy``/``lastUpdatedBy``: ``API:`` and key[:4].
 
-Observed on 2026-10-23: the records an API user wrote carry ``"createdBy": "API:<the first
+As ``docs/upstream/OBSERVED.md`` notes, the records an API user wrote carry ``"createdBy":
+"API:<the first
 four characters of its key>"``. The scrub is narrow, as the e-mail scrub is: the marker in
 any case, at the start of a word or right after a JSON escape (``\\n``), never inside a
 JSON escape. What it cannot reach, ``API_USER_ANYWHERE`` finds and the check refuses.
@@ -1118,7 +1120,7 @@ def changed_reminder(endpoint: str, response: httpx.Response) -> str:
     """The note after a recorded write: the organisation changed, and the delete is due.
 
     Names the ``insertId`` when the answer carries one (an integer: the new record's id
-    for a create, the record's own for an update, observed on 2026-10-24), and nothing
+    for a create, the record's own for an update, ``docs/upstream/OBSERVED.md``), and nothing
     else of the answer.
     """
     try:

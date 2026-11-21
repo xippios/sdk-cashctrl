@@ -49,7 +49,7 @@ samples `tests/fixtures/account_read/by_id.json`, `tests/fixtures/person_read/by
 
 ### Timestamps and dates come without a zone
 
-A timestamp comes as `YYYY-MM-DD HH:MM:SS.f` without a zone (`2026-10-23 07:06:39.0`), and a
+A timestamp comes as `YYYY-MM-DD HH:MM:SS.f` without a zone (`2026-10-23 07:06:40.0`), and a
 date in the same form (`2025-12-31 23:59:59.0` for the end of a fiscal period). The
 undocumented `lastEntryDate` comes with a time of day.
 
@@ -79,12 +79,13 @@ recorded 2026-11-21.
 
 ### A `.json` answer is `application/json;charset=utf-8`
 
-Every answer of a `.json` operation recorded so far, a refusal included, is
-`application/json;charset=utf-8`. `api/_download.py` reads a file operation's JSON answer as
+Every answer of HTTP 200 of a `.json` operation recorded so far, a refusal included, is
+`application/json;charset=utf-8`; the 401 of a wrong key is `text/plain;charset=utf-8`. `api/_download.py` reads a file operation's JSON answer as
 a refusal.
 
-Probe: 2026-10-23, `GET currency/list.json` and `GET account/read.json`; samples
-`tests/fixtures/currency_list/default.json` and `tests/fixtures/account_read/missing_id.json`.
+Probe: 2026-10-23, `GET currency/list.json` and `GET account/read.json`, and `GET account/list.json`
+with a wrong key; samples `tests/fixtures/currency_list/default.json`,
+`tests/fixtures/account_read/missing_id.json` and `tests/fixtures/account_list/wrong_key.json`.
 
 ### Fields no table describes
 
@@ -102,6 +103,31 @@ Probe: 2026-10-23, 2026-10-27, 2026-10-28 and 2026-10-29, `GET account/list.json
 `tests/fixtures/journal_read/collective.json`, `tests/fixtures/order_read/by_id.json`,
 `tests/fixtures/person_category_list/default.json` and
 `tests/fixtures/order_document_read/by_id.json`, recorded 2026-10-28 UTC, 2026-10-29 CET.
+
+### The default lists of a new organisation
+
+The lists of an organisation's defaults answer every record at once: `account/category/list.json`
+38 categories, CashCtrl's default chart, flat, each with its `parentId`;
+`person/category/list.json` the four default categories and `person/title/list.json` the
+three default titles; `order/category/list.json` without `type` the six default sales
+categories, `total` equal to the records; and `location/list.json` the one location created
+in the app.
+
+Probe: 2026-10-24 and 2026-10-27, `GET account/category/list.json`,
+`GET person/category/list.json`, `GET person/title/list.json`, `GET order/category/list.json`
+and `GET location/list.json`; samples `tests/fixtures/account_category_list/default.json`,
+`tests/fixtures/person_category_list/default.json`,
+`tests/fixtures/person_title_list/default.json`, `tests/fixtures/order_category_list/default.json`,
+recorded 2026-10-24, and `tests/fixtures/location_list/default.json`.
+
+### An order's read sends `hash`
+
+`order/read.json` sends `hash`, an undocumented text of 32 characters that may be the token
+of a public link to the order's document; that was not verified. The recorder writes
+`REDACTED` in its place.
+
+Probe: 2026-10-23, `GET order/read.json?id=3`; sample `tests/fixtures/order_read/by_id.json`,
+its `hash` scrubbed.
 
 ### A book entry is `MANUAL` or `GENERATED`
 
@@ -155,11 +181,11 @@ user's current fiscal period, server-side state that `fiscalperiod/switch.json` 
 and `account/list.json` gives that period's balances. Without `type`, `order/list.json`
 lists both types.
 
-Probe: 2026-10-23, `GET order/list.json` and `GET account/list.json`, after the seed run of
-the same day left 2025 the current period; samples
-`tests/fixtures/order_list/fp2026_sales.json` and
-`tests/fixtures/order_list/fp2026_purchase.json`. The list without `type`, of
-`GET order/list.json` on 2026-10-23, kept no answer.
+Probe: 2026-10-23, after the seed run of the same day left 2025 the current period, as
+`GET fiscalperiod/list.json` marks it; sample `tests/fixtures/fiscalperiod_list/default.json`.
+The lists without `fiscalPeriodId` and without `type`, of `GET order/list.json`,
+`GET journal/list.json` and `GET account/list.json` on 2026-10-23, kept no answer: the
+recorded lists send both.
 
 ### The discovery lists
 
@@ -235,9 +261,10 @@ record's own id. `fiscalperiod/create.json` answers `success` and `message` alon
 `"Payment order created"` without an `insertId`.
 
 Probe: 2026-10-23, 2026-10-24, 2026-10-27 and 2026-10-28, `POST journal/create.json`,
+`POST journal/update.json`,
 `POST person/create.json`, `POST order/create.json`, `POST order/update.json`,
-`POST order/update_status.json` and `POST order/payment/create.json`; samples
-`tests/fixtures/journal_create/ok.json`, `tests/fixtures/person_create/ok.json`,
+`POST order/update_status.json` and `POST order/payment/create.json`; samples `tests/fixtures/journal_create/ok.json`, `tests/fixtures/journal_update/ok.json`,
+`tests/fixtures/person_create/ok.json`,
 `tests/fixtures/order_create/ok.json`, `tests/fixtures/order_update/ok.json`,
 `tests/fixtures/order_update_status/ok.json` and
 `tests/fixtures/order_payment_create/cash_pdf.json`. The fiscal period's, of
@@ -246,13 +273,14 @@ Probe: 2026-10-23, 2026-10-24, 2026-10-27 and 2026-10-28, `POST journal/create.j
 ### An amount with a tax code is gross
 
 A journal entry's `amount` with a `taxId` is the gross amount, VAT included, and an
-order's items' `unitPrice` was read as gross, `baseValue` `GROSS`, although the tax codes'
-components read `calcType` `NET`: the balance of account 1100 after seeding was `0.00` at
+order's items' `unitPrice` was read as gross, `baseValue` `GROSS`, although the components
+of the two tax codes the seed run used, `UN1` and `VN1`, read `calcType` `NET`: the balance of account 1100 after seeding was `0.00` at
 2025-12-31 and `4850.00` at 2026-09-30, the gross reading of the seeded entries exactly.
 
-Probe: 2026-10-23, `GET account/balance` for account 1100 after the seed run, and
-`GET order/read.json`; sample `tests/fixtures/order_read/by_id.json`, every item `GROSS` and
-`NET`. The balances, of `GET account/balance` on 2026-10-23, kept no answer.
+Probe: 2026-10-23, `GET account/balance` for account 1100 after the seed run,
+`GET tax/list.json` and `GET order/read.json`; samples `tests/fixtures/tax_list/default.json`,
+the components of `UN1` and `VN1`, and `tests/fixtures/order_read/by_id.json`, every item
+`GROSS` and `NET`. The balances, of `GET account/balance` on 2026-10-23, kept no answer.
 
 ### Writes are form-encoded UTF-8
 
@@ -297,8 +325,7 @@ Probe: 2026-10-26, `GET journal/list.json?onlyPurchase=true` and
 ### Deleting an order deletes its book entries
 
 `order/delete.json` deletes the order's book entries with it, those booked by hand
-included, and the journal entries its items booked; a payment's order is deleted like any
-other ("1 document deleted").
+included, and the journal entries its items booked.
 
 Probe: 2026-11-17, `POST order/delete.json` and `GET order/bookentry/read.json` for the
 entry booked to the deleted order; sample
@@ -308,13 +335,15 @@ entry booked to the deleted order; sample
 
 `order/payment/create.json` with `type` `PAIN` refuses a date in the past and an order whose
 sender or recipient holds no bank account or whose sender has no BIC; `CASH_PDF` for the
-same order and the same past date is created. After the order's delete,
+same order and the same past date is created. The order with a payment is deleted like any
+other, "1 document deleted". After the order's delete,
 `order/payment/download` answers HTTP 400 with `text/plain`: no file for the payment of a
 deleted order.
 
 Probe: 2026-10-28 UTC, 2026-10-29 CET, `POST order/payment/create.json` for the marked order
-26; samples `tests/fixtures/order_payment_create/pain.json` and
-`tests/fixtures/order_payment_create/cash_pdf.json`. The download after the delete, of
+26 and `POST order/delete.json`; samples `tests/fixtures/order_payment_create/pain.json` and
+`tests/fixtures/order_payment_create/cash_pdf.json`, and `tests/fixtures/order_delete/ok.json`,
+an order's delete of 2026-10-27 with the same answer. The download after the delete, of
 `GET order/payment/download` in the live run of 2026-10-29, kept no answer.
 
 ## A new organisation
