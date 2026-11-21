@@ -235,7 +235,7 @@ def test_get_fiscal_period_without_an_id_reads_the_current_period(
         p["id"]: p for p in recorded_body(fixtures_dir, "fiscalperiod_list", "default")["data"]
     }
     assert listed[FP2025]["isCurrent"] is True, "the list marks it current"
-    assert (result.data.is_current, result.data.current) == (False, False), "observed 2026-11-17"
+    assert (result.data.is_current, result.data.current) == (False, False), "as OBSERVED.md notes"
 
 
 def test_get_fiscal_period_raises_not_found_for_an_unknown_id(
@@ -752,7 +752,7 @@ def test_list_journal_entries_pages_from_start(
 def test_a_page_past_the_end_is_empty_with_upstreams_total(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
-    """Observed on 2026-10-23: HTTP 200, ``data`` empty, ``total`` unchanged."""
+    """HTTP 200, ``data`` empty, ``total`` unchanged (``docs/upstream/OBSERVED.md``)."""
     route = replay_fixture("journal_list", "fp2025_start_15_limit_5")
     result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025, start=15, limit=5)
     assert route.call_count == 1

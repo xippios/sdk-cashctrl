@@ -2091,7 +2091,7 @@ async def create_order_payment_async(
     entry (upstream: "for that see Book entries"), and upstream documents no way to read,
     list or delete it. The order ids come from ``list_orders``, ``status_id`` from the
     ``status`` of the orders' category in ``list_order_categories``. Upstream checks the
-    payment and refuses it naming the fields: ``PAIN`` was refused on 2026-10-29 for a
+    payment and refuses it naming the fields: ``PAIN`` was refused for a
     date in the past and for a sender or recipient without a bank account or BIC, where
     ``CASH_PDF`` for the same order and date was created.
 

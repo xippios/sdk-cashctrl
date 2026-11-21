@@ -93,14 +93,17 @@ The models type the fields no parameter table describes from the recorded answer
 model's docstring names them: the balances of `account/list.json` and its `accountClass`, a
 tax code's components and rates, a journal entry's `rows` with their `fc*`, `ac*` and `dc*`
 amounts, an order's items with `baseValue` and `taxCalcType`, a person's derived names, the
-discovery lists' records and an order document's fields. A field only ever seen as `null`
-or `[]` is kept as upstream sends it.
+order categories with their statuses and book templates, the discovery lists' records and an
+order document's fields. A field only ever seen as `null` or `[]` is kept as upstream sends
+it.
 
-Probe: 2026-10-23, 2026-10-27, 2026-10-28 and 2026-10-29, `GET account/list.json`,
+Probe: 2026-10-23, 2026-10-24, 2026-10-27, 2026-10-28 and 2026-10-29, `GET account/list.json`,
 `GET tax/list.json`, `GET journal/read.json`, `GET order/read.json`,
-`GET person/category/list.json` and `GET order/document/read.json`; samples
+`GET order/category/list.json`, `GET person/category/list.json` and
+`GET order/document/read.json`; samples
 `tests/fixtures/account_list/only_active_finanz.json`, `tests/fixtures/tax_list/default.json`,
 `tests/fixtures/journal_read/collective.json`, `tests/fixtures/order_read/by_id.json`,
+`tests/fixtures/order_category_list/default.json`, recorded 2026-10-24,
 `tests/fixtures/person_category_list/default.json` and
 `tests/fixtures/order_document_read/by_id.json`, recorded 2026-10-28 UTC, 2026-10-29 CET.
 
@@ -111,14 +114,16 @@ The lists of an organisation's defaults answer every record at once: `account/ca
 `person/category/list.json` the four default categories and `person/title/list.json` the
 three default titles; `order/category/list.json` without `type` the six default sales
 categories, `total` equal to the records; and `location/list.json` the one location created
-in the app.
+in the app. `account/category/tree.json` answers the same 38 categories nested, with display
+fields alone and without the list's `accountClass` and `fullName`.
 
 Probe: 2026-10-24 and 2026-10-27, `GET account/category/list.json`,
 `GET person/category/list.json`, `GET person/title/list.json`, `GET order/category/list.json`
 and `GET location/list.json`; samples `tests/fixtures/account_category_list/default.json`,
 `tests/fixtures/person_category_list/default.json`,
 `tests/fixtures/person_title_list/default.json`, `tests/fixtures/order_category_list/default.json`,
-recorded 2026-10-24, and `tests/fixtures/location_list/default.json`.
+recorded 2026-10-24, and `tests/fixtures/location_list/default.json`. The tree, of
+`GET account/category/tree.json` on 2026-10-27, kept no answer.
 
 ### An order's read sends `hash`
 

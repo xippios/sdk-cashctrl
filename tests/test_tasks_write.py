@@ -738,8 +738,8 @@ def test_update_person_refuses_undocumented_stored_keys(
     change: dict[str, Any],
     message: str,
 ) -> None:
-    """Observed 2026-10-24: an address's ``titleId`` is stored and read back, a contact's
-    ``purpose`` was not stored; neither is in its table, so neither can be sent back."""
+    """An address's ``titleId`` is stored and read back, a contact's ``purpose`` is not
+    (``docs/upstream/OBSERVED.md``); neither is in its table, so neither can be sent back."""
     body = recorded_read(fixtures_dir, "person_read", "for_update")
     body["data"][where][0].update(change)
     serve_read(respx_mock, "person/read.json", body)
@@ -2057,7 +2057,7 @@ def test_only_an_entry_booked_by_hand_is_changed_or_deleted(
     kind: str | None,
     shown: str,
 ) -> None:
-    """``MANUAL`` is the type observed for an entry booked by hand (2026-11-17): any other
+    """``MANUAL`` is the type of an entry booked by hand (``docs/upstream/OBSERVED.md``): any other
     type, or none, is refused after the read, since upstream's answer to a write of it was
     never observed. The recorded read ``order_bookentry_read/for_update`` changed in memory.
     """
