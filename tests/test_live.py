@@ -44,9 +44,9 @@ amount moved, the order gone): the test then checks that no journal entry of the
 is left and probes ``order/payment/download`` once with the payment's parameters, a
 binary answer never recorded, asserting only that upstream answered and recording
 which, ``file`` or ``refusal``, as the property ``payment_download`` (``--junitxml``).
-The first run, on 2026-10-29, recorded ``refusal (HTTP 400, text/plain)``: no file is
-served for the payment of a deleted order; whether upstream keeps the payment itself
-cannot be seen, as the API has no payment read or list.
+Upstream serves no file for the payment of a deleted order, a refusal
+(``docs/upstream/OBSERVED.md``); whether it keeps the payment itself cannot be seen, as the
+API has no payment read or list.
 
 ``create_order_book_entry``, ``update_order_book_entry`` and ``delete_order_book_entry``
 are tested on one marked purchase invoice of a seeded vendor
@@ -55,8 +55,8 @@ https://github.com/xippios/sdk-cashctrl/issues/44): created in its category's fi
 status, which books its items, an entry of 50.00 booked on it from the bank, the delete
 tool's refusal of the entry the items booked, the entry's amount updated and read back,
 the entry deleted with the delete tool, then the order. An order's delete takes its
-manual entries (checked once, live, on 2026-11-17: ``order_bookentry_read/order_deleted``),
-so the sweep of marked orders leaves no entry behind, and the ``finally`` deletes the
+manual entries (``docs/upstream/OBSERVED.md``), so the sweep of marked orders leaves
+no entry behind, and the ``finally`` deletes the
 order alone.
 
 The file tasks tested live write into pytest's temporary directory and assert the file's
@@ -67,15 +67,15 @@ exports stand for the four, which share one download path, as
 https://github.com/xippios/sdk-cashctrl/pull/20 decided: ``export_accounts`` and
 ``export_orders`` have no live test of their own.
 One more asks for the document of an order that does not exist and expects
-``NotFoundError`` and no file: CashCtrl answers it with HTTP 404 (observed on
-2026-10-29), which ``classify`` maps to ``NotFoundError`` on a ``read.pdf`` by ``ids``
+``NotFoundError`` and no file: CashCtrl answers it with HTTP 404, which ``classify``
+maps to ``NotFoundError`` on a ``read.pdf`` by ``ids``
 (``docs/upstream/OBSERVED.md``).
 
 The report files (https://github.com/xippios/sdk-cashctrl/issues/45), their ids from the
 tree ``report_tree`` reads once: the balance sheet of 2025 and the system collection
 (``Jahresbericht`` in the seed) each as PDF and as Excel, and the annual report of 2025,
 each download reading the tree first; the payroll collection is refused after that read
-alone, and an element no report has is ``NotFoundError`` (HTTP 404, observed 2026-11-17).
+alone, and an element no report has is ``NotFoundError`` (``docs/upstream/OBSERVED.md``).
 
 The calls of one run: 33 for the reads (19, 9 for the discovery lists and the reports:
 one each, and the tree ``get_report_data`` reads first, 3 for the book entries of an
@@ -362,7 +362,7 @@ REPORT_MEDIA: dict[ReportFormat, str] = {
     "pdf": "application/pdf",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
-"""The media types of a report's PDF and Excel file, charset aside (observed 2026-11-17)."""
+"""A report's PDF and Excel media types, charset aside (``docs/upstream/OBSERVED.md``)."""
 
 
 @pytest.fixture(scope="module")
@@ -433,7 +433,7 @@ async def test_the_payroll_collection_is_refused_before_its_download(
 
 
 async def test_an_unknown_report_is_not_found(demo_org: str, tmp_path: Path) -> None:
-    # Not in the tree, so asked of upstream as given: HTTP 404 (observed 2026-11-17).
+    # Not in the tree, so asked of upstream as given: HTTP 404 (docs/upstream/OBSERVED.md).
     with pytest.raises(NotFoundError) as info:
         await tasks.download_report_async(demo_org, 999999, "pdf", tmp_path / "missing.pdf")
     assert str(info.value).endswith("(GET /api/v1/report/element/download.pdf)")
@@ -686,7 +686,7 @@ async def test_delete_journal_entry_refuses_an_entry_an_order_booked(
 
     The journal of 2026 is listed with ``only_purchase`` ("Flag to only include purchase
     order book entries", ``docs/upstream/journal.md`` line 47): the seeded purchase
-    orders booked two (``journal_list/order_booked``, recorded on 2026-10-26). The first
+    orders booked two (``journal_list/order_booked``, ``docs/upstream/OBSERVED.md``). The first
     entry that names its order (``order_id`` or ``order_book_entry_id``, marks the delete
     refuses) is deleted without ``confirm``: the task reads it and refuses it before any
     preview. Nothing is created or deleted, and the delete wrapper is replaced by one
@@ -858,10 +858,10 @@ async def test_order_create_update_delete(
 PAYMENT_TYPE: PaymentType = "CASH_PDF"
 """The payment the live test creates: ``CASH_PDF``, a PDF, which demo accepts.
 
-``PAIN``, upstream's default, was refused on 2026-10-29 (``order_payment_create/pain``):
-the date in the past, and the sender's bank account and BIC and the recipient's bank
-account not set, which the synthetic books do not hold. ``CASH_PDF`` with the same date
-and order was accepted (``order_payment_create/cash_pdf``).
+``PAIN``, upstream's default, refuses a date in the past and an order whose sender or
+recipient holds no bank account or whose sender has no BIC, which the synthetic books do
+not hold. ``CASH_PDF`` for the same order and date is accepted (``OBSERVED.md`` under
+``docs/upstream/``, ``order_payment_create/pain`` and ``order_payment_create/cash_pdf``).
 """
 
 
@@ -884,10 +884,10 @@ async def test_order_status_payment_delete(
     the payment survived its order's deletion is recorded as the property
     ``payment_download``, ``file`` or ``refusal``.
 
-    Observed on 2026-10-29, the first run: the status set ("Status changed"), the
-    ``CASH_PDF`` payment created ("Payment order created", no ``insertId``), the order
-    deleted with its payment ("1 document deleted"), none of its journal entries left,
-    and the probe answered HTTP 400, ``text/plain``: ``refusal``.
+    What upstream answers each step, the status set, the ``CASH_PDF`` payment created, the
+    order deleted with its payment and none of its journal entries left, and the probe's
+    ``refusal``, is noted in ``docs/upstream/OBSERVED.md``, each note with the probe that
+    showed it.
     """
     purchase_categories = await tasks.list_order_categories_async(demo_org, type="PURCHASE")
     (invoice,) = [

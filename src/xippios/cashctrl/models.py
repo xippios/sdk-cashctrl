@@ -32,14 +32,14 @@ as sent: no recorded message carries a tag.
 
 ``docs/upstream/`` shows no response bodies. Field types come from the create and update
 parameter tables where they describe the field, and from the answers recorded against
-the demo organisation where they do not: on 2026-10-23 and 2026-10-24 for the ledger,
-journal, person and order models, on 2026-10-27 for the category, title, location and
-report models, on 2026-10-28 for the custom field and cost center models, whose records
-``scripts/seed_demo.py --discovery`` created, and on 2026-10-29 for the order document.
-The latter fields are named in each model's docstring as typed from observation. Two
-demo organisations answered on 2026-10-23: the first, a copy of real books, since
-retired, and the synthetic one seeded by ``scripts/seed_demo.py``; the committed
-fixtures come from the synthetic one only. What those answers showed:
+the demo organisation where they do not: the ledger, journal, person and order models,
+the category, title, location and report models, the custom field and cost center
+models, whose records ``scripts/seed_demo.py --discovery`` created, and the order
+document, each answer with its probe in ``docs/upstream/OBSERVED.md``. The fields typed
+so are named in each model's docstring as typed from observation. Two demo
+organisations answered: the first, a copy of real books, since retired, and the
+synthetic one seeded by ``scripts/seed_demo.py``; the committed fixtures come from the
+synthetic one only. What those answers showed:
 
 - Timestamps come as ``YYYY-MM-DD HH:MM:SS.f`` (``2026-10-23 07:06:39.0``) without a zone;
   they are kept as naive ``datetime``.
@@ -1280,10 +1280,10 @@ class _OrderDocumentFields(UpstreamModel):
 class OrderDocument(_OrderDocumentFields):
     """The document of one order as ``order/document/read.json`` returns it (``order.md``).
 
-    How the order is printed and sent, not the order itself. ``docs/upstream/`` shows no
-    response body; typed from the answer recorded on 2026-10-29 for the seeded invoice
-    RE-2026-103 (``tests/fixtures/order_document_read/by_id.json``) and, where they
-    describe a field, from the tables of "Update document" (``header`` and ``footer`` as
+    How the order is printed and sent, not the order itself. ``docs/upstream/`` shows no response
+    body; typed from the answer recorded for the seeded invoice RE-2026-103
+    (``tests/fixtures/order_document_read/by_id.json``, ``docs/upstream/OBSERVED.md``) and, where
+    they describe a field, from the tables of "Update document" (``header`` and ``footer`` as
     HTML, ``custom_reference``, ``file_id``, ``language`` ``DE``, ``EN``, ``FR``, ``IT``,
     ``layout_id``, ``org_bank_account_id``, ``org_location_id``, ``recipient_address_id``,
     ``recipient_bank_account_id``, ``is_display_item_gross``, ``is_file_replacement``) and
@@ -1329,7 +1329,7 @@ class OrderBookEntry(UpstreamModel):
     account to the category's), ``amount``, ``currency_id``, ``currency_rate``, ``date``
     (``YYYY-MM-DD``), ``description``, ``reference``, ``tax_id`` and ``template_id``.
 
-    Typed from observation on 2026-10-27, the entry a seeded purchase order booked
+    Typed from observation (``docs/upstream/OBSERVED.md``), the entry a seeded purchase order booked
     (``tests/fixtures/order_bookentry_list/booked.json``): ``id``, ``order_id``,
     ``type`` (``GENERATED`` for one booked from the items), ``debit_id`` and
     ``debit_name``, ``credit_id`` and ``credit_name`` (the account's number and
@@ -1384,7 +1384,7 @@ class OrderCategoryStatus(UpstreamModel):
     (localised, ``<values><de>Entwurf</de>...</values>``), ``action_id`` (what follows
     the status, ``CATEGORY_9`` or ``BOOK_TEMPLATE_3``; empty for none), ``is_add_stock``,
     ``is_book`` (whether orders in this status book journal entries), ``is_closed`` and
-    ``is_remove_stock``. Typed from observation on 2026-10-24: ``id`` (the id
+    ``is_remove_stock``. Typed from observation (``docs/upstream/OBSERVED.md``): ``id`` (the id
     ``create_order`` takes as ``status_id``), ``category_id``, ``pos``, the twins without
     ``is_`` and the ``created*``/``last_updated*`` bookkeeping fields; the first status of
     the invoice category came without ``created`` and with an empty ``createdBy``.
@@ -1413,9 +1413,9 @@ class OrderCategoryStatus(UpstreamModel):
 class OrderBookTemplate(UpstreamModel):
     """One book template of an order category, an item of ``OrderCategory.book_templates``.
 
-    Typed from the ``bookTemplates`` table of ``order/category/create.json``:
-    ``account_id`` (typically a bank account for a payment template), ``name``
-    (localised), ``is_allow_tax`` and ``tax_id``. Typed from observation on 2026-10-24:
+    Typed from the ``bookTemplates`` table of ``order/category/create.json``: ``account_id``
+    (typically a bank account for a payment template), ``name`` (localised),
+    ``is_allow_tax`` and ``tax_id``. Typed from observation (``docs/upstream/OBSERVED.md``):
     ``id``, ``category_id``, ``pos``, the twin ``allow_tax``, ``text`` and ``value`` (only
     seen ``null``) and the ``created*``/``last_updated*`` bookkeeping fields.
     """
@@ -1455,8 +1455,8 @@ class OrderCategory(UpstreamModel):
     ``null``), ``rounding_id``, ``sent_status_id``, ``sequence_nr_id`` and ``type``
     (``SALES``, ``PURCHASE``).
 
-    Typed from observation on 2026-10-24 against the demo organisation (CashCtrl's six
-    default sales categories): the answer is ``{"total": ..., "data": [...]}``; ``id``,
+    Typed from observation (``docs/upstream/OBSERVED.md``) against the demo organisation (CashCtrl's
+    six default sales categories): the answer is ``{"total": ..., "data": [...]}``; ``id``,
     ``name`` (seen equal to ``name_singular``), ``pos``, ``default_status_id``,
     ``sequence_nr_id_inherited``, ``template_id``, ``layout_name`` (localised),
     ``value`` (the id as text), the twins without ``is_`` and ``is_free`` with its twin,
@@ -1544,13 +1544,13 @@ class CustomField(UpstreamModel):
     the custom field group") and ``values`` (TEXT holding a JSON array,
     ``["red","green","blue"]``, the choices of a ``COMBOBOX``).
 
-    Typed from observation on 2026-10-28 (``tests/fixtures/customfield_list/person.json``,
-    the one custom field ``scripts/seed_demo.py --discovery`` created, a ``TEXT`` field on
-    persons): ``id``; ``field_id`` (``customField1``, the key of ``custom``);
-    ``default_variable_name`` (``$customField1``), which ``variable_name`` repeats when
-    none was set; ``name`` and ``column_name``, both the row label; ``pos`` (``1``); the
-    twins ``multi`` and ``inactive``; and the ``created*``/``last_updated*`` bookkeeping
-    fields. Only seen ``null`` and kept as sent: ``category_id``, ``variable_id`` and
+    Typed from observation (``docs/upstream/OBSERVED.md``,
+    ``tests/fixtures/customfield_list/person.json``, the one custom field
+    ``scripts/seed_demo.py --discovery`` created, a ``TEXT`` field on persons): ``id``; ``field_id``
+    (``customField1``, the key of ``custom``); ``default_variable_name`` (``$customField1``), which
+    ``variable_name`` repeats when none was set; ``name`` and ``column_name``, both the row label;
+    ``pos`` (``1``); the twins ``multi`` and ``inactive``; and the ``created*``/``last_updated*``
+    bookkeeping fields. Only seen ``null`` and kept as sent: ``category_id``, ``variable_id`` and
     ``group_name``.
     """
 
@@ -1591,8 +1591,8 @@ class PersonCategory(UpstreamModel):
     Typed from the tables of ``person/category/create.json`` and ``update.json``:
     ``name`` (localised, ``<values><de>Kunden</de><en>Customers</en>...</values>``),
     ``discount_percentage`` (for orders), ``parent_id`` and ``sequence_nr_id`` (the
-    sequence that numbers its persons, inherited from the parent when empty). Typed from
-    observation on 2026-10-27 (CashCtrl's four default categories, all at the top level):
+    sequence that numbers its persons, inherited from the parent when empty). Typed from observation
+    (``docs/upstream/OBSERVED.md``, CashCtrl's four default categories, all at the top level):
     ``id`` and the ``created*``/``last_updated*`` bookkeeping fields;
     ``sequence_nr_id_inherited``, ``discount_inherited`` and ``discount_effective`` were
     only seen ``null`` and are kept as sent.
@@ -1621,8 +1621,8 @@ class PersonTitle(UpstreamModel):
     and ``update_person`` take as ``title_id``. Typed from the tables of
     ``person/title/create.json`` and ``update.json``: ``name`` (the title itself,
     localised, ``<values><de>Herr</de><en>Mr.</en>...</values>``), ``gender`` (``MALE``
-    or ``FEMALE``, a string) and ``sentence`` (the letter salutation, localised). Typed
-    from observation on 2026-10-27 (CashCtrl's three default titles): ``id``, ``value``
+    or ``FEMALE``, a string) and ``sentence`` (the letter salutation, localised). Typed from
+    observation (``docs/upstream/OBSERVED.md``, CashCtrl's three default titles): ``id``, ``value``
     (the id as text), the ``created*``/``last_updated*`` bookkeeping fields, and
     ``text``, only seen ``null`` and kept as sent. The title without a ``gender`` had no
     ``sentence``.
@@ -1649,8 +1649,8 @@ class AccountCategory(UpstreamModel):
     ``<values><de>...</de></values>``; the five top-level categories' plain,
     ``Assets``), ``number`` (optional text, "Must be numeric", used for sorting: ``"1"``,
     ``"10"``, ``"100"``; every recorded category has one) and ``parent_id`` (``None`` at
-    the top level). Typed from
-    observation on 2026-10-27 (CashCtrl's default chart, 38 categories): ``id``,
+    the top level). Typed from observation (``docs/upstream/OBSERVED.md``, CashCtrl's
+    default chart, 38 categories): ``id``,
     ``account_class`` (seen: ``ASSET``, ``LIABILITY``, ``EXPENSE``, ``REVENUE``,
     ``BALANCE``, one per top-level category and inherited below it), ``full_name`` (the
     number and the name, ``"1 Assets"``), ``system`` with its ``is_system`` twin (true
@@ -1658,9 +1658,9 @@ class AccountCategory(UpstreamModel):
     bookkeeping fields.
 
     ``account/category/tree.json`` answers the same 38 categories nested, each child list
-    under ``data``, and its ``total`` counts the five top-level ones; it adds only
-    display fields (``text``, the name in one language; ``cls``; ``leaf``) and lacks
-    ``account_class`` and ``full_name`` (compared on 2026-10-27), so the flat list is
+    under ``data``, and its ``total`` counts the five top-level ones; it adds only display
+    fields (``text``, the name in one language; ``cls``; ``leaf``) and lacks
+    ``account_class`` and ``full_name`` (``docs/upstream/OBSERVED.md``), so the flat list is
     the one wrapped.
     """
 
@@ -1692,12 +1692,12 @@ class CostCenter(UpstreamModel):
     a list of ``{fileId}``, which the list does not send (it sends ``attachment_count``)
     and which is kept, empty, should it come.
 
-    Typed from observation on 2026-10-28 (``tests/fixtures/account_costcenter_list/
-    default.json``, the one cost centre ``scripts/seed_demo.py --discovery`` created):
-    ``id``; the balances of the fiscal period asked for (``fiscalPeriodId``, "from which
-    we retrieve the balances"; without it the current one, assumed, since upstream
-    documents no default) as ``opening_amount`` and ``end_amount``, as ``Account`` has
-    them (``0`` seen, no amount allocated);
+    Typed from observation (``docs/upstream/OBSERVED.md``,
+    ``tests/fixtures/account_costcenter_list/default.json``, the one cost centre
+    ``scripts/seed_demo.py --discovery`` created): ``id``; the balances of the fiscal period
+    asked for (``fiscalPeriodId``, "from which we retrieve the balances"; without it the
+    current one, assumed, since upstream documents no default) as ``opening_amount`` and
+    ``end_amount``, as ``Account`` has them (``0`` seen, no amount allocated);
     ``attachment_count``; the twin ``inactive``; and the ``created*``/``last_updated*``
     bookkeeping fields. Only seen ``null`` and kept as sent: ``category_name`` and
     ``target_display``.
@@ -1774,9 +1774,9 @@ class Location(_LocationFields):
     string), ``org_name`` (the company name), ``address``, ``zip``, ``city``, ``canton``,
     ``country`` (ISO 3166 alpha-3, ``CHE``), ``email``, ``phone_main``,
     ``phone_salary_cert``, ``url``, ``vat_uid``, ``bur_nr``, ``footer`` (HTML),
-    ``logo_file_id``, ``bank_account_id`` and ``is_inactive``. Typed from observation on
-    2026-10-27 (the demo organisation's one location, created by hand with placeholder
-    data, ``docs/demo-org.md``): ``id``, ``street_name`` and ``street_number``
+    ``logo_file_id``, ``bank_account_id`` and ``is_inactive``. Typed from observation
+    (``docs/upstream/OBSERVED.md``, the demo organisation's one location, created by hand with
+    placeholder data, ``docs/demo-org.md``): ``id``, ``street_name`` and ``street_number``
     (``address`` split), ``full_address`` (the company name and the address as printed,
     a line each), ``text`` (the name) and ``value`` (the id as text),
     ``list_cls``, ``attachments`` (only seen empty, kept as sent), the twin ``inactive``
@@ -1805,9 +1805,9 @@ class HistoryEntry(UpstreamModel):
     """One entry of the history, the audit log, an entry of ``history/list.json``.
 
     ``docs/upstream/common.md``, History, documents the list's parameters only
-    (``orderId``, ``personId``, ``statementId`` among them). Typed from observation on
-    2026-10-27 (``tests/fixtures/history_list/order.json``, a seeded order's): ``id``,
-    ``created`` (when the change was made) and ``created_by`` (who made it: an API user,
+    (``orderId``, ``personId``, ``statementId`` among them). Typed from observation
+    (``docs/upstream/OBSERVED.md``, ``tests/fixtures/history_list/order.json``, a seeded order's):
+    ``id``, ``created`` (when the change was made) and ``created_by`` (who made it: an API user,
     which upstream names as ``API:`` and the first four characters of its key, shows as
     ``API:REDACTED``, as on every record), ``type`` (the module, ``ORDER`` seen),
     ``change_type`` (``CREATE`` and ``STATUS`` in the fixture, and ``UPDATE``,
@@ -1837,8 +1837,8 @@ class ReportTreeNode(UpstreamModel):
     which are grouped together and form one document"; "A report element is the actual
     report, for example the balance sheet or profit and loss statement." The answer is
     ``{"total": ..., "data": [...]}``, ``total`` counting the top-level nodes. The
-    documentation describes no field; typed from observation on 2026-10-27 (CashCtrl's
-    default reports: six collections and two elements at the top level, 44 nodes, every
+    documentation describes no field; typed from observation (``docs/upstream/OBSERVED.md``,
+    CashCtrl's default reports: six collections and two elements at the top level, 44 nodes, every
     field but ``data`` on every node).
 
     ``id`` is the tree's own text key (``collection-1``, ``element-1``), which no other

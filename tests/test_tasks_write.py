@@ -269,8 +269,9 @@ def test_a_refused_create_names_the_field(replay_fixture: ReplayFixture) -> None
     assert raised.value.errors == [
         FieldError(field="debitId", message="This field cannot be empty.")
     ]
-    assert (
-        str(raised.value) == "CashCtrl rejected the request: debitId: This field cannot be empty."
+    assert str(raised.value) == (
+        "CashCtrl rejected the request: debitId: This field cannot be empty. "
+        "(POST /api/v1/journal/create.json)"
     )
 
 
@@ -532,6 +533,10 @@ def test_deleting_a_gone_entry_is_refused(replay_fixture: ReplayFixture) -> None
         tasks_write.delete_journal_entry(DEMO, JOURNAL_ENTRY, confirm=True)
     assert raised.value.errors == []
     assert raised.value.upstream_message == "This book entry does not exist."
+    assert str(raised.value) == (
+        "CashCtrl rejected the request: This book entry does not exist. "
+        "(POST /api/v1/journal/delete.json)"
+    )
 
 
 @pytest.mark.parametrize("confirm", [False, True])
@@ -592,7 +597,7 @@ def test_a_preview_refuses_an_entry_an_order_booked(
     path: str,
     call: Callable[[], Any],
 ) -> None:
-    """The recorded read of an entry an order booked (2026-10-26), unchanged: refused.
+    """The recorded read of an entry an order booked, ``journal_read/order_booked``: refused.
 
     ``orderId`` is set, ``attachmentCount`` is ``null``; without ``confirm`` the delete's
     and the update's read refuses it, and nothing is written.
@@ -733,8 +738,8 @@ def test_update_person_refuses_undocumented_stored_keys(
     change: dict[str, Any],
     message: str,
 ) -> None:
-    """Observed 2026-10-24: an address's ``titleId`` is stored and read back, a contact's
-    ``purpose`` was not stored; neither is in its table, so neither can be sent back."""
+    """An address's ``titleId`` is stored and read back, a contact's ``purpose`` is not
+    (``docs/upstream/OBSERVED.md``); neither is in its table, so neither can be sent back."""
     body = recorded_read(fixtures_dir, "person_read", "for_update")
     body["data"][where][0].update(change)
     serve_read(respx_mock, "person/read.json", body)
@@ -1561,7 +1566,7 @@ def test_create_order_payment_with_confirm_replays_the_recorded_payment(
 def test_a_refused_payment_names_the_date_and_the_bank_accounts(
     replay_fixture: ReplayFixture, fixtures_dir: Path
 ) -> None:
-    """``PAIN`` for the order 26 on 2026-10-29: refused, the fields and messages named."""
+    """``PAIN`` for the order 26: refused, its fields and messages named (``OBSERVED.md``)."""
     preview = preview_of(tasks_write.create_order_payment(DEMO, PAY_DAY, [PAID], type="PAIN"))
     recorded = recorded_body(fixtures_dir, "order_payment_create", "pain")
     assert list(preview.payload.items()) == recorded
@@ -1577,6 +1582,9 @@ def test_a_refused_payment_names_the_date_and_the_bank_accounts(
     ]
     assert str(refused.value).startswith(
         "CashCtrl rejected the request: date: The date cannot be in the past.; "
+    )
+    assert str(refused.value).endswith(
+        "Sender: BIC must be set. (POST /api/v1/order/payment/create.json)"
     )
 
 
@@ -2023,7 +2031,7 @@ def test_an_orders_delete_takes_its_manual_entries(
     """The check of https://github.com/xippios/sdk-cashctrl/issues/44, made once, live.
 
     The entry 150, booked by the create tool on the marked order 70, read after the
-    order's delete on 2026-11-17: upstream answers that it does not exist.
+    order's delete: upstream answers that it does not exist (``docs/upstream/OBSERVED.md``).
     """
     replay_fixture("order_bookentry_read", "order_deleted")
     write = respx_mock.post(url__regex=rf"{re.escape(BASE)}/order/bookentry/.*")
@@ -2049,7 +2057,7 @@ def test_only_an_entry_booked_by_hand_is_changed_or_deleted(
     kind: str | None,
     shown: str,
 ) -> None:
-    """``MANUAL`` is the type observed for an entry booked by hand (2026-11-17): any other
+    """``MANUAL`` is the type of an entry booked by hand (``docs/upstream/OBSERVED.md``): any other
     type, or none, is refused after the read, since upstream's answer to a write of it was
     never observed. The recorded read ``order_bookentry_read/for_update`` changed in memory.
     """
@@ -2453,7 +2461,7 @@ async def test_a_refusal_through_the_write_server(
     )
     assert rejected == (
         "error: RequestRejected: CashCtrl rejected the request: "
-        "debitId: This field cannot be empty."
+        "debitId: This field cannot be empty. (POST /api/v1/journal/create.json)"
     )
 
 

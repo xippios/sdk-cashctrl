@@ -24,6 +24,7 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 import respx
+from xippios.core.testing import load_fixture
 
 from xippios.cashctrl import __version__
 
@@ -640,12 +641,26 @@ def test_2025_that_type_earliest_would_not_create_is_refused(
     assert "type EARLIEST would not create 2025" in err
 
 
-def test_a_wrong_key_stops_at_the_first_read(capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_wrong_key_stops_at_the_first_read(
+    capsys: pytest.CaptureFixture[str], fixtures_dir: Path
+) -> None:
+    """The recorded 401 of a wrong key at the seeder's first read, ``location/list.json``.
+
+    NOT RECORDED there: ``account_list/wrong_key``'s answer served at another URL, for a
+    state upstream answers alike behind one gateway (conventions §10, kind 3): CashCtrl
+    authenticates every request by its key (``docs/upstream/authentication.md``), lists
+    the 401 for the API as a whole (``docs/upstream/error-handling.md``) and answers it
+    with a page of its server, as it answers a 404 at five file operations
+    (``docs/upstream/OBSERVED.md``). Changed in memory, its body names the organisation's
+    host, a form upstream was not seen to send (conventions §10, kind 4), so that the
+    seeder is seen never to print the body.
+    """
+    answer = load_fixture(fixtures_dir / "account_list" / "wrong_key.json").response
+    headers = [(name, value) for name, value in answer.headers if name.lower() != "content-length"]
+    body = f"{answer.body} ({SUB}.cashctrl.com)".encode()
     with respx.mock(assert_all_called=False) as router:
-        route = router.route(host=f"{SUB}.cashctrl.com")
-        route.mock(
-            return_value=httpx.Response(401, text=f"<html>{SUB}.cashctrl.com: unauthorized</html>")
-        )
+        route = router.get(host=f"{SUB}.cashctrl.com", path="/api/v1/location/list.json")
+        route.mock(return_value=httpx.Response(answer.status, headers=headers, content=body))
         status, out, err = run(capsys, "--apply", "--yes")
         assert route.call_count == 1
     assert status == 1

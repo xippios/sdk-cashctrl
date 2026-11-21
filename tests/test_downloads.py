@@ -54,7 +54,7 @@ BODIES: dict[str, tuple[bytes, str]] = {
 }
 """A made-up body per format, under the content type upstream is assumed to send."""
 JSON_UTF8 = "application/json;charset=utf-8"
-"""The content type of every ``.json`` answer recorded since 2026-10-23."""
+"""The content type of every ``.json`` answer recorded (``docs/upstream/OBSERVED.md``)."""
 
 EXPORTS: dict[str, tuple[Callable[..., typing.Any], Callable[..., typing.Any], str]] = {
     "export_journal_entries": (tasks.export_journal_entries, tasks.list_journal_entries, "journal"),
@@ -521,6 +521,10 @@ def test_a_refusal_with_a_message_on_an_export_is_no_absence(
     with pytest.raises(RequestRejected) as info:
         tasks.export_persons(DEMO, "xlsx", tmp_path / "persons.xlsx")
     assert info.value.upstream_message == "Not allowed."
+    assert (
+        str(info.value)
+        == "CashCtrl rejected the request: Not allowed. (GET /api/v1/person/list.xlsx)"
+    )
     assert files(tmp_path) == []
 
 
@@ -530,10 +534,17 @@ def test_a_refusal_with_a_message_on_an_export_is_no_absence(
 def test_json_that_is_no_refusal_is_raised_too(
     respx_mock: respx.MockRouter, tmp_path: Path, body: bytes
 ) -> None:
-    """Whatever JSON stands in for a file, it is never kept as one."""
+    """Whatever JSON stands in for a file, it is never kept as one.
+
+    The error names the request as core's ``request_description`` gives it (conventions §5).
+    """
     mount(respx_mock, "account/list.pdf", body, JSON_UTF8)
-    with pytest.raises(ValidationError, match="neither a file nor a refusal"):
+    with pytest.raises(ValidationError, match="neither a file nor a refusal") as info:
         tasks.export_accounts(DEMO, "pdf", tmp_path / "accounts.pdf")
+    assert str(info.value) == (
+        "CashCtrl: the answer is JSON that is neither a file nor a refusal; nothing was written "
+        "(GET /api/v1/account/list.pdf)"
+    )
     assert files(tmp_path) == []
 
 
@@ -589,7 +600,7 @@ async def test_the_async_twins_are_the_tasks(respx_mock: respx.MockRouter, tmp_p
 FP2025 = 2
 """The demo organisation's fiscal period 2025."""
 REPORT_MEDIA = {"pdf": "application/pdf;charset=UTF-8", "xlsx": f"{XLSX};charset=UTF-8"}
-"""The content types upstream sent for a report's PDF and Excel file (observed 2026-11-17)."""
+"""The content types of a report's PDF and Excel file (``docs/upstream/OBSERVED.md``)."""
 TREE = f"{BASE}/report/tree.json"
 RULE = (
     "payroll and people reports, every type that starts with SALARY_ or contains PERSON, "
@@ -846,7 +857,7 @@ def test_every_download_reads_the_tree_as_upstream_lists_it_then(
 def test_the_annual_report_is_refused_when_its_collection_holds_a_refused_report(
     respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path
 ) -> None:
-    """The annual report is the system collection's PDF: the same file (observed 2026-11-17)."""
+    """The annual report is the system collection's PDF (``docs/upstream/OBSERVED.md``)."""
     tree = mount_tree(respx_mock, fixtures_dir, {"element-2": {"type": "SALARY_LIST"}})
     route = mount_report(respx_mock, "report/collection/download_annualreport.pdf", "pdf")
     with pytest.raises(InvalidRequestError) as refused:

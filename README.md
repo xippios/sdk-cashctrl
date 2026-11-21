@@ -248,10 +248,10 @@ write server only: never by the read server, never as an HTTP route.
   `cashctrl_list_order_book_entries` (the `id`, not the `nr`). A journal `associate_id` is a person's id; create a new
   person with `cashctrl_create_person` first (upstream would create one from a name,
   which the tools do not send).
-- CashCtrl checks every write and refuses with the fields it objects to, e.g.
-  `error: RequestRejected: CashCtrl rejected the request: debitId: This field cannot be
-  empty.`; a refused write changed nothing. A write that meets a server error or a
-  timeout is never repeated (sdk-core ADR-0011): read back before sending it again.
+- CashCtrl checks every write and refuses with the fields it objects to, e.g. `error:
+  RequestRejected: CashCtrl rejected the request: debitId: This field cannot be empty.
+  (POST /api/v1/journal/create.json)`; a refused write changed nothing. A write that meets a
+  server error or a timeout is never repeated (sdk-core ADR-0011): read back before sending it again.
 
 ```python
 from datetime import date

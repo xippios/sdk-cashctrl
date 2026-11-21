@@ -44,14 +44,16 @@ DOCUMENTED_REJECTION = {
 }
 
 
-def response(path: str, status: int, body: bytes, headers: dict[str, str]) -> httpx.Response:
+def response(
+    path: str, status: int, body: bytes, headers: dict[str, str], method: str = "GET"
+) -> httpx.Response:
     return httpx.Response(
-        status, headers=headers, content=body, request=httpx.Request("GET", f"{BASE}{path}")
+        status, headers=headers, content=body, request=httpx.Request(method, f"{BASE}{path}")
     )
 
 
-def refusal(path: str, payload: dict[str, object]) -> httpx.Response:
-    return response(path, 200, json.dumps(payload).encode(), JSON)
+def refusal(path: str, payload: dict[str, object], method: str = "GET") -> httpx.Response:
+    return response(path, 200, json.dumps(payload).encode(), JSON, method)
 
 
 def recorded(fixtures_dir: Path, endpoint: str, case: str) -> httpx.Response:
@@ -60,7 +62,7 @@ def recorded(fixtures_dir: Path, endpoint: str, case: str) -> httpx.Response:
 
 
 def test_the_documented_rejection_names_every_field() -> None:
-    error = classify(refusal("/journal/create.json", DOCUMENTED_REJECTION))
+    error = classify(refusal("/journal/create.json", DOCUMENTED_REJECTION, "POST"))
     assert isinstance(error, RequestRejected)
     assert error.errors == [
         FieldError(field="debitId", message="This field cannot be empty."),
@@ -70,16 +72,29 @@ def test_the_documented_rejection_names_every_field() -> None:
     assert error.upstream_message is None
     assert str(error) == (
         "CashCtrl rejected the request: debitId: This field cannot be empty.; "
-        "creditId: This field cannot be empty.; amount: This field cannot be empty."
+        "creditId: This field cannot be empty.; amount: This field cannot be empty. "
+        "(POST /api/v1/journal/create.json)"
     )
     assert error.source == "cashctrl"
 
 
 def test_a_rejection_is_an_invalid_request_for_both_adapters() -> None:
-    error = RequestRejected([FieldError(field=None, message="Nope.")])
+    error = RequestRejected(
+        [FieldError(field=None, message="Nope.")], request="POST /api/v1/journal/create.json"
+    )
     assert isinstance(error, InvalidRequestError)
     assert status_for(error) == 422
-    assert error_to_text(error) == "error: RequestRejected: CashCtrl rejected the request: Nope."
+    assert error_to_text(error) == (
+        "error: RequestRejected: CashCtrl rejected the request: Nope. "
+        "(POST /api/v1/journal/create.json)"
+    )
+
+
+def test_a_rejection_built_without_its_request_names_none() -> None:
+    """Built by a caller, with no answer to name the request from: the reasons alone."""
+    assert str(RequestRejected([FieldError(field=None, message="Nope.")])) == (
+        "CashCtrl rejected the request: Nope."
+    )
     assert str(RequestRejected()) == "CashCtrl rejected the request: no reason given"
 
 
@@ -104,6 +119,31 @@ def test_each_error_classify_words_names_the_request_by_cores_description(
     assert isinstance(error, NotFoundError)
     assert str(error).endswith(f" ({request_description(answer)})")
     assert request_description(answer).startswith("GET /api/v1/")
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "case"),
+    [
+        ("account_read", "missing_id"),
+        ("journal_create", "rejected"),
+        ("journal_delete", "already_deleted"),
+        ("order_payment_create", "pain"),
+    ],
+)
+def test_each_rejection_names_the_request_by_cores_description(
+    fixtures_dir: Path, endpoint: str, case: str
+) -> None:
+    """Conventions §5: a refusal at HTTP 200 names its request as the two errors above do.
+
+    The method and the path as core's ``request_description`` gives them, after the
+    reasons; never the host or the query.
+    """
+    answer = recorded(fixtures_dir, endpoint, case)
+    error = classify(answer)
+    assert isinstance(error, RequestRejected)
+    assert str(error).endswith(f" ({request_description(answer)})")
+    assert request_description(answer).startswith(("GET /api/v1/", "POST /api/v1/"))
+    assert answer.request.url.host not in str(error)
 
 
 def test_the_observed_unknown_id_is_not_found(fixtures_dir: Path) -> None:
@@ -131,7 +171,9 @@ def test_the_observed_missing_id_is_a_rejection_with_a_message(fixtures_dir: Pat
     assert isinstance(error, RequestRejected)
     assert error.errors == []
     assert error.upstream_message == "ID missing."
-    assert str(error) == "CashCtrl rejected the request: ID missing."
+    assert (
+        str(error) == "CashCtrl rejected the request: ID missing. (GET /api/v1/account/read.json)"
+    )
 
 
 def test_a_field_list_on_read_by_id_is_a_rejection_not_absence() -> None:
@@ -202,9 +244,11 @@ def test_anything_but_a_read_by_id_is_a_rejection(path: str) -> None:
 
 
 def test_a_refusal_is_classified_whatever_the_content_type() -> None:
-    """NOT RECORDED: a refusal composed in the recorded shape (conventions §10, kind 2).
+    """NOT RECORDED: a refusal composed in the shape ``account_read/missing_id`` recorded, a
+    documented error (conventions §10, kind 2).
 
-    Served under a content type upstream was not seen to send with it (kind 4's form).
+    Its content type, ``text/html``, is an input of the test, not an answer from CashCtrl:
+    ``classify`` must not read it, and a byte pre-check and a JSON parse decide.
     """
     body = b'{"success":false,"errorMessage":"Nope."}'
     error = classify(response("/account/delete.json", 200, body, {"content-type": "text/html"}))
@@ -482,10 +526,14 @@ async def test_a_429_is_a_rate_limit_error_with_retry_after(
 
     CashCtrl documents the 429 and nothing about its window (``error-handling.md``); 120
     seconds is beyond the retry policy's backoff, so the client raises at once. NOT
-    RECORDED: the documented 429, composed with a ``Retry-After`` (conventions §10, kind 2).
+    RECORDED: the documented 429, composed as CashCtrl's status pages were recorded,
+    ``CashCtrl - 401 Unauthorized`` and ``CashCtrl - 404 Not Found`` under
+    ``text/plain;charset=utf-8`` (conventions §10, kind 2). Its ``Retry-After`` is an input
+    of the test, not an answer from CashCtrl.
     """
     route = respx_mock.get(f"{BASE}/account/list.json")
-    route.respond(429, headers={"Retry-After": "120"}, text="Too Many Requests")
+    plain = {"Retry-After": "120", "content-type": "text/plain;charset=utf-8"}
+    route.respond(429, headers=plain, text="CashCtrl - 429 Too Many Requests")
     error = await raised("/account/list.json")
     assert isinstance(error, RateLimitError)
     assert error.retry_after == 120.0

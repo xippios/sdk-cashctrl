@@ -13,9 +13,9 @@ Core writes a 2xx body unread, so ``classify`` sees its status and headers only,
 CashCtrl refuses with HTTP 200 and ``"success": false``: a refused download
 would be written as the file. ``download`` therefore streams to a temporary file beside
 ``dest`` and reads the answer's ``Content-Type`` before the file becomes ``dest``. JSON
-(``application/json``, with or without a charset; every ``.json`` answer recorded since
-2026-10-23 is ``application/json;charset=utf-8``) is a refusal: its first ``BODY_LIMIT``
-bytes go through ``classify`` as an answer of the same request would, which raises
+(``application/json``, with or without a charset; every ``.json`` answer recorded is
+``application/json;charset=utf-8``, ``docs/upstream/OBSERVED.md``) is a refusal: its first
+``BODY_LIMIT`` bytes go through ``classify`` as an answer of the same request would, which raises
 ``RequestRejected``, or ``NotFoundError`` for a read by ids (``classify``), the
 temporary file is removed and ``dest`` is left as it was. JSON that is no refusal
 CashCtrl documents raises ``ValidationError`` the same way. Any other content type is
@@ -35,6 +35,7 @@ from xippios.core import (
     InvalidRequestError,
     ValidationError,
     XippiosError,
+    request_description,
 )
 
 from xippios.cashctrl._client import NEUTRAL_HOST, SOURCE, classify, client_for
@@ -79,8 +80,8 @@ def _refusal(
     if error is not None:
         return error
     return ValidationError(
-        f"{SOURCE}: {endpoint} answered JSON that is neither a file nor a refusal; "
-        "nothing was written",
+        "CashCtrl: the answer is JSON that is neither a file nor a refusal; nothing was "
+        f"written ({request_description(answer)})",
         raw=head[:BODY_LIMIT].decode("utf-8", errors="replace"),
         source=SOURCE,
     )

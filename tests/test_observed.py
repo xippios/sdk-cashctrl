@@ -5,14 +5,16 @@ script neither writes nor checks and ``FETCHED.md`` lists in a row of its own, a
 each note its evidence: the probe that showed it, its date, its operation and its sample, a
 recording under ``tests/fixtures/``, or its request where the probe kept no answer. A note
 here is a ``###`` section, and its last paragraph, ``Probe:``, names them. The package's
-own text, ``CLAUDE.md``, ``README.md``, ``docs/demo-org.md``, ``docs/write-tools.md`` and
-every module under ``src/xippios/cashctrl/``, keeps what its reader needs and no probe: the
-probes stand in ``OBSERVED.md`` alone.
+own text, ``CLAUDE.md``, ``README.md``, ``docs/demo-org.md``, ``docs/write-tools.md``,
+every module under ``src/xippios/cashctrl/`` and every test module but this one, keeps what
+its reader needs and no probe: the probes stand in ``OBSERVED.md`` alone.
 """
 
 import json
 import re
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM = ROOT / "docs" / "upstream"
@@ -30,13 +32,17 @@ ENDPOINT_BLOCK = re.compile(
     re.MULTILINE,
 )
 PROBE = re.compile(
-    r"\b(?:observed|verified|verification|seen|probed)\b(?:(?!\.\s).){0,60}?\b20\d\d-\d\d-\d\d\b"
-    r"|\b20\d\d-\d\d-\d\d\b(?:(?!\.\s).){0,25}?\b(?:observed|seen)\b"
+    r"\b(?:observed|observation|verified|verification|seen|probed|compared|answered|refused"
+    r"|recorded since)\b(?:(?!\.\s).){0,60}?\b20\d\d-\d\d-\d\d\b"
+    r"|(?<![`\"'])\b20\d\d-\d\d-\d\d\b(?![`\"'])(?:(?!\.\s).){0,25}?"
+    r"\b(?:observed|seen|answered|answers|refused|refuses|rejected|rejects|returned|returns)\b"
     r"|\bobserved in [A-Z][a-z]+ 20\d\d\b"
     r"|\((?:observed|verified)\b",
     re.IGNORECASE,
 )
-"""A probe in prose: observed, verified or seen with its date, or a citation ``(observed``."""
+"""A probe in prose: what upstream did, was seen, compared, answered or refused, with its date
+before or after the verb, or a citation ``(observed``. A fixture's provenance, recorded on a
+date, is none, nor a date in quotes or a code span, a value sent or compared."""
 RULES = [
     ROOT / "CLAUDE.md",
     ROOT / "README.md",
@@ -46,6 +52,9 @@ RULES = [
 """The package's documents, which point to ``OBSERVED.md`` and keep no probe."""
 SCRIPTS = [ROOT / "scripts" / "record_fixture.py"]
 """The scripts whose text states what upstream does, which keep no probe either."""
+TESTS = sorted(path for path in (ROOT / "tests").glob("*.py") if path.name != Path(__file__).name)
+"""The test modules but this one, which names the probes' words: their docstrings and comments
+say what upstream answers and keep no probe either; a finding goes to ``OBSERVED.md``."""
 WRAPPED = re.compile(r'\A"""``(GET|POST) /api/v1/([^`\s]+)``')
 """A wrapper module's first line: the operation it wraps."""
 
@@ -126,12 +135,40 @@ def test_the_documents_point_to_the_notes() -> None:
         assert "docs/upstream/OBSERVED.md" in path.read_text(encoding="utf-8"), path.name
 
 
+@pytest.mark.parametrize(
+    ("text", "probe"),
+    [
+        ("Typed from observation on 2026-10-27, the entry a seeded order booked", True),
+        ("``PAIN`` was refused on 2026-10-29 for a date in the past", True),
+        ("every ``.json`` answer recorded since 2026-10-23 is JSON", True),
+        ("the tree lacks ``full_name`` (compared on 2026-10-27)", True),
+        ("Two organisations answered on 2026-10-23", True),
+        ("HTTP 404 (observed 2026-11-17)", True),
+        ("``PAIN`` for the order 26 on 2026-10-29: refused, the fields named", True),
+        ("read after the order's delete on 2026-11-17: upstream answers that it is gone", True),
+        (
+            "Recorded on 2026-10-26: an entry an order booked sends ``attachmentCount`` ``null``",
+            False,
+        ),
+        (
+            "the seeded orders booked two (``journal_list/order_booked``, recorded on 2026-10-26)",
+            False,
+        ),
+        ("date_added: The date of the entry, e.g. ``2026-10-24``.", False),
+    ],
+)
+def test_a_probe_in_prose_is_told_from_a_date(text: str, probe: bool) -> None:
+    """The wordings a dated note took, its date before or after the verb, and three a date may
+    stand in: a fixture's provenance, twice, and an input."""
+    assert bool(PROBE.search(text)) is probe
+
+
 def test_the_package_keeps_no_probe() -> None:
     """A probe, kept or not, stands in ``OBSERVED.md`` alone; the rule it backs stays."""
     sources = sorted((ROOT / "src" / "xippios" / "cashctrl").rglob("*.py"))
     found = {
         str(path.relative_to(ROOT)): [match[0] for match in PROBE.finditer(" ".join(text.split()))]
-        for path in [*RULES, *SCRIPTS, *sources]
+        for path in [*RULES, *SCRIPTS, *TESTS, *sources]
         if (text := path.read_text(encoding="utf-8"))
     }
     assert {path: probes for path, probes in found.items() if probes} == {}

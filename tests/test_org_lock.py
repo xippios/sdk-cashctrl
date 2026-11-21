@@ -24,11 +24,10 @@ import typing
 from typing import Any
 
 import pytest
-import respx
 from mcp.server.mcpserver import MCPServer
 from xippios.core import TenantLock, bind_tasks
 from xippios.core.mcp import build_server
-from xippios.core.testing import mcp_call, mcp_call_text
+from xippios.core.testing import ReplayFixture, mcp_call, mcp_call_text
 
 from xippios.cashctrl import mcp, mcp_write, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, TENANTS
@@ -74,10 +73,9 @@ def test_a_bound_task_keeps_its_name_and_drops_org(name: str) -> None:
     assert ("Args:" in doc) == bool(parameters), "an Args: block the org line emptied goes"
 
 
-async def test_a_bound_sync_facade_awaits_its_async_twin(respx_mock: respx.MockRouter) -> None:
-    """NOT RECORDED: an empty list composed in the lists' recorded shape (§10, kind 2)."""
-    route = respx_mock.get("https://demo.cashctrl.com/api/v1/currency/list.json")
-    route.respond(200, json={"total": 0, "data": []})
+async def test_a_bound_sync_facade_awaits_its_async_twin(replay_fixture: ReplayFixture) -> None:
+    """The recorded currency list, replayed: the test asserts what was sent and the meta."""
+    route = replay_fixture("currency_list", "default")
     result = await bind_tasks([tasks.list_currencies], LOCK)[0]()
     assert (result.meta.tenant, result.meta.request) == (DEMO, {"org": DEMO})
     assert route.call_count == 1
@@ -100,19 +98,18 @@ async def test_the_organisation_list_shows_the_bound_organisation_only(
 
 
 async def test_the_bound_read_server_reaches_the_bound_organisation_only(
-    monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter
+    monkeypatch: pytest.MonkeyPatch, replay_fixture: ReplayFixture
 ) -> None:
     """A call that still names an organisation is refused before the tool runs.
 
     Core's argument check refuses an argument no tool of a bound server declares, ``org``
     among them, and names the ones the tool takes; the call without it reaches the bound
-    organisation alone. NOT RECORDED: an empty list composed in the lists' recorded shape
-    (conventions §10, kind 2).
+    organisation alone. The recorded currency list is replayed: the test asserts what was
+    sent and the meta.
     """
     monkeypatch.setenv(TENANTS.list_var, "xa")
     monkeypatch.setenv(TENANTS.var("xa", "SUBDOMAIN"), "xa-tenant")
-    route = respx_mock.get("https://demo.cashctrl.com/api/v1/currency/list.json")
-    route.respond(200, json={"total": 0, "data": []})
+    route = replay_fixture("currency_list", "default")
     server = build_server(mcp.build(LOCK))
     refused = await mcp_call_text(server, "cashctrl_list_currencies", {"org": "xa"})
     assert refused == (
