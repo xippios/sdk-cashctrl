@@ -455,6 +455,7 @@ CashCtrl was seen doing beside it, each note with its probe: `docs/upstream/OBSE
 - sdk-core: [docs/review-checklist.md](https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md) — what the review of a pull request checks, in order.
 - sdk-cashctrl: [docs/adr.md](https://github.com/xippios/sdk-cashctrl/blob/main/docs/adr.md) — the index of this package's own decisions, generated from the records in `docs/adr/`.
 - sdk-cashctrl: [docs/upstream/FETCHED.md](https://github.com/xippios/sdk-cashctrl/blob/main/docs/upstream/FETCHED.md) — the snapshot of the upstream documentation, the reference for names, parameters and semantics.
+- sdk-cashctrl: [docs/write-tools.md](https://github.com/xippios/sdk-cashctrl/blob/main/docs/write-tools.md) — how a write tool is built and tested: its endpoint wrapper, its task, its docstring and its tests.
 
 ## Licence
 

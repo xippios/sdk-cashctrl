@@ -5,6 +5,7 @@ and FastAPI routes, built on `xippios-core`. This file holds what an agent needs
 the package: what it wraps, its layout, its commands and its code rules. The documents it
 follows, sdk-core's conventions among them, are listed under
 [`## Documents` in the README](README.md#documents); read them before you change a file.
+Each section keeps its rules and names the document or docstring that holds the details.
 
 ## What this package wraps
 
@@ -26,46 +27,29 @@ semantics; a wrapper is never written from memory of the API.
 CashCtrl serves each organisation from its own subdomain, and an API user belongs to one
 organisation. `_client.py` is therefore a registry, not one client: `TENANTS`, core's
 `Tenants` (conventions §7), declared as `CASHCTRL_ORGS` with the fields `SUBDOMAIN` and
-`API_KEY`, `param="org"`, the parameter that names an organisation, the reserved `demo`
-and `check_subdomain` (one DNS label, lower-cased) as the subdomain's check. The registry,
-`list_organisations` and the `--org` lock are core's: `Tenants`, `list_task`,
-`TenantLock`, `bind_tasks` and `tenant_instructions` from `xippios.core` and
-`serve_tenants` from `xippios.core.mcp`, which core 0.3.0 left to this package and 0.4.0
-took back (sdk-core ADR-0042, decision 1). Core keeps `ResultMeta.tenant` and the write server's
-rules too.
+`API_KEY`, `param="org"`, the reserved `demo` and `check_subdomain` as the subdomain's check.
+The registry, `list_organisations` and the `--org` lock are core's (sdk-core ADR-0042,
+decision 1); the docstrings of `_client.py` and `mcp.py` say how the package wires them.
 
 - `org` is the first, required parameter of every task; the MCP tools take it too unless
   the server is started with `--org`, which binds it so no tool takes it. It is the name
   of a declared organisation (`demo`, `acme`), and every result names it as
-  `meta.tenant` (it stays in `meta.request` as well). `client_for(org)` is `TENANTS.client_for(org, _build)`: that
-  organisation's own client, own base URL, own key, own token bucket, no shared cache,
-  rebuilt when one of its variables changes (the key included); the client it replaces
-  is closed through its `aclose()`, on the running event loop or, outside one, on core's
-  background loop (`Tenants.client_for`; `TENANTS.reset()` drops without closing). An
-  undeclared name is an `InvalidRequestError` listing the declared ones ("unknown
-  tenant"); a malformed `CASHCTRL_ORGS` or a missing or malformed subdomain is a
-  `ConfigError` naming the variable, never its value, a malformed subdomain with what it
-  should hold (`Tenants(hints=...)`).
-- `TENANTS.names()` reads `CASHCTRL_ORGS` (comma-separated, `^[a-z0-9_]+$`) on every call
-  and appends `demo` when `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY` are both
-  set. `list_organisations` (core's `list_task`, the tool
-  `cashctrl_list_organisations`) returns those names, nothing else, on the read server
-  and as a route; on a bound server, the bound organisation only, `meta.tenant` `None`.
-- `--org <name>` binds an MCP server (read or write) to one organisation (core's
-  `serve_tenants(server, build, TENANTS, noun="organisation", check=check_org)` in
-  `mcp.py` and `mcp_write.py`): an undeclared name or a missing or malformed subdomain
-  (`check_org` in `_client.py`) stops it at startup (exit status 2). The lock is no
-  middleware but a wrapper: `build(TenantLock(TENANTS, org))` returns the tool set whose
-  tasks `bind_tasks` binds, one tool per task with `org` bound at build, the same
-  `__name__` (tool names and `MCP_CAPS` keys stay), the docstring without its `org`
-  line, and a signature without `org`, so no tool of a bound server takes `org`; its
-  instructions are `BOUND_INSTRUCTIONS`, without the clause that a tool takes `org`, and
-  end "This server is bound to org <name>; every tool acts on that organisation and takes
-  no org." A call that still passes `org` is refused by core's
-  argument check before the tool runs, naming the tool's arguments
-  (`tests/test_org_lock.py`). Core serves the write server over `--http` on a loopback
-  `--host` only, unless `--allow-remote` is passed. The HTTP router has no lock:
-  consumers pass `org` explicitly.
+  `meta.tenant`. `client_for(org)` is that organisation's own client, own base URL, own
+  key, own token bucket, no shared cache, rebuilt when one of its variables changes. An
+  undeclared name is an `InvalidRequestError` listing the declared ones; a malformed
+  `CASHCTRL_ORGS` or a missing or malformed subdomain is a `ConfigError` naming the
+  variable, never its value.
+- `TENANTS.names()` reads `CASHCTRL_ORGS` on every call and appends `demo` when its pair is
+  set. `list_organisations` (core's `list_task`, the tool `cashctrl_list_organisations`)
+  returns those names, nothing else; on a bound server, the bound organisation only.
+- `--org <name>` binds an MCP server (read or write) to one organisation through core's
+  `serve_tenants`: an undeclared name or a missing or malformed subdomain (`check_org`)
+  stops it at startup (exit status 2). Core's `bind_tasks` binds `org` into every tool,
+  as `mcp.py`'s docstring says, so no tool of a bound server takes `org`, and its
+  instructions name the organisation. A call that still passes `org` is refused by core's
+  argument check before the tool runs (`tests/test_org_lock.py`). Core serves the write
+  server over `--http` on a loopback `--host` only, unless `--allow-remote` is passed. The
+  HTTP router has no lock: consumers pass `org` explicitly.
 - The subdomain stays out of messages and logs: core's status errors name the method and
   the path, never the host, and `classify` hands core a copy of an error response whose
   body names `cashctrl.com` instead of the organisation's host, so neither the quoted
@@ -82,46 +66,36 @@ rules too.
 and nothing else, ever. The recorder takes no organisation; every live test takes the
 `demo_org` fixture, which fails unless `demo` is the only declared organisation;
 `tests/conftest.py` removes `CASHCTRL_ORGS` and every organisation's pair but demo's
-through core's `keep_reserved_tenants` when pytest imports it, before any fixture runs, and
-`CASHCTRL_ORGS` again for every test, sets the placeholder subdomain in every offline test
-and calls `TENANTS.reset()` around each.
-Core's plugin does the rest (sdk-core ADR-0035): no network outside a test marked `live` or
-`network`, no rate-limit waits, and the placeholder key on every auth object, with
-`CASHCTRL_DEMO_API_KEY` named in `xippios_placeholder_key_envs`. The demo organisation is
-synthetic: invented books seeded by `scripts/seed_demo.py` and described in
-`docs/demo-org.md`, never a copy of real books. So the recorder records any module and
-any amount; it still scrubs e-mail addresses, API user tags, token-like body fields,
-`ssn` and every name ending in `iban`, in the request body as well (How to record a
-fixture), and refuses any method but GET and POST, a POST to anything but the fourteen
-write paths, a GET to a path `docs/upstream/` does not document as a GET, a create
-without the marker `xippios-live`, an order write naming an unmarked order or a book
-entry's update or delete whose order is unmarked, and any endpoint but `.json` or `FILE_PATHS`. Writes
-against demo create a record marked `xippios-live`, update it and delete it again,
-nothing else but a payment of a deleted order (see Write tools). The demo subdomain is
-treated like a key: never in a file, a commit, a log line or a report. The repository is
-public.
+before any fixture runs, as its comments say. Core's plugin does the rest (sdk-core
+ADR-0035): no network outside a test marked `live` or `network`, no rate-limit waits, and
+the placeholder key on every auth object. The demo organisation is synthetic: invented
+books seeded by `scripts/seed_demo.py` and described in `docs/demo-org.md`, never a copy
+of real books. So the recorder records any module and any amount; it still scrubs e-mail
+addresses, API user tags, token-like body fields, `ssn` and every name ending in `iban`,
+in the request body as well, and refuses any method but GET and POST, a POST to anything
+but the fourteen write paths, a GET to a path `docs/upstream/` does not document as a GET,
+a create without the marker `xippios-live`, an order write naming an unmarked order or a
+book entry's update or delete whose order is unmarked, and any endpoint but `.json` or
+`FILE_PATHS` (How to record a fixture). Writes against demo create a record marked
+`xippios-live`, update it and delete it again, nothing else but a payment of a deleted
+order (see Write tools). The demo subdomain is treated like a key: never in a file, a
+commit, a log line or a report. The repository is public.
 
 ## Rate limit (sdk-core ADR-0033)
 
 Decisions 1, 2, 3 and 5 of sdk-core ADR-0033 are adopted; decision 4 is deliberately not applied.
+The docstring of `RATE_LIMIT` in `_client.py` gives the reasons.
 
-1. **Pace.** 60 requests per minute per organisation with a burst of 1, one request at
-   a time and then one a second, one token bucket per client (`RATE_LIMIT` in
-   `_client.py`). The pace is self-imposed: CashCtrl documents no per-second or
-   per-minute limit, only a 429 ("We recommend adding delays between your requests",
-   `docs/upstream/error-handling.md`).
+1. **Pace.** 60 requests per minute per organisation with a burst of 1, one token bucket
+   per client (`RATE_LIMIT`). The pace is self-imposed: CashCtrl documents no limit, only
+   a 429 (`docs/upstream/error-handling.md`).
 2. **Quotas.** No longer-window quota is documented, so nothing is rationed.
 3. **A spent limit.** A 429 becomes `RateLimitError` through core's status mapping inside
    `classify`, with `retry_after` from `Retry-After` when upstream sends it; retries
-   honour it up to `backoff_max`, beyond which the error reaches the caller
-   (`tests/test_errors.py`). CashCtrl documents no fallback, and every answer carries
-   `x-cashctrl-requests-left` (299 on every answer) with an unknown window and scope, so it is not read.
+   honour it up to `backoff_max` (`tests/test_errors.py`). `x-cashctrl-requests-left` has
+   an unknown window and scope, so it is not read.
 4. **No firing into a spent quota** is deliberately not applied: no `QuotaPolicy` is
-   installed. Core's `QuotaPolicy` (sdk-core ADR-0037, decision 2) keeps a long-window quota, and
-   CashCtrl documents none, nor a window for
-   `x-cashctrl-requests-left`; its 429 asks only for delays, a pace refusal. With no
-   window to give it, a policy would take its default of an hour and turn one 429
-   without `Retry-After` into an hour of refusals once a call's retries are spent.
+   installed, since CashCtrl documents no window to give one.
 5. **Pauses are stated** by core's adapters: `error: RateLimitError: ... (retry after N s)`
    over MCP, a 429 problem with `retry_after` and `Retry-After` over HTTP.
 
@@ -141,7 +115,6 @@ src/xippios/cashctrl/
                    _form.py encodes and posts writes, _download.py streams files
   tasks.py         task functions and list_organisations; __all__ is what the adapters register but
                    BULK_TASKS, the file tasks (Python only); MCP_CAPS the per-tool result caps
-                   (list_custom_fields, list_cost_centers, get_report_data, list_history)
   tasks_write.py   confirm-gated write tasks for the separate write server (Write tools below)
   mcp_write.py     xippios-cashctrl-mcp-write entry point: build() the write tool set, server
   mcp.py           xippios-cashctrl-mcp-read entry point: build() the read tool set, server
@@ -174,10 +147,12 @@ tests/
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
   test_refresh_upstream.py  the capture script keeps and lists OBSERVED.md, offline
   test_observed.py  OBSERVED.md's notes and probes
+  test_claude_md.py  this file stays under 37,000 characters
   test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
 docs/
   upstream/        documentation snapshot, FETCHED.md, OBSERVED.md
   demo-org.md      the synthetic demo organisation: why, how to create and seed it, its books
+  write-tools.md   how a write tool is built and tested
   adr/             this package's design decisions, one NNNN-<slug>.md record each, laid
                    out in its README.md
   adr.md           the index of the decisions, written by scripts/adr_index.py, never by hand
@@ -206,142 +181,79 @@ instead, named after the service, and this Layout says so (conventions §2).
 journal entries, persons, orders and an order's book entries, `update_order_status` and
 `create_order_payment`, served by `xippios-cashctrl-mcp-write` only: never by the read
 server, never on the HTTP router (core's `assert_write_tools` in `tests/test_tasks_write.py`).
-The recipe for one more:
+`docs/write-tools.md` walks one more through its wrapper, its task, its docstring and its
+tests, and the docstring of `tasks_write.py` holds the decisions taken for them. The rules:
 
-1. **Layer 1.** `api/<module>_create.py` (and `_update`, `_delete`): a `<module>_fields`
-   builder takes every parameter the create table documents, snake_cased, and returns
-   the form fields under upstream's names through `api/_form.py`'s `form_fields`
-   (booleans `true`/`false`, `Decimal` as plain digits, dates `YYYY-MM-DD`, lists as
-   compact JSON with upstream's keys, `None` and empty lists left out); the wrapper
-   takes `org` and those fields and posts them with `post_form` (core's `data=`, with
-   `charset=UTF-8` declared), returning a `WriteAnswer`. A `delete.json` takes
-   `delete_fields(ids)`. JSON array items are `*Input` models in `models.py`
-   (`validation_alias=AliasChoices(snake, camel)`, `serialization_alias=camel`,
-   unknown keys refused).
-2. **Layer 2.** An async task, `org` first and `confirm: bool = False` last (core
-   refuses to register a write task without it), the create table's parameters as
-   keyword arguments, `custom: Mapping[str, str] | None` among them. The gate is
-   `if confirm is not True:`, never truthiness: from Python only `True` writes (over
-   MCP the schema turns `"true"`, `"yes"`, `"1"`, `1` into `True` and refuses what is
-   no boolean). Ids are ids: journal `associate_id` is an `int`, since upstream would
-   create a person from a name. It returns
-   `Result[WritePreview[<record>] | WriteResult]`: while `confirm` is false a
-   `WritePreview` (`performed=False`, `endpoint`, `payload` = the exact fields,
-   `before` = the record for an update or a delete as the read task's projection,
-   `changes` for an update) with `meta.request` = `{"org": org}`; with `confirm` a
-   `WriteResult` (`performed=True`, `insert_id`, `message`) with `meta.request` = `org`
-   plus the fields as sent. `ssn` and an `iban` show as `REDACTED` in `payload`,
+1. **The gate.** A write task takes `org` first and `confirm: bool = False` last (core
+   refuses to register a write task without it). The gate is `if confirm is not True:`,
+   never truthiness: from Python only `True` writes. Ids are ids: journal `associate_id`
+   is an `int`, since upstream would create a person from a name.
+2. **Preview and result.** While `confirm` is false the task returns a `WritePreview`, and
+   with `confirm` a `WriteResult`. `ssn` and an `iban` show as `REDACTED` in `payload`,
    `changes` and `meta.request` (Personal identifiers below). The payload is never in a
    result twice. A create's preview sends nothing; an update's or a delete's sends one
    read, never a write.
-3. **Updates read, merge, send.** Upstream empties every parameter an update omits.
-   An `update.json` task reads the record, maps every parameter it documents from it
-   (`_journal_values`, `_person_values`, `_order_values`, `_book_entry_values`),
-   applies the arguments given (not `None`), and sends all of them. An order's items go
-   back under the keys the items table documents (`_order_items`, in their `pos`), the
-   computed ones left out; upstream stores the items an update sends anew, with new ids.
-   A mandatory parameter neither the record nor the call gives raises
-   `InvalidRequestError` before any write; so does a stored list whose shape was never
-   observed (attachments, allocations, bank accounts, children, service periods,
-   insurance contracts, certificate values, an order item's allocations), a stored key
-   the input table does not document (an address's `titleId`, a contact's `purpose`,
-   an order item's `attachments` or `isOptional`), and a field whose absence
-   from the read is unknown rather than empty (an insurance's `insuranceNr` and
-   `insuranceMemberNr`, an employee's `userId`), unless the call gives or clears it.
-   `person/read.json` returns every stored documented field and leaves empty ones out. `clear: list[str] | None` names
-   parameters to send empty, a flag (`_FLAGS`) as `false`, checked against a
-   `<RESOURCE>_UPDATE` table of the documented update parameters; one both given and
-   cleared is refused, and so is one an update sends only when given (`_UNSENT`:
-   `sequence_number_id`). A journal entry an order or a salary run booked (`orderId`,
-   `orderBookEntryId`, `salaryBookEntryId`) is refused, by `delete_journal_entry` as
-   well, which reads the entry first, confirmed or not; an order is not refused for
-   being booked, since upstream changes an order's automatic book entries through its
-   items (`docs/upstream/order.md`, Book entry), and a book entry's update and delete
-   read it first and write only one of `type` `MANUAL`, booked by hand (the items' are
-   `GENERATED`). A confirmed call reads again and recomputes, so its payload can differ
-   from the preview's if the record changed. Never send a partial record.
-4. **Custom fields** are `customField<ID>` to text (`api/_form.py`'s `CUSTOM_FIELD`),
-   rendered as `<values><customField1>...</customField1></values>`, values escaped; an
-   update merges the given values into the stored XML (`merge_custom`) and refuses XML
-   it cannot carry over value for value.
-5. **Facts for docstrings.** A journal `amount` with a `tax_id` is gross, and order
-   items' `unitPrice` was read as gross; previews are
-   free; `confirm=true` writes; ids come from `list_accounts`, `list_tax_codes`,
-   `list_persons`, `list_order_categories`, `list_currencies` and the discovery lists:
-   `list_person_categories` (a person's `category_id`), `list_person_titles`
-   (`title_id`), `list_locations` (an employee's `location_id`), `list_account_categories`
-   (the `category_id` that narrows `list_accounts`), `list_cost_centers` (an
-   allocation's `to_cost_center_id`) and `list_custom_fields` (`customField<id>`, by the
-   module's `type`); each write docstring names the lists its ids come from. Upstream
-   refuses with HTTP 200 and an `errors` list (`RequestRejected` naming the fields); a
-   delete of an id that no longer exists answers `success: false` with `message`
-   (`RequestRejected`, not `NotFoundError`). `person.nr` is unique: a second person with
-   the same `nr` is refused.
-6. **Tests.** Record the create, the read the update starts from, the update, the
-   delete, in that order, so every record created is deleted again; compute the
-   payload offline through the task's preview and pass exactly those pairs to the
-   recorder. In `tests/test_tasks_write.py`: the preview sends no request and its
-   `payload` equals the recorded request body; `confirm=True` replays it; an update's
-   refusal is tested on a recorded read changed in memory (say so). In
-   `tests/test_live.py`: one test per resource calls each write tool once with
-   `confirm=True`, every record marked `xippios-live` (title, company or description,
-   and `nr` where it has one, so no sequence number advances), dated 2026-10-24; it
-   first sweeps leftovers (list with `query=xippios-live`, delete each whose marked
-   field holds the marker), deletes what it created by id with the delete tool, and a
-   `finally` deletes it through the wrapper if an assertion failed first. An update is
-   previewed, confirmed and read back: the changed field holds the new value and every
-   other derived field is unchanged.
-7. **Statuses and payments**: `update_order_status` and
-   `create_order_payment` send the fields given, nothing read: a preview sends no
-   request. A payment (pain.001 or PDF) books nothing and has no documented delete: the
-   live test deletes the paid order and leaves the payment, an accepted residue.
+3. **Updates read, merge, send.** Upstream empties every parameter an update omits, so an
+   `update.json` task reads the record, applies the arguments given and sends every
+   parameter the update table documents. A mandatory parameter neither the record nor the
+   call gives raises `InvalidRequestError` before any write; so does a stored list whose
+   shape was never observed, a stored key the input table does not document, and a field
+   whose absence from the read is unknown rather than empty, unless the call gives or
+   clears it. Of the parameters `clear` names, one both given and cleared is refused, and
+   so is one an update sends only when given. A journal entry an order or a salary run
+   booked is refused, by `delete_journal_entry` as well, which reads the entry first,
+   confirmed or not; a book entry's update and delete read it first and write only one of
+   `type` `MANUAL`, booked by hand. A confirmed call reads again and recomputes, so its
+   payload can differ from the preview's. Never send a partial record.
+4. **Custom fields** are `customField<ID>` to text, values escaped; an update merges the
+   given values into the stored XML and refuses XML it cannot carry over value for value.
+5. **Docstrings.** A write task's docstring is its tool's description: each write
+   docstring names the lists its ids come from, and says what an amount includes and how
+   upstream refuses, as `docs/write-tools.md` lists them.
+6. **Tests.** Record the create, the read the update starts from, the update, the delete,
+   in that order, so every record created is deleted again, with the payload the task's
+   preview computes. In `tests/test_tasks_write.py` the preview sends no request and its
+   `payload` equals the recorded request body. In `tests/test_live.py` one test per
+   resource calls each write tool once with `confirm=True`, every record marked
+   `xippios-live`; it first sweeps leftovers, deletes what it created by id with the
+   delete tool, and a `finally` deletes it through the wrapper if an assertion failed
+   first.
+7. **Statuses and payments**: `update_order_status` and `create_order_payment` send the
+   fields given, nothing read: a preview sends no request. A payment books nothing and has
+   no documented delete: the live test deletes the paid order and leaves the payment, an
+   accepted residue.
 
 ## Personal identifiers (sdk-core ADR-0017)
 
-CashCtrl documents two personal identifiers, a person's `ssn` ("Social security number
-of the employee") and the `iban` of each of a person's `bankAccounts` (the list sends an
-`iban` of its own). The rule is `ssn` and `iban` wherever it appears: a person's
-`bankAccounts[].iban` and the organisation's locations' `iban` and `qrIban` alike, kept
-out of every projection a task returns and dropped from the raw report rows
-`get_report_data` returns. `iban` covers the organisation's own bank account numbers too,
-as sdk-core ADR-0017's "bank account number", since conventions §3 leaves to the source
-what it judges equivalent to a personal identifier. The recorder rewrites any
-value under `iban` in a body to `REDACTED`, so a projection that kept one could never be
-replay-tested with a real value.
+CashCtrl documents two personal identifiers, a person's `ssn` and the `iban` of each of a
+person's `bankAccounts`. The rule is `ssn` and `iban` wherever it appears, the
+organisation's locations' `iban` and `qrIban` alike, as sdk-core ADR-0017's "bank account
+number", since conventions §3 leaves to the source what it judges equivalent to a personal
+identifier: kept out of every projection a task returns and dropped from the raw report
+rows `get_report_data` returns. The docstring of `tasks.py` and the README say where each
+stays out.
 
-- The endpoint wrappers' read models stay faithful and carry them (`Person`,
-  `PersonDetail`, `JournalEntryDetail.associates`, `Location`, `OrderDocument`; sdk-core ADR-0028, decision 1).
-- The tasks return projections without them, built with `UpstreamModel.project` in
-  `tasks.py`: `PersonProjection` (`list_persons`), `PersonDetailProjection`
-  (`get_person`; each bank account kept without its `iban`, which the projection's own
-  validator drops), `JournalEntryDetailProjection` (`get_journal_entry`, its
-  `associates` projected), `LocationProjection` (`list_locations`, without `iban` and
-  `qr_iban`, both undocumented and only seen `null`) and `OrderDocumentProjection`
-  (`get_order_document`, without `orgIban`, `orgQrIban` and `recipientIban`, only seen
-  `null`). A write preview's `before` is the same projection.
+- The endpoint wrappers' read models stay faithful and carry them (sdk-core ADR-0028,
+  decision 1). The tasks return projections without them, built with `UpstreamModel.project`
+  in `tasks.py` (`PersonProjection`, `PersonDetailProjection`,
+  `JournalEntryDetailProjection`, `LocationProjection`, `OrderDocumentProjection`). A
+  write preview's `before` is the same projection.
 - `create_person` and `update_person` take `ssn` and, in `bank_accounts`, `iban`, and
   send them as given; a preview's `payload` and `changes` and a performed write's
-  `meta.request` show `REDACTED` instead (`_shown` in `tasks_write.py`), a cleared `ssn`
-  as empty.
+  `meta.request` show `REDACTED` instead.
 - Fixtures never carry their values: the recorder rewrites the value of `ssn` and of
-  every name ending in `iban` (`qrIban`, `orgIban`, ...) to `REDACTED`, in any
-  letter case, and its final check refuses a value that survives the rewrite (How to
-  record a fixture); the recorded location holds `null` for `iban` and `qrIban`.
+  every name ending in `iban` to `REDACTED`, in any letter case, and its final check
+  refuses a value that survives the rewrite (How to record a fixture).
 - `get_report_data` refuses payroll and people reports before their data is requested:
   a type that starts with `SALARY_` or contains `PERSON`, or is `SETTLEMENT`,
-  `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or `ORG_CHART`. The answer never names its
-  type, so `_report_type` reads `report/tree.json` once per organisation into a `WeakKeyDictionary` keyed on its
-  client, which `TENANTS.reset()` or a changed variable drops; `get_report_tree`
-  refreshes it; an element the kept tree lacks reads it once more, one still missing is
-  asked of upstream. Other reports come back as sent, every key `ssn` or ending in `iban`
-  dropped at any depth, in any case (`_report`; sdk-core ADR-0028, decision 1).
+  `WITHHOLDING_TAX_SETTLEMENT`, `PEOPLE` or `ORG_CHART`, as the report tree it keeps per
+  organisation names it (`_report_type`). Other reports come back as sent, every key
+  `ssn` or ending in `iban` dropped at any depth, in any case (`_report`).
 - A task that fetches them deliberately may return them and says so in its docstring.
   Files may carry them, at the caller's path, never in a result or a tool
   (`BULK_TASKS`): `export_persons` names `PERSON_COLUMNS` unless its caller names
-  columns, `ssn` or `iban` among them; `download_order_document`'s PDF
-  may carry the organisation's IBAN or QR-IBAN and the recipient's address (QR-bill);
-  a report file is refused by `get_report_data`'s type rule on the tree read right
-  before it (`_tree_now`), but no key is dropped from a file.
+  columns, and a report file is refused by `get_report_data`'s type rule, but no key is
+  dropped from a file.
 
 ## Commands
 
@@ -361,34 +273,31 @@ uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loop
 `uv run pytest` is offline: core's plugin refuses the network and skips the rate limiter's
 waits in every test not marked `live` (conventions §10, sdk-core ADR-0035). A test that
 asserts a limiter wait or a quota pause is marked `rate_limited`, one that must reach the
-network `network`. It sends the key's placeholder, with `CASHCTRL_DEMO_API_KEY` set to it
-because `pyproject.toml` names that variable under `xippios_placeholder_key_envs`; the
-package keeps no placeholder fixture of its own (`tests/conftest.py` keeps the demo-only
-environment, Organisations above).
+network `network`. The key's placeholder stands in `CASHCTRL_DEMO_API_KEY`, which
+`pyproject.toml` names under `xippios_placeholder_key_envs`, so the package keeps no
+placeholder fixture of its own.
 
 A keyed command, the live tests, the recorder and the seeder, runs under `direnv exec .`
 from the clone or a directory under it, a worktree among them: direnv loads the demo
 organisation's pair from the clone's own `.envrc`, which `.gitignore` lists and nobody
 reads or prints (Never below).
 
-`.github/workflows/live.yml` runs the live tests nightly at 02:36 UTC, a time derived from
-the slug so that sources sharing a key never start together, and on demand; a pull request
-never runs them. Every `live` test runs, write tests included, so a live write test acts
-only on data kept for testing (the demo organisation, sdk-core ADR-0036, decision 2) and cleans up after itself.
-Only its `uv run pytest -m live --tb=short --assert=plain` step sees the demo
-organisation's pair, from the secrets `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY`
-(the `live_secrets` answer and the reserved organisation's key); both must give
-sdk-cashctrl access for the nightly run to pass. Every live run takes `--tb=short --assert=plain`, since
-the log of `live.yml` is public: the first keeps a failing test's frame arguments out of
-it, a raw upstream payload among them, and the second the values a failed `assert`
-compares. A live test asserts on shapes and counts, never on a raw payload.
+`.github/workflows/live.yml` runs the live tests nightly at 02:36 UTC and on demand; a pull
+request never runs them. Every `live` test runs, write tests included, so a live write test
+acts only on data kept for testing (the demo organisation, sdk-core ADR-0036, decision 2)
+and cleans up after itself. Only its `uv run pytest -m live --tb=short --assert=plain` step
+sees the demo organisation's pair, from the secrets `CASHCTRL_DEMO_SUBDOMAIN` and
+`CASHCTRL_DEMO_API_KEY`; both must give sdk-cashctrl access for the nightly run to pass.
+Every live run takes `--tb=short --assert=plain`, since the log of `live.yml` is public:
+they keep a failing test's frame arguments and the values a failed `assert` compares out
+of it. A live test asserts on shapes and counts, never on a raw payload.
 
 ## Code rules
 
 - Three layers (sdk-core ADR-0001, conventions §2): endpoint wrappers in `api/`, task
   functions in `tasks.py`, adapters in `mcp.py` and `http.py`. The adapters register
-  `tasks.__all__` and call only tasks, the tasks call only wrappers and reference data, and
-  a wrapper returns models.
+  `tasks.__all__` and call only tasks, the tasks call only wrappers, and a wrapper
+  returns models.
 - Upstream's documented error shapes go into `classify` in `_client.py`, once, and an error
   class of the package's own into `errors.py`; a wrapper never inspects a status code
   (conventions §5, §6).
@@ -468,13 +377,12 @@ above its status table); steps 2 to 4 and 6 read here:
 3. `api/<operation>.py`: one async wrapper that takes `org` first, calls
    `_client.client_for(org)` and returns models through `xippios.core.parse`.
 4. `tasks.py`: an async task, `org` its first parameter, that composes wrappers and
-   returns `Result[T]` with full `ResultMeta` through `_meta(org, ...)` (source,
-   endpoint, `tenant=org`, request parameters, `published_at`/`vintage` when the upstream
-   gives them). Derive the sync one with
-   `sync()`, add its name to `__all__`, re-export it from `__init__.py`. What it returns
-   leaves out documented personal identifiers (`ssn`, `iban` and their like) unless it
-   fetches them deliberately and says so, and a write task does not echo one in
-   `meta.request` (sdk-core ADR-0017).
+   returns `Result[T]` with full `ResultMeta` through `_meta(org, ...)`, as the docstring
+   of `tasks.py` lays the meta out. Derive the sync one with `sync()`, add its name to
+   `__all__`, re-export it from `__init__.py`. What it returns leaves out documented
+   personal identifiers (`ssn`, `iban` and their like) unless it fetches them
+   deliberately and says so, and a write task does not echo one in `meta.request`
+   (sdk-core ADR-0017).
 
 Step 5, the docstring for agents, is the command's; then:
 
@@ -482,39 +390,30 @@ Step 5, the docstring for agents, is the command's; then:
    with `org="demo"` that also calls the tool end to end with
    `xippios.core.testing.mcp_call` (and compares what was sent through
    `sent_urls(route)` or `sent_query(route)` with `recorded_query(fixture)`, never a
-   request from `route.calls`), a case in `TOOL_CASES` (which
-   checks `meta.tenant` and snake_case keys for every tool; a tool whose recorded
-   answer is empty goes into `UNOBSERVED`, whose models' field names are checked as
-   well, and a field kept as upstream sends it into `AS_SENT`), a live smoke test in
-   `test_live.py` that takes the `demo_org` fixture.
+   request from `route.calls`), a case in `TOOL_CASES`, which checks `meta.tenant` and
+   snake_case keys for every tool (an empty recorded answer goes into `UNOBSERVED`, a
+   field kept as upstream sends it into `AS_SENT`), a live smoke test in `test_live.py`
+   that takes the `demo_org` fixture.
 
 A list that documents `start` and `limit` (journal, persons, orders, history) pages through
-`_offset_pages` in `tasks.py` (conventions §4, sdk-core ADR-0034): `limit` given is one request
-for the page at `start` (default 0); `limit` omitted collects every page from `start`
-through core's `paginate_offset`, `PAGE_SIZE` (100, upstream's documented default) a
-request. `meta.total` is upstream's `total` on every list task, never `len(data)`.
+`_offset_pages` in `tasks.py` (conventions §4, sdk-core ADR-0034), as the docstring of
+`tasks.py` says. `meta.total` is upstream's `total` on every list task, never `len(data)`.
 
 Lookups (accounts, currencies, tax codes, fiscal periods, account and person categories,
 titles, cost centers, locations, custom fields) are tasks too, named `list_<thing>`, so
 agents can form valid calls; they serve the organisation's own data live and are never
 packaged: a multi-tenant source packages no tenant data, and a value set
 `docs/upstream/` fixes is a `Literal` in `models.py`, written by hand. A lookup whose
-whole list an agent needs and the default result cap (200 rows or 64 KB) would cut gets a cap of its
-own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (sdk-core ADR-0038, decision 5):
-`list_custom_fields` (500 rows or 128 KB; no filter but `type`, and a write needs a
-type's custom fields whole) and `get_report_data` (128 KB; a report is read whole, and
-over its bound its top-level rows are cut, `total` and `properties` kept whole, with the
-note); `list_cost_centers` and
-`list_history` keep the default bound with a note naming their filters (the history's
-note also names `limit`, and core's cut ends with where to resume). Every other list
-takes filters or pages, or is short. Where the documentation gives no schema and the
+whole list an agent needs and the default result cap (200 rows or 64 KB) would cut gets a
+cap of its own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (sdk-core
+ADR-0038, decision 5); the docstring of `MCP_CAPS` gives each cap its reason. Every other
+list takes filters or pages, or is short. Where the documentation gives no schema and the
 shape differs by kind, as the rows of `report/element/data.json` differ by report type,
 the task returns upstream's JSON as sent (`JsonValue`, camelCase keys included) and says
-so in its docstring; `AS_SENT` in
-`tests/test_tasks.py` names those fields for the snake_case check. A task-shaped
-function that returns a subset of an upstream record builds its model with
-`UpstreamModel.project`; nothing is renamed or computed, parsing a value
-(`parse_decimal`) is the only override.
+so in its docstring; `AS_SENT` in `tests/test_tasks.py` names those fields for the
+snake_case check. A task-shaped function that returns a subset of an upstream record
+builds its model with `UpstreamModel.project`; nothing is renamed or computed, parsing a
+value (`parse_decimal`) is the only override.
 
 Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
 use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
@@ -522,15 +421,12 @@ HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFound
 for an unknown id on a `read.json` by `id`; a 404 is an unknown endpoint
 (`UpstreamError`), on a `read.pdf` by `ids` or a report download by its id an unknown id (`NotFoundError`). Probes: `docs/upstream/OBSERVED.md`.
 
-Files: the wrappers `<module>_list_csv|xlsx|pdf`,
-`order_document_read_pdf` and `report_*_download_*` (conventions §2) call `api/_download.py`'s `download`, which streams
-through core's `download` into a temporary file beside `dest` and renames it there: a
-file lands where the caller says, and nothing is read into a result, held in memory or
-cached. Core writes a 2xx body unread, so `download` reads `Content-Type`
-first: JSON is a refusal sent as HTTP 200, whose head goes through `classify`; the file
-is removed and `dest` left as it was. The recorder writes no file, so
-`tests/test_downloads.py` mounts synthetic bytes; `test_live.py` downloads one order
-document, two exports and the five report files, and expects an unknown order's and an unknown report's refusal.
+Files: the file wrappers (conventions §2) call `api/_download.py`'s `download`, which
+streams through core's `download` into a temporary file beside `dest` and reads the
+answer's `Content-Type` before it renames the file there, as its docstring says: a file
+lands where the caller says, and nothing is read into a result, held in memory or cached.
+A JSON answer is a refusal sent as HTTP 200: the file is removed and `dest` left as it
+was. The recorder writes no file, so `tests/test_downloads.py` mounts synthetic bytes.
 
 ### How to record a fixture
 
@@ -549,7 +445,7 @@ Besides the list under Never above:
 - Never hand-write a fixture, and never commit one without grepping for key patterns
   and for values under `ssn` and every name ending in `iban`.
 - Never record a fixture, run a live test or make a live call against any organisation
-  but `demo`; never set `CASHCTRL_ORGS` with real names in a session or a test.
+  but `demo`; never set `CASHCTRL_ORGS` with real names in a shell or a test.
 - Never print, log or commit `CASHCTRL_DEMO_SUBDOMAIN` or any organisation's subdomain.
 - Never add a task, tool or helper that spans organisations.
 - Never point fixtures, live tests or the seeder at an organisation with real data: the
