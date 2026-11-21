@@ -68,7 +68,9 @@ package wires them.
 and nothing else, ever. The recorder takes no organisation; every live test takes the
 `demo_org` fixture, which fails unless `demo` is the only declared organisation;
 `tests/conftest.py` removes `CASHCTRL_ORGS` and every organisation's pair but demo's
-before any fixture runs, as its comments say. Core's plugin does the rest (sdk-core
+through core's `keep_reserved_tenants` when pytest imports it, before any fixture runs, and
+`CASHCTRL_ORGS` again for every test, sets the placeholder subdomain in every offline test
+and calls `TENANTS.reset()` around each. Core's plugin does the rest (sdk-core
 ADR-0035): no network outside a test marked `live` or `network`, no rate-limit waits, and
 the placeholder key on every auth object. The demo organisation is synthetic: invented
 books seeded by `scripts/seed_demo.py` and described in `docs/demo-org.md`, never a copy
@@ -89,12 +91,13 @@ Decisions 1, 2, 3 and 5 of sdk-core ADR-0033 are adopted; decision 4 is delibera
 The docstring of `RATE_LIMIT` in `_client.py` gives the reasons.
 
 1. **Pace.** 60 requests per minute per organisation with a burst of 1, one token bucket
-   per client (`RATE_LIMIT`). The pace is self-imposed: CashCtrl documents no limit, only
-   a 429 (`docs/upstream/error-handling.md`).
+   per client (`RATE_LIMIT`). The pace is self-imposed: CashCtrl documents no per-second
+   or per-minute limit, only a 429 (`docs/upstream/error-handling.md`).
 2. **Quotas.** No longer-window quota is documented, so nothing is rationed.
 3. **A spent limit.** A 429 becomes `RateLimitError` through core's status mapping inside
    `classify`, with `retry_after` from `Retry-After` when upstream sends it; retries
-   honour it up to `backoff_max` (`tests/test_errors.py`). `x-cashctrl-requests-left` has
+   honour it up to `backoff_max`, beyond which the error reaches the caller
+   (`tests/test_errors.py`). `x-cashctrl-requests-left` has
    an unknown window and scope, so it is not read.
 4. **No firing into a spent quota** is deliberately not applied: no `QuotaPolicy` is
    installed, since CashCtrl documents no window to give one.
@@ -201,21 +204,25 @@ tests, and the docstring of `tasks_write.py` holds the decisions taken for them.
    call gives raises `InvalidRequestError` before any write; so does a stored list whose
    shape was never observed, a stored key the input table does not document, and a field
    whose absence from the read is unknown rather than empty, unless the call gives or
-   clears it. Of the parameters `clear` names, one both given and cleared is refused, and
-   so is one an update sends only when given. A journal entry an order or a salary run
+   clears it. `clear` names parameters to send empty, checked against the documented
+   update parameters; one both given and cleared is refused, and so is one an update sends
+   only when given (`sequence_number_id`). A journal entry an order or a salary run
    booked is refused, by `delete_journal_entry` as well, which reads the entry first,
    confirmed or not; a book entry's update and delete read it first and write only one of
    `type` `MANUAL`, booked by hand. A confirmed call reads again and recomputes, so its
-   payload can differ from the preview's. Never send a partial record.
+   payload can differ from the preview's if the record changed. Never send a partial
+   record.
 4. **Custom fields** are `customField<ID>` to text, values escaped; an update merges the
    given values into the stored XML and refuses XML it cannot carry over value for value.
 5. **Docstrings.** A write task's docstring is its tool's description: each write
    docstring names the lists its ids come from, and says what an amount includes and how
    upstream refuses, as `docs/write-tools.md` lists them.
 6. **Tests.** Record the create, the read the update starts from, the update, the delete,
-   in that order, so every record created is deleted again, with the payload the task's
-   preview computes. In `tests/test_tasks_write.py` the preview sends no request and its
-   `payload` equals the recorded request body. In `tests/test_live.py` one test per
+   in that order, so every record created is deleted again; compute the payload offline
+   through the task's preview and pass exactly those pairs to the recorder. In
+   `tests/test_tasks_write.py`: the preview sends no request and its `payload` equals the
+   recorded request body; `confirm=True` replays it; an update's refusal is tested on a
+   recorded read changed in memory (say so). In `tests/test_live.py` one test per
    resource calls each write tool once with `confirm=True`, every record marked
    `xippios-live` (title, company or description, and `nr` where it has one, so no
    sequence number advances), dated 2026-10-24; it first sweeps leftovers (list with
