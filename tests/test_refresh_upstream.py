@@ -7,6 +7,8 @@ name.
 """
 
 import importlib.util
+import re
+import types
 from pathlib import Path
 from types import ModuleType
 
@@ -86,3 +88,51 @@ def test_a_snapshot_keeps_observed_and_removes_a_stale_file(
 def test_an_entry_that_would_be_written_as_observed_is_refused(script: ModuleType) -> None:
     with pytest.raises(SystemExit, match=r"clashing file names .*observed\.md"):
         script.split_page(page("Introduction", "Observed"))
+
+
+def found(pattern: str, text: str) -> tuple[str, ...]:
+    """The groups of ``pattern``'s one match in ``text``, a line pattern."""
+    match = re.search(pattern, text, re.MULTILINE)
+    assert match is not None, pattern
+    return match.groups()
+
+
+def committed_fetched(script: ModuleType, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """``FETCHED.md`` as committed, and as ``render_fetched`` writes it for the committed snapshot.
+
+    Nothing is fetched. The page the snapshot was made from is not committed, so its byte
+    count, sha256, ETag and the run's time are read from the committed file and given to
+    the renderer, the digest through a stand-in for ``hashlib`` that answers the committed
+    one; every file's row and note come from the committed snapshot's files themselves.
+    """
+    out = SCRIPT.parents[1] / "docs" / "upstream"
+    committed = (out / "FETCHED.md").read_text(encoding="utf-8")
+    size, digest = found(r"^- (\d+) bytes, sha256 `([0-9a-f]{64})`$", committed)
+    (etag,) = found(r"^- HTTP 200, ETag `(.+)`, Last-Modified not sent$", committed)
+    (year,) = found(r"The documentation is \N{COPYRIGHT SIGN} (\d{4}) CashCtrl Ltd\.", committed)
+    rows = re.findall(r"^\| (\S+\.md) \| (https://\S+) \| (\S+Z) \|", committed, re.M)
+    parts = [
+        script.Part(
+            name.removesuffix(".md").replace("-", " "), url.removeprefix(script.PAGE_URL), ()
+        )
+        for name, url, _ in rows
+    ]
+    assert [part.file for part in parts] == [name for name, _, _ in rows]
+    files = {part.file: (out / part.file).read_text(encoding="utf-8") for part in parts}
+    stand_in = types.SimpleNamespace(
+        sha256=lambda _: types.SimpleNamespace(hexdigest=lambda: digest)
+    )
+    monkeypatch.setattr(script, "hashlib", stand_in)
+    response = script.Response(status=200, body=bytes(int(size)), etag=etag, last_modified=None)
+    observed = (out / script.OBSERVED).is_file()
+    rendered = script.render_fetched(parts, files, response, rows[0][2], year, observed)
+    return committed, str(rendered)
+
+
+def test_the_committed_fetched_md_is_the_scripts_text(
+    script: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Written offline by ``render_fetched`` alone, ``OBSERVED.md``'s row included."""
+    committed, rendered = committed_fetched(script, monkeypatch)
+    assert committed == rendered
+    assert committed.splitlines()[-1] == ROW
