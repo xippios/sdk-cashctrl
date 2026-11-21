@@ -16,6 +16,6 @@ BOUND = 37_000
 def test_claude_md_stays_under_its_bound() -> None:
     size = len((ROOT / "CLAUDE.md").read_bytes())
     assert size < BOUND, (
-        f"CLAUDE.md holds {size:,} bytes, {BOUND:,} at most: move its reference text into "
-        "the documents and docstrings it points to, and keep each rule"
+        f"CLAUDE.md holds {size:,} bytes, where it must hold fewer than {BOUND:,}: move its "
+        "reference text into the documents and docstrings it points to, and keep each rule"
     )
