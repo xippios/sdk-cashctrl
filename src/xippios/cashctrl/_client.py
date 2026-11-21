@@ -299,11 +299,11 @@ def classify(response: httpx.Response) -> XippiosError | None:
     report has; the annual report's download
     takes no such id. ``docs/upstream/OBSERVED.md`` notes both, with their recordings.
 
-    The two errors ``classify`` words itself, ``NotFoundError`` for these 404s and for a
-    read by id refused below, name the request as core's ``request_description`` gives
-    it, ``GET /api/v1/account/read.json``: the method and the path, never the host or the
-    query (conventions §5, sdk-core ADR-0030, decision 4). ``RequestRejected`` names the
-    fields and upstream's message.
+    Every error ``classify`` words itself, ``NotFoundError`` for these 404s and for a read
+    by id refused below and ``RequestRejected`` for any other refusal, names the request as
+    core's ``request_description`` gives it, ``GET /api/v1/account/read.json``, after its
+    reasons: the method and the path, never the host or the query (conventions §5,
+    sdk-core ADR-0030, decision 4).
 
     Documented refusals: validation errors come back as HTTP 200 with
     ``{"success": false, "errors": [{"field": ..., "message": ...}]}``. They raise
@@ -369,7 +369,9 @@ def classify(response: httpx.Response) -> XippiosError | None:
         return NotFoundError(
             f"CashCtrl: {message} ({request_description(response)})", source=SOURCE
         )
-    return RequestRejected(errors, upstream_message=message, source=SOURCE)
+    return RequestRejected(
+        errors, upstream_message=message, source=SOURCE, request=request_description(response)
+    )
 
 
 def _build(org: str) -> AsyncClient:

@@ -28,6 +28,13 @@ class RequestRejected(InvalidRequestError):
     cases, this one is raised after the upstream call, by the client's ``classify`` hook;
     adapters answer it like any ``InvalidRequestError``: text over MCP, HTTP 422.
 
+    The message names the fields, or upstream's message, and then the request in
+    parentheses, as ``classify`` hands it over from core's ``request_description``:
+    ``CashCtrl rejected the request: debitId: This field cannot be empty.
+    (POST /api/v1/journal/create.json)``, the method and the path, never the host or the
+    query (conventions §5). A rejection built without ``request`` has no answer to name
+    one from, and its message ends with the reasons.
+
     Attributes:
         errors: The field errors upstream listed, in its order; empty when it gave none.
         upstream_message: Upstream's single message (``errorMessage``), when it sent one.
@@ -39,17 +46,21 @@ class RequestRejected(InvalidRequestError):
         *,
         upstream_message: str | None = None,
         source: str | None = None,
+        request: str | None = None,
     ) -> None:
         self.errors = list(errors)
         self.upstream_message = upstream_message
-        super().__init__(_describe(self.errors, upstream_message), source=source)
+        super().__init__(_describe(self.errors, upstream_message, request), source=source)
 
 
-def _describe(errors: Sequence[FieldError], upstream_message: str | None) -> str:
+def _describe(
+    errors: Sequence[FieldError], upstream_message: str | None, request: str | None
+) -> str:
     if errors:
         reasons = "; ".join(
             f"{error.field}: {error.message}" if error.field else error.message for error in errors
         )
     else:
         reasons = upstream_message or "no reason given"
-    return f"CashCtrl rejected the request: {reasons}"
+    named = f" ({request})" if request else ""
+    return f"CashCtrl rejected the request: {reasons}{named}"
