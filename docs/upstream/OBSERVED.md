@@ -182,10 +182,13 @@ and `account/list.json` gives that period's balances. Without `type`, `order/lis
 lists both types.
 
 Probe: 2026-10-23, after the seed run of the same day left 2025 the current period, as
-`GET fiscalperiod/list.json` marks it; sample `tests/fixtures/fiscalperiod_list/default.json`.
-The lists without `fiscalPeriodId` and without `type`, of `GET order/list.json`,
-`GET journal/list.json` and `GET account/list.json` on 2026-10-23, kept no answer: the
-recorded lists send both.
+`GET fiscalperiod/list.json` marks it, and `GET account/list.json` without `fiscalPeriodId`;
+samples `tests/fixtures/fiscalperiod_list/default.json`,
+`tests/fixtures/account_list/filter_number_eq.json`, account 1020 with `endAmount` 101230,
+its balance at the end of 2025, and `tests/fixtures/account_list/only_active_finanz.json`.
+The journal's and the order's lists without `fiscalPeriodId`, and the order list without
+`type`, of `GET journal/list.json` and `GET order/list.json` on 2026-10-23, kept no answer:
+their recordings send both.
 
 ### The discovery lists
 
