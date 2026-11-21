@@ -74,7 +74,7 @@ Every answer carries the header `x-cashctrl-requests-left`, `299` on each one re
 
 Probe: 2026-10-23 and 2026-11-21, `GET account/list.json` with a wrong key and
 `GET report/element/download.pdf`; samples `tests/fixtures/account_list/wrong_key.json`,
-the 401 of 2026-10-23, and `tests/fixtures/report_element_download/unknown_id_pdf.json`,
+the 401 of 2026-10-23, and `tests/fixtures/report_element_download_pdf/unknown_id.json`,
 recorded 2026-11-21.
 
 ### A `.json` answer is `application/json;charset=utf-8`
@@ -218,11 +218,11 @@ Probe: 2026-10-29, 2026-11-17 and 2026-11-21, `GET order/document/read.pdf`,
 document's 404 was seen in the live run of 2026-10-29, beside the existing order's PDF in
 the same run, and the element's PDF and the collection's Excel file in the live run of
 2026-11-17; samples, recorded 2026-11-21 for an id no record has, `999999999`:
-`tests/fixtures/order_document_read/unknown_id_pdf.json`,
-`tests/fixtures/report_element_download/unknown_id_pdf.json`,
-`tests/fixtures/report_element_download/unknown_id_xlsx.json`,
-`tests/fixtures/report_collection_download/unknown_id_pdf.json` and
-`tests/fixtures/report_collection_download/unknown_id_xlsx.json`.
+`tests/fixtures/order_document_read_pdf/unknown_id.json`,
+`tests/fixtures/report_element_download_pdf/unknown_id.json`,
+`tests/fixtures/report_element_download_xlsx/unknown_id.json`,
+`tests/fixtures/report_collection_download_pdf/unknown_id.json` and
+`tests/fixtures/report_collection_download_xlsx/unknown_id.json`.
 
 ## Writes
 

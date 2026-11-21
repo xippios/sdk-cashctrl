@@ -72,14 +72,14 @@ never shows a value, and exits with status 1:
   (``.pdf``, ``.xlsx``, ``.csv``, ``.zip``) a file; both are refused before a request is
   sent. ``FILE_PATHS`` names the five file paths a GET may be recorded for, the downloads
   whose 404 for an id no record has ``_client.classify`` maps: ``order/document/read.pdf``
-  and the PDF and Excel files of a report element and of a report collection
-  (https://github.com/xippios/coordinate-sdk/issues/123,
-  https://github.com/xippios/coordinate-sdk/issues/124). Their answer is written only when
-  it is no file: an answer of HTTP 2xx whose content type is not JSON (``FILE``) is
-  refused after its one request and nothing is written, so the recorder never keeps a
-  file; a 404 page or CashCtrl's JSON refusal is recorded. Give such a path an id no record
-  has, ``elementId=999999999``, and a case named after its format, ``unknown_id_pdf``:
-  the fixture's directory drops the extension.
+  and the PDF and Excel files of a report element and of a report collection, as the
+  maintainer decided on 2026-11-21, so that the mapping rests on recorded answers. Their
+  answer is written only when it is no file: an error status, or at HTTP 2xx CashCtrl's
+  refusal, a JSON object with ``success`` false. Any other answer of HTTP 2xx, whatever
+  its content type says, is refused after its one request and nothing is written
+  (``is_no_refusal``), so the recorder never keeps a file. Give such a path an id no
+  record has, ``elementId=999999999``; its fixture lands in its wrapper's directory, the
+  extension the last word: ``tests/fixtures/report_element_download_pdf/unknown_id.json``.
 - No e-mail addresses. Every e-mail-shaped string in the request URL, the request
   body, the response header values and the response body becomes ``user@example.com``,
   with ``@`` written plainly, as ``%40`` or as the HTML entities ``&#64;``, ``&#x40;``
@@ -248,12 +248,13 @@ FILE_PATHS = frozenset(
         "report/collection/download.xlsx",
     }
 )
-"""The file paths a GET may be recorded for, its answer only when it is no file (``is_a_file``).
+"""The file paths a GET may be recorded for, its answer only when it is no file.
 
 The downloads whose 404 for an id no record has ``_client.classify`` maps to
-``NotFoundError`` (https://github.com/xippios/coordinate-sdk/issues/124).
+``NotFoundError``, admitted by the maintainer's decision of 2026-11-21 so that the mapping
+rests on recorded answers; an answer of HTTP 2xx is written only when it is CashCtrl's
+refusal (``is_no_refusal``).
 """
-_JSON = "application/json"
 MARK = "xippios-live"
 """The marker a recorded create must carry in one of its values (title, company, ...)."""
 ORDER_WRITES = {
@@ -392,8 +393,12 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def fixture_endpoint(endpoint: str) -> str:
-    """``account/read.json`` → ``account_read``: the fixture directory of an endpoint."""
-    return endpoint.rsplit(".", 1)[0].replace("/", "_")
+    """The fixture directory of an endpoint, its wrapper's name (conventions §2, §10).
+
+    ``account/read.json`` → ``account_read``, and a file path keeps its extension as the
+    last word: ``order/document/read.pdf`` → ``order_document_read_pdf``.
+    """
+    return endpoint.removesuffix(".json").replace("/", "_").replace(".", "_")
 
 
 def unmarked(method: str, endpoint: str, params: dict[str, str]) -> str | None:
@@ -456,8 +461,9 @@ def refusal(method: str, endpoint: str) -> str | None:
         )
     if not endpoint.endswith(".json") and endpoint not in FILE_PATHS:
         return (
-            f"only .json endpoints are recorded, not {endpoint}: one without the extension "
-            "answers a bare number or a document, and an export is a file"
+            f"only .json endpoints and five file paths are recorded, not {endpoint}: one "
+            "without the extension answers a bare number or a document, and an export is a "
+            f"file; the file paths are {', '.join(sorted(FILE_PATHS))}, for their refusals"
         )
     if not is_write(method):
         documented = documented_methods(UPSTREAM).get(endpoint, frozenset())
@@ -494,14 +500,20 @@ async def exchange_async(
 exchange = sync(exchange_async)
 
 
-def is_a_file(response: httpx.Response) -> bool:
-    """Whether an answer is a file: HTTP 2xx with a content type other than JSON.
+def is_no_refusal(response: httpx.Response) -> bool:
+    """Whether a file path's answer must not be written: HTTP 2xx, and no refusal.
 
-    A file path's answer is recorded only when it is no file, a 404 page or CashCtrl's
-    refusal as JSON, never the file an id fetched.
+    A refusal is CashCtrl's, a JSON object with ``success`` false, whatever the content
+    type says. A file path's answer is recorded only when it is an error status or such a
+    refusal, never the file an id fetched, nor another answer of HTTP 2xx.
     """
-    media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-    return response.is_success and media_type != _JSON
+    if not response.is_success:
+        return False
+    try:
+        answer = json.loads(response.content)
+    except ValueError:
+        return True
+    return not (isinstance(answer, dict) and answer.get("success") is False)
 
 
 def order_ids(text: str) -> list[int] | None:
@@ -1172,12 +1184,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     response = exchange(client, method, f"/{args.endpoint}", args.params)
     if method == "POST":
         print(changed_reminder(args.endpoint, response))  # noqa: T201
-    if args.endpoint in FILE_PATHS and is_a_file(response):
+    if args.endpoint in FILE_PATHS and is_no_refusal(response):
         content_type = response.headers.get("content-type") or "no content type"
         print(  # noqa: T201
-            f"not written {path.relative_to(ROOT)}: {args.endpoint} answered with a file "
-            f"(HTTP {response.status_code}, {content_type}); a file path is recorded only for "
-            "an answer that is no file, such as the 404 of an id no record has"
+            f"not written {path.relative_to(ROOT)}: {args.endpoint} answered HTTP "
+            f"{response.status_code} ({content_type}) with no refusal; a file path is recorded "
+            "only for an error status or CashCtrl's refusal, success false, never a file"
         )
         return 1
     try:
