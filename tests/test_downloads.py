@@ -476,7 +476,9 @@ def test_an_unknown_order_is_not_found_and_nothing_is_written(
     dest.write_bytes(b"the caller's earlier file")
     with pytest.raises(NotFoundError) as info:
         tasks.download_order_document(DEMO, [999999], dest)
-    assert str(info.value) == "CashCtrl: This order does not exist. (/order/document/read.pdf)"
+    assert str(info.value) == (
+        "CashCtrl: This order does not exist. (GET /api/v1/order/document/read.pdf)"
+    )
     assert dest.read_bytes() == b"the caller's earlier file", "dest is left as it was"
     assert files(tmp_path) == ["invoice.pdf"], "the refusal is removed"
 
@@ -491,7 +493,7 @@ def test_an_unknown_orders_404_is_not_found_and_dest_stays(
     with pytest.raises(NotFoundError) as info:
         tasks.download_order_document(DEMO, [999999999], dest)
     assert route.call_count == 1
-    assert str(info.value).endswith("(/order/document/read.pdf)")
+    assert str(info.value).endswith("(GET /api/v1/order/document/read.pdf)")
     assert dest.read_bytes() == b"the caller's earlier file"
     assert files(tmp_path) == ["invoice.pdf"]
 
@@ -899,7 +901,9 @@ def test_a_report_the_tree_does_not_list_is_not_found_and_dest_stays(
     dest.write_bytes(b"the caller's earlier file")
     with pytest.raises(NotFoundError) as info:
         getattr(tasks, task)(DEMO, 999999999, fmt, dest, fiscal_period=FP2025)
-    assert str(info.value) == f"CashCtrl: no record has an id asked, HTTP 404 (/{endpoint})"
+    assert (
+        str(info.value) == f"CashCtrl: no record has an id asked, HTTP 404 (GET /api/v1/{endpoint})"
+    )
     assert (tree.call_count, route.call_count) == (1, 1)
     assert dest.read_bytes() == b"the caller's earlier file"
     assert files(tmp_path) == [f"missing.{fmt}"]

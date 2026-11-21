@@ -18,6 +18,7 @@ from xippios.core import (
     UpstreamError,
     XippiosError,
 )
+from xippios.core.errors import request_description
 from xippios.core.http import status_for
 from xippios.core.mcp import error_to_text
 from xippios.core.testing import fixture_path, load_fixture, response_from_fixture, sent_query
@@ -82,22 +83,47 @@ def test_a_rejection_is_an_invalid_request_for_both_adapters() -> None:
     assert str(RequestRejected()) == "CashCtrl rejected the request: no reason given"
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "case"),
+    [
+        ("account_read", "unknown_id"),
+        ("journal_read", "unknown_id"),
+        ("order_document_read", "unknown_id_pdf"),
+        ("report_collection_download", "unknown_id_xlsx"),
+    ],
+)
+def test_each_error_classify_words_names_the_request_by_cores_description(
+    fixtures_dir: Path, endpoint: str, case: str
+) -> None:
+    """Conventions §5: the method and the path as core's ``request_description`` gives them.
+
+    Never a description of the package's own, never the query or the host.
+    """
+    answer = recorded(fixtures_dir, endpoint, case)
+    error = classify(answer)
+    assert isinstance(error, NotFoundError)
+    assert str(error).endswith(f" ({request_description(answer)})")
+    assert request_description(answer).startswith("GET /api/v1/")
+
+
 def test_the_observed_unknown_id_is_not_found(fixtures_dir: Path) -> None:
     error = classify(recorded(fixtures_dir, "account_read", "unknown_id"))
     assert isinstance(error, NotFoundError)
-    assert str(error) == "CashCtrl: This account does not exist. (/account/read.json)"
+    assert str(error) == "CashCtrl: This account does not exist. (GET /api/v1/account/read.json)"
 
 
 def test_the_observed_unknown_journal_entry_is_not_found(fixtures_dir: Path) -> None:
     error = classify(recorded(fixtures_dir, "journal_read", "unknown_id"))
     assert isinstance(error, NotFoundError)
-    assert str(error) == "CashCtrl: This book entry does not exist. (/journal/read.json)"
+    assert str(error) == "CashCtrl: This book entry does not exist. (GET /api/v1/journal/read.json)"
 
 
 def test_the_observed_unknown_fiscal_period_is_not_found(fixtures_dir: Path) -> None:
     error = classify(recorded(fixtures_dir, "fiscalperiod_read", "unknown_id"))
     assert isinstance(error, NotFoundError)
-    assert str(error) == ("CashCtrl: This fiscal period does not exist. (/fiscalperiod/read.json)")
+    assert str(error) == (
+        "CashCtrl: This fiscal period does not exist. (GET /api/v1/fiscalperiod/read.json)"
+    )
 
 
 def test_the_observed_missing_id_is_a_rejection_with_a_message(fixtures_dir: Path) -> None:
@@ -234,7 +260,7 @@ def test_the_recorded_404_of_an_unknown_id_is_not_found(fixtures_dir: Path, path
     assert answer.status_code == 404
     error = classify(answer)
     assert isinstance(error, NotFoundError)
-    assert str(error) == (f"CashCtrl: no record has an id asked, HTTP 404 ({path})"), (
+    assert str(error) == (f"CashCtrl: no record has an id asked, HTTP 404 (GET /api/v1{path})"), (
         "the path, never the query or the host"
     )
 
@@ -255,7 +281,7 @@ def test_a_404_by_the_id_with_other_parameters_is_not_found(fixtures_dir: Path, 
     error = classify(recorded_at(fixtures_dir, path))
     assert isinstance(error, NotFoundError)
     assert str(error) == (
-        f"CashCtrl: no record has an id asked, HTTP 404 ({path.split('?', 1)[0]})"
+        f"CashCtrl: no record has an id asked, HTTP 404 (GET /api/v1{path.split('?', 1)[0]})"
     ), "the path, never the query or the host"
 
 

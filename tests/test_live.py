@@ -352,7 +352,7 @@ async def test_the_document_of_an_unknown_order_is_not_found(demo_org: str, tmp_
     dest = tmp_path / "missing.pdf"
     with pytest.raises(NotFoundError) as info:
         await tasks.download_order_document_async(demo_org, [999999], dest)
-    assert str(info.value).endswith("(/order/document/read.pdf)")
+    assert str(info.value).endswith("(GET /api/v1/order/document/read.pdf)")
     assert list(tmp_path.iterdir()) == [], "no file, no temporary file"
 
 
@@ -434,7 +434,7 @@ async def test_an_unknown_report_is_not_found(demo_org: str, tmp_path: Path) -> 
     # Not in the tree, so asked of upstream as given: HTTP 404 (observed 2026-11-17).
     with pytest.raises(NotFoundError) as info:
         await tasks.download_report_async(demo_org, 999999, "pdf", tmp_path / "missing.pdf")
-    assert str(info.value).endswith("(/report/element/download.pdf)")
+    assert str(info.value).endswith("(GET /api/v1/report/element/download.pdf)")
     assert list(tmp_path.iterdir()) == []
 
 
