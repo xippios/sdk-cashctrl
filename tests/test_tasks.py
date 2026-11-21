@@ -1392,8 +1392,9 @@ async def test_a_live_iban_on_an_order_document_never_reaches_a_result(
 ) -> None:
     """On the recorded answer changed in memory: the three numbers set to a made-up IBAN.
 
-    The recorder rewrites every name ending in ``iban`` (queue row 243), so no fixture
-    holds a set number; the projection keeps them out of every result regardless.
+    The recorder rewrites every name ending in ``iban``, as
+    https://github.com/xippios/sdk-cashctrl/pull/21 has it, so no fixture holds a set
+    number; the projection keeps them out of every result regardless.
     """
     fixture = recorded(fixtures_dir, "order_document_read", "by_id")
     body = json.loads(fixture.response.body)
@@ -1709,7 +1710,8 @@ async def test_the_order_categories_are_on_the_read_server_and_the_router() -> N
 # CashCtrl's defaults (person categories and titles, the chart's account categories, the
 # report tree) and the main location made by hand with placeholder data (docs/demo-org.md).
 # The custom field and cost center lists were recorded again on 2026-10-28, each with the
-# one record scripts/seed_demo.py --discovery created (G5 (3) of 2026-10-28).
+# one record scripts/seed_demo.py --discovery created
+# (https://github.com/xippios/sdk-cashctrl/pull/19).
 
 
 def test_list_custom_fields_replays_the_recorded_list(
@@ -2200,7 +2202,7 @@ def test_get_report_data_drops_every_key_ending_in_iban(
     respx_mock: respx.MockRouter,
     fixtures_dir: Path,
 ) -> None:
-    """On the recorded balance sheet changed in memory: compound IBAN names (row 243).
+    """On the recorded balance sheet changed in memory: compound IBAN names are dropped.
 
     ``orgIban`` two levels down, ``recipient_iban`` in a top-level row and ``ORG-QR-IBAN``
     in ``properties`` are dropped, as the recorder rewrites every name ending in
@@ -2283,8 +2285,9 @@ def test_get_report_data_refuses_before_anything_is_sent(
     assert not respx_mock.calls
 
 
-# Payroll and people reports, refused by type (G5 (1) of 2026-10-28, queue row 123): the type
-# comes from the report tree, read once per organisation and kept until TENANTS.reset().
+# Payroll and people reports, refused by type (https://github.com/xippios/sdk-cashctrl/pull/19):
+# the type comes from the report tree, read once per organisation and kept until
+# TENANTS.reset().
 
 DATA_URL = f"{BASE}/report/element/data.json"
 TREE_URL = f"{BASE}/report/tree.json"
@@ -2323,7 +2326,11 @@ REFUSED_DOCUMENTED_TYPES = {
     "EXPENSE_BY_PERSON_CHART",
     "REVENUE_BY_PERSON_CHART",
 }
-"""The 15 of the 41 documented report types the rule refuses (G5 (1), queue row 225)."""
+"""The 15 of the 41 documented report types the rule refuses.
+
+https://github.com/xippios/sdk-cashctrl/pull/19 extended the rule to the documented types
+the demo tree lacks.
+"""
 
 
 def tree_nodes(nodes: list[dict[str, typing.Any]]) -> Iterator[dict[str, typing.Any]]:
@@ -2431,7 +2438,7 @@ def test_a_payroll_element_retyped_in_the_tree_is_read(
     """The rule follows the tree, not the id: element 24 retyped is read.
 
     ``WITHHOLDING_TAX_RATES``, a documented type the demo tree lacks, lists rates and no
-    persons, so it passes (queue row 225).
+    persons, so it passes (https://github.com/xippios/sdk-cashctrl/pull/19).
     """
     respx_mock.get(TREE_URL).respond(200, json=changed_tree(fixtures_dir, e24=report_type))
     data = replay_fixture("report_element_data", "balance_fp2025")
@@ -2841,12 +2848,13 @@ none since 2026-10-28, when the custom field and cost center lists, the last two
 recorded with a record each. Every model's field names are checked on its schema as well
 (``test_every_model_serialises_under_snake_case_names``)."""
 AS_SENT: dict[str, frozenset[str]] = {"cashctrl_get_report_data": frozenset({"data", "properties"})}
-"""Fields of a tool's ``data`` that hold upstream's JSON as sent (``JsonValue``, decided by
-Johannes on 2026-10-27): their own names are snake_case, the keys inside them upstream's."""
+"""Fields of a tool's ``data`` that hold upstream's JSON as sent (``JsonValue``, as
+https://github.com/xippios/sdk-cashctrl/pull/15 decided): their own names are snake_case,
+the keys inside them upstream's."""
 SNAKE_CASES = {tool: case for tool, case in TOOL_CASES.items() if tool not in UNOBSERVED}
 READ_FIRST: dict[str, tuple[str, ...]] = {"report_element_data": ("report_tree/default",)}
 """Fixtures a task reads before the one its case names: ``get_report_data`` reads the report
-tree first, for the report's type (G5 (1) of 2026-10-28)."""
+tree first, for the report's type (https://github.com/xippios/sdk-cashctrl/pull/19)."""
 
 
 def replay_case(replay_fixture: Callable[[str, str], respx.Route], fixture: str) -> respx.Route:
@@ -2970,10 +2978,10 @@ async def test_every_tool_names_its_organisation_as_the_tenant(
     assert payload["meta"]["tenant"] == DEMO
 
 
-# The API user tag (G5 (2) of 2026-10-28, queue row 129). CashCtrl names the API user that
-# wrote a record ``API:`` and the first four characters of its key in ``createdBy`` and
-# ``lastUpdatedBy``; the recorder writes ``API:REDACTED``, and every model masks a live
-# tag to the same, so a live answer has a fixture's shape.
+# The API user tag (https://github.com/xippios/sdk-cashctrl/pull/19). CashCtrl names the
+# API user that wrote a record ``API:`` and the first four characters of its key in
+# ``createdBy`` and ``lastUpdatedBy``; the recorder writes ``API:REDACTED``, and every
+# model masks a live tag to the same, so a live answer has a fixture's shape.
 
 LIVE_TAG = "API:Zq7k"
 """A tag shaped as upstream writes it, four made-up characters: tests only."""

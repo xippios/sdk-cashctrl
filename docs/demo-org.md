@@ -431,8 +431,8 @@ the first write:
   of `NET` or `GROSS` (`docs/upstream/common.md`), which the run prints before the first
   write. The payments assume the invoice amount is what the customer pays (gross). If
   upstream reads it as net and adds the VAT, the debtors keep the VAT of each paid
-  invoice. The run prints the balance of 1100 at both dates; the human compares it with
-  what the books imply under each reading, at 8.1 %:
+  invoice. The run prints the balance of 1100 at both dates, which whoever runs it
+  compares with what the books imply under each reading, at 8.1 %:
 
   | Balance of 1100 at | amount read as gross | amount read as net, VAT added |
   | --- | ---: | ---: |

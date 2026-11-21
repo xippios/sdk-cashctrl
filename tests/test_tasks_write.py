@@ -12,11 +12,12 @@ preview is what upstream receives.
 The negative update cases change a recorded read in memory (a field removed, a stored
 list filled in) and serve it with ``respx``; they are not fixtures, and they say so.
 
-``update_order_status`` and ``create_order_payment`` (G5 (8) of 2026-10-28) take their
-status ids from the recorded categories (``order_category_list/default`` and
-``purchase``), never a guess. Their fixtures of 2026-10-29 record the marked purchase
-order 26 (created and deleted through the write tools, not recorded): its status set,
-its payment as ``PAIN`` refused and as ``CASH_PDF`` created.
+``update_order_status`` and ``create_order_payment``
+(https://github.com/xippios/sdk-cashctrl/pull/21) take their status ids from the recorded
+categories (``order_category_list/default`` and ``purchase``), never a guess. Their
+fixtures of 2026-10-29 record the marked purchase order 26 (created and deleted through
+the write tools, not recorded): its status set, its payment as ``PAIN`` refused and as
+``CASH_PDF`` created.
 
 The book entries (https://github.com/xippios/sdk-cashctrl/issues/43) record on 2026-11-17
 the marked purchase order 70 (created and deleted through the write tools, not
@@ -164,8 +165,9 @@ async def test_the_write_server_serves_write_tasks_only() -> None:
 
     So the organisation list, a reference tool, stays on the read server. Fourteen write
     tasks: create, update and delete for journal entries, persons and orders, an order's
-    status and an order's payment (G5 (8) of 2026-10-28), and create, update and delete
-    for an order's book entries (https://github.com/xippios/sdk-cashctrl/issues/43).
+    status and an order's payment (https://github.com/xippios/sdk-cashctrl/pull/21), and
+    create, update and delete for an order's book entries
+    (https://github.com/xippios/sdk-cashctrl/issues/43).
     """
     assert len(WRITE_TASKS) == 14
     assert {"update_order_status", "create_order_payment"} <= WRITE_TASKS.keys()
@@ -1450,7 +1452,7 @@ def recorded_purchase_invoice_status() -> int:
 
     From ``order_category_list/purchase`` (recorded on 2026-10-29): the purchase invoice
     category's next status after the first that names no follow-up action, an open one
-    first (gap, row 242).
+    first, as https://github.com/xippios/sdk-cashctrl/pull/21 chose it.
     """
     raw = load_fixture(_FIXTURES / "order_category_list" / "purchase.json").response.body
     categories = ListResponse[OrderCategory].model_validate_json(raw or "")

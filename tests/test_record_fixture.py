@@ -1,15 +1,14 @@
 """The fixture recorder records the demo organisation only and never writes its host or key.
 
 It also holds to its policies: GET only for a path the snapshot in docs/upstream/ documents
-as a GET, and POST for the write tools' operations only, an
-order write only for orders marked xippios-live, read first; .json only, and the refusals
-of five file paths; no e-mail
-address, in the request body neither. The demo
-organisation is synthetic, so every module and every amount may be recorded. The key as
-given and binary bodies are core's ``Scrub``; the host, the encoded forms, the JSON-decoded
-verify and the rest are the recorder's own (``TenantScrub``, sdk-core ADR-0042, decision
-3), whose tests below follow core's at sdk-core ``cb8ecdf`` (``tests/testing/test_scrub.py``,
-``test_fixtures.py``, ``test_record_replay.py``).
+as a GET, and POST for the write tools' operations only, an order write only for orders
+marked xippios-live, read first; .json paths, and of five file paths the refusals alone; no
+e-mail address, in the request body neither. The demo organisation is synthetic, so every
+module and every amount may be recorded. The key as given and binary bodies are core's
+``Scrub``; the host, the encoded forms, the JSON-decoded verify and the rest are the
+recorder's own (``TenantScrub``, sdk-core ADR-0042, decision 3), whose tests below follow
+core's at sdk-core ``cb8ecdf`` (``tests/testing/test_scrub.py``, ``test_fixtures.py``,
+``test_record_replay.py``).
 """
 
 import base64
@@ -120,7 +119,11 @@ def test_wrong_key_never_sends_the_real_key(
 
 @pytest.mark.parametrize("wrong_key", [False, True])
 def test_the_recording_client_never_retries(recorder: ModuleType, wrong_key: bool) -> None:
-    """The demo organisation's configuration with ``RetryPolicy(max_attempts=1)`` (row 138)."""
+    """The demo organisation's configuration with ``RetryPolicy(max_attempts=1)``.
+
+    https://github.com/xippios/sdk-cashctrl/pull/19 gave the recorder a client that never
+    retries, so a 5xx is recorded as it came.
+    """
     client = recorder.recording_client(wrong_key=wrong_key)
     assert client.config.retry.max_attempts == 1
     demo = client_for(DEMO).config
@@ -483,9 +486,10 @@ def test_a_get_to_a_write_path_is_refused(
     capsys: pytest.CaptureFixture[str],
     endpoint: str,
 ) -> None:
-    """A write is recorded as a POST or not at all (row 242 item 10).
+    """A write is recorded as a POST or not at all.
 
-    Any other path the snapshot documents as a POST is refused by the tests below.
+    A GET to a write path is refused, as https://github.com/xippios/sdk-cashctrl/pull/21
+    decided; any other path the snapshot documents as a POST is refused by the tests below.
     """
     assert recorder.main([endpoint, "get", "ids=26"]) == 1
     assert not respx_mock.calls, "refused before any request"
@@ -667,8 +671,9 @@ def test_a_create_without_the_marker_is_refused(
     }
 
 
-# The order writes: every order named is read first and must be marked (Johannes,
-# 2026-10-28). The reads are answered by respx with recorded order reads changed in memory.
+# The order writes: every order named is read first and must be marked, failing closed
+# (https://github.com/xippios/sdk-cashctrl/pull/21). The reads are answered by respx with
+# recorded order reads changed in memory.
 
 ORDER_READ = f"https://{REAL}.cashctrl.com/api/v1/order/read.json"
 ORDER_WRITE_CASES = [
@@ -1714,7 +1719,7 @@ def test_every_field_ending_in_iban_becomes_redacted(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """An order document's ``orgIban``, ``orgQrIban`` and ``recipientIban`` (queue row 243).
+    """An order document's ``orgIban``, ``orgQrIban`` and ``recipientIban``, by one name rule.
 
     ``order/document/read.json`` sends them, only seen ``null`` in demo; the answer is
     set in memory here, not a fixture. Every name that ends in ``iban`` is rewritten.
@@ -1771,7 +1776,11 @@ def test_a_compound_iban_the_scrub_cannot_reach_is_never_written(
 
 
 def test_the_recorder_and_the_tasks_share_one_identifier_rule(recorder: ModuleType) -> None:
-    """Row 242 item 12: ``models.is_identifier_key`` decides for both, ``ssn`` whole."""
+    """``models.is_identifier_key`` decides for both, ``ssn`` whole.
+
+    https://github.com/xippios/sdk-cashctrl/pull/21 gave the recorder's checks and the
+    report drop this one predicate.
+    """
     from xippios.cashctrl import models
 
     assert recorder.is_identifier_key is models.is_identifier_key
