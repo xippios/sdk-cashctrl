@@ -524,10 +524,14 @@ async def test_a_429_is_a_rate_limit_error_with_retry_after(
 
     CashCtrl documents the 429 and nothing about its window (``error-handling.md``); 120
     seconds is beyond the retry policy's backoff, so the client raises at once. NOT
-    RECORDED: the documented 429, composed with a ``Retry-After`` (conventions §10, kind 2).
+    RECORDED: the documented 429, composed as CashCtrl's status pages were recorded,
+    ``CashCtrl - 401 Unauthorized`` and ``CashCtrl - 404 Not Found`` under
+    ``text/plain;charset=utf-8`` (conventions §10, kind 2). Its ``Retry-After`` is an input
+    of the test, not an answer from CashCtrl.
     """
     route = respx_mock.get(f"{BASE}/account/list.json")
-    route.respond(429, headers={"Retry-After": "120"}, text="Too Many Requests")
+    plain = {"Retry-After": "120", "content-type": "text/plain;charset=utf-8"}
+    route.respond(429, headers=plain, text="CashCtrl - 429 Too Many Requests")
     error = await raised("/account/list.json")
     assert isinstance(error, RateLimitError)
     assert error.retry_after == 120.0
