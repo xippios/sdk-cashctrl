@@ -534,10 +534,17 @@ def test_a_refusal_with_a_message_on_an_export_is_no_absence(
 def test_json_that_is_no_refusal_is_raised_too(
     respx_mock: respx.MockRouter, tmp_path: Path, body: bytes
 ) -> None:
-    """Whatever JSON stands in for a file, it is never kept as one."""
+    """Whatever JSON stands in for a file, it is never kept as one.
+
+    The error names the request as core's ``request_description`` gives it (conventions §5).
+    """
     mount(respx_mock, "account/list.pdf", body, JSON_UTF8)
-    with pytest.raises(ValidationError, match="neither a file nor a refusal"):
+    with pytest.raises(ValidationError, match="neither a file nor a refusal") as info:
         tasks.export_accounts(DEMO, "pdf", tmp_path / "accounts.pdf")
+    assert str(info.value) == (
+        "CashCtrl: the answer is JSON that is neither a file nor a refusal; nothing was written "
+        "(GET /api/v1/account/list.pdf)"
+    )
     assert files(tmp_path) == []
 
 
