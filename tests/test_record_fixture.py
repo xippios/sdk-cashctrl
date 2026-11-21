@@ -17,6 +17,7 @@ import dataclasses
 import importlib.util
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -1197,22 +1198,25 @@ def recorded_404(endpoint: str) -> httpx.Response:
     )
 
 
-def changed_in_memory(
-    endpoint: str, status: int, content: bytes, content_type: str
+def recorded_404_changed(
+    endpoint: str, *, status: int, content_type: str, binary: bool = False, **headers: str
 ) -> httpx.Response:
     """NOT RECORDED: ``endpoint``'s recorded 404 changed in memory (conventions §10, kind 4).
 
-    Served at another status, with its content type replaced and its body changed, for a
-    form upstream was not seen to send there: an answer of HTTP 2xx, a file or JSON,
-    which the recorder never writes but for CashCtrl's refusal, so none is recorded.
+    Served at another status or under another content type, with a header added, and for
+    a binary body its first byte made no UTF-8: a form upstream was not seen to send at
+    these paths, which reaches the recorder's branches as an answer of that form would.
     """
-    headers = [
+    answer = recorded_404(endpoint)
+    content = (b"\xff" + answer.content[1:]) if binary else answer.content
+    kept = [
         (name, value)
-        for name, value in recorded_404(endpoint).headers.multi_items()
+        for name, value in answer.headers.multi_items()
         if name.lower() not in ("content-type", "content-length")
     ]
+    added = [(name.replace("_", "-"), value) for name, value in headers.items()]
     return httpx.Response(
-        status, headers=[*headers, ("content-type", content_type)], content=content
+        status, headers=[*kept, *added, ("content-type", content_type)], content=content
     )
 
 
@@ -1229,7 +1233,7 @@ def test_a_file_path_records_the_404_of_an_unknown_id(
     capsys: pytest.CaptureFixture[str],
     endpoint: str,
 ) -> None:
-    """Each path's own recorded 404 is no file: it is written, in its wrapper's directory."""
+    """Each path's own recorded 404 is an error with a text body: written in its wrapper's dir."""
     directory, name = FILE_REFUSALS[endpoint]
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}")
     route.mock(return_value=recorded_404(endpoint))
@@ -1245,59 +1249,99 @@ def test_a_file_path_records_the_404_of_an_unknown_id(
 
 
 @pytest.mark.parametrize("endpoint", sorted(FILE_REFUSALS))
+def test_a_text_error_under_a_files_content_type_is_written(
+    recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter, endpoint: str
+) -> None:
+    """A 404 labelled as a PDF whose body is text is still an error answer, and is written."""
+    directory, name = FILE_REFUSALS[endpoint]
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}")
+    route.mock(
+        return_value=recorded_404_changed(endpoint, status=404, content_type="application/pdf")
+    )
+    assert recorder.main([endpoint, "labelled", f"{name}=1"]) == 0
+    assert (tmp_path / "tests" / "fixtures" / directory / "labelled.json").is_file()
+
+
+@pytest.mark.parametrize("endpoint", sorted(FILE_REFUSALS))
 def test_a_file_paths_refusal_at_http_200_is_recorded(
     recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter, endpoint: str
 ) -> None:
     """CashCtrl's refusal, ``success`` false, is no file either, whatever path answers it.
 
-    NOT RECORDED: the body is the refusal's shape as ``account_read/missing_id`` recorded it,
-    in the path's recorded 404 changed in memory (``changed_in_memory``, conventions §10).
+    NOT RECORDED: CashCtrl's documented refusal, composed in the shape
+    ``account_read/missing_id`` recorded (conventions §10, kind 2).
     """
     directory, name = FILE_REFUSALS[endpoint]
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}")
     refusal = b'{"success":false,"errorMessage":"No.","data":null}'
-    route.mock(return_value=changed_in_memory(endpoint, 200, refusal, JSON_UTF8))
+    route.mock(
+        return_value=httpx.Response(200, content=refusal, headers={"content-type": JSON_UTF8})
+    )
     assert recorder.main([endpoint, "refused", f"{name}=1"]) == 0
     assert (tmp_path / "tests" / "fixtures" / directory / "refused.json").is_file()
 
 
-@pytest.mark.parametrize(
-    ("content", "content_type"),
-    [
-        (b"%PDF-1.7 \xe2\xe3\xcf\xd3", "application/pdf;charset=UTF-8"),
-        (b"PK\x03\x04\x14\x00\x06\x00", "application/vnd.ms-excel"),
-        (b"%PDF-1.7 text alone", "application/pdf"),
-        (b'{"success":true,"data":{"id":1}}', JSON_UTF8),
-        (b'{"total":0,"data":[]}', "application/json"),
-        (b"%PDF-1.7 text alone", JSON_UTF8),
-    ],
-    ids=["binary-pdf", "binary-zip", "text-pdf", "json-success", "json-list", "json-label-pdf"],
-)
+ANSWERS_NOT_WRITTEN: dict[str, Callable[[str], httpx.Response]] = {
+    # The path's recorded 404 changed in memory (``recorded_404_changed``, kind 4).
+    "binary-pdf": lambda endpoint: recorded_404_changed(
+        endpoint, status=200, content_type="application/pdf;charset=UTF-8", binary=True
+    ),
+    "binary-xlsx": lambda endpoint: recorded_404_changed(
+        endpoint, status=200, content_type="application/vnd.ms-excel", binary=True
+    ),
+    "text-pdf": lambda endpoint: recorded_404_changed(
+        endpoint, status=200, content_type="application/pdf"
+    ),
+    "text-labelled-json": lambda endpoint: recorded_404_changed(
+        endpoint, status=200, content_type=JSON_UTF8
+    ),
+    "redirect": lambda endpoint: recorded_404_changed(
+        endpoint, status=302, content_type="text/plain;charset=utf-8", location="/"
+    ),
+    "binary-404-pdf": lambda endpoint: recorded_404_changed(
+        endpoint, status=404, content_type="application/pdf", binary=True
+    ),
+    # NOT RECORDED: shapes recorded at ``.json`` operations, a read's and a list's, composed
+    # (conventions §10, kind 2): JSON that is no refusal.
+    "json-success": lambda _: httpx.Response(
+        200, content=b'{"success":true,"data":{"id":1}}', headers={"content-type": JSON_UTF8}
+    ),
+    "json-list": lambda _: httpx.Response(
+        200, content=b'{"total":0,"data":[]}', headers={"content-type": "application/json"}
+    ),
+}
+"""Answers a file path never writes: a file, JSON that is no refusal, a 3xx, a binary 404."""
+
+
+@pytest.mark.parametrize("kind", sorted(ANSWERS_NOT_WRITTEN))
 @pytest.mark.parametrize("endpoint", sorted(FILE_REFUSALS))
-def test_a_file_path_writes_no_answer_of_http_2xx_but_a_refusal(
+def test_a_file_path_writes_no_answer_but_an_error_or_a_refusal(
     recorder: ModuleType,
     tmp_path: Path,
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
     endpoint: str,
-    content: bytes,
-    content_type: str,
+    kind: str,
 ) -> None:
-    """An answer of HTTP 2xx that is no refusal spends its one request and is never written.
+    """Only an error of HTTP 4xx or 5xx with a text body, or the refusal at HTTP 2xx.
 
-    Whatever its content type says: a file, a file whose bytes happen to be text, and JSON
-    that is no refusal, each in the path's recorded 404 changed in memory
-    (``changed_in_memory``, conventions §10).
+    Any other answer spends its one request and is never written, whatever its content
+    type says: a file, a file whose bytes happen to be text, JSON that is no refusal, a
+    redirect, an error whose body is binary.
     """
     _, name = FILE_REFUSALS[endpoint]
+    answer = ANSWERS_NOT_WRITTEN[kind](endpoint)
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/{endpoint}")
-    route.mock(return_value=changed_in_memory(endpoint, 200, content, content_type))
-    assert recorder.main([endpoint, "a_file", f"{name}=1"]) == 1
+    route.mock(return_value=answer)
+    assert recorder.main([endpoint, "not_kept", f"{name}=1"]) == 1
     assert route.call_count == 1
     assert not (tmp_path / "tests" / "fixtures").exists()
     out = capsys.readouterr().out
     assert out.startswith("not written tests/fixtures/")
-    assert f"{endpoint} answered HTTP 200 ({content_type}) with no refusal" in out
+    content_type = answer.headers["content-type"]
+    assert (
+        f"{endpoint} answered HTTP {answer.status_code} ({content_type}), which a file path" in out
+    )
     assert REAL not in out
 
 
