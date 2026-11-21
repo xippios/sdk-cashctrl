@@ -169,7 +169,11 @@ def test_a_top_level_message_is_read_when_error_message_is_absent(
     ],
 )
 def test_reading_one_record_by_id_is_not_found(path: str) -> None:
-    """A ``read.json`` by ``id``, and a ``read.pdf`` by ``ids`` (assumed alike, not observed)."""
+    """A ``read.json`` by ``id``, and a ``read.pdf`` by ``ids`` (assumed alike, not observed).
+
+    NOT RECORDED: the refusal is composed in the shape ``account_read/unknown_id`` recorded,
+    a documented error (conventions §10, kind 2).
+    """
     error = classify(refusal(path, {"success": False, "errorMessage": "Gone.", "data": None}))
     assert isinstance(error, NotFoundError)
 
@@ -198,6 +202,10 @@ def test_anything_but_a_read_by_id_is_a_rejection(path: str) -> None:
 
 
 def test_a_refusal_is_classified_whatever_the_content_type() -> None:
+    """NOT RECORDED: a refusal composed in the recorded shape (conventions §10, kind 2).
+
+    Served under a content type upstream was not seen to send with it (kind 4's form).
+    """
     body = b'{"success":false,"errorMessage":"Nope."}'
     error = classify(response("/account/delete.json", 200, body, {"content-type": "text/html"}))
     assert isinstance(error, RequestRejected)
@@ -219,10 +227,20 @@ def test_a_refusal_is_classified_whatever_the_content_type() -> None:
 def test_everything_else_falls_through(
     path: str, status: int, body: bytes, content_type: dict[str, str]
 ) -> None:
+    """NOT RECORDED: bodies composed in the test (conventions §10).
+
+    A list and a read in the shapes recorded (kind 2), and a CSV, a PDF, malformed JSON, a
+    204 and a 302 of no shape upstream sends (kind 5), to show that ``classify`` lets them be.
+    """
     assert classify(response(path, status, body, content_type)) is None
 
 
 def test_a_404_means_the_endpoint_does_not_exist() -> None:
+    """NOT RECORDED: the documented 404 of an unknown endpoint (``error-handling.md``).
+
+    No recording holds its body, so ``Not here``, of no shape upstream sends, stands in
+    (conventions §10, kinds 2 and 5); ``_status_error`` words the error from the status.
+    """
     error = classify(response("/account/nope.json", 404, b"Not here", {}))
     assert isinstance(error, UpstreamError)
     assert not isinstance(error, NotFoundError)
@@ -303,10 +321,11 @@ def test_a_404_by_the_id_with_other_parameters_is_not_found(fixtures_dir: Path, 
     ],
 )
 def test_every_other_404_is_an_unknown_endpoint(path: str) -> None:
-    """NOT RECORDED: ``Not here`` is a body of no shape upstream sends (conventions §10).
+    """NOT RECORDED: the documented 404 of an unknown endpoint (``error-handling.md``).
 
-    It shows that ``classify`` leaves every 404 but a file operation's by its id to
-    core's mapping, whatever the body; no recording of another operation is served here.
+    No recording holds its body, so ``Not here``, of no shape upstream sends, stands in
+    (conventions §10, kinds 2 and 5): ``_status_error`` words every 404 but a file
+    operation's by its id as an unknown endpoint, from the status, whatever the body.
     """
     error = classify(response(path, 404, b"Not here", {}))
     assert isinstance(error, UpstreamError)
@@ -315,6 +334,11 @@ def test_every_other_404_is_an_unknown_endpoint(path: str) -> None:
 
 
 def test_core_keeps_mapping_status_retry_after_and_body() -> None:
+    """NOT RECORDED: the documented 403, 429 and 503 of ``error-handling.md``, composed.
+
+    Their bodies are of no shape upstream sends (conventions §10, kinds 2 and 5), to show
+    that core's mapping of status, ``Retry-After`` and body stays.
+    """
     plain = {"content-type": "text/plain"}
     auth = classify(response("/account/list.json", 403, b"Forbidden", plain))
     assert isinstance(auth, AuthError)
@@ -457,7 +481,8 @@ async def test_a_429_is_a_rate_limit_error_with_retry_after(
     """sdk-core ADR-0033, decision 3: core's mapping inside ``classify``, ``Retry-After`` as sent.
 
     CashCtrl documents the 429 and nothing about its window (``error-handling.md``); 120
-    seconds is beyond the retry policy's backoff, so the client raises at once.
+    seconds is beyond the retry policy's backoff, so the client raises at once. NOT
+    RECORDED: the documented 429, composed with a ``Retry-After`` (conventions §10, kind 2).
     """
     route = respx_mock.get(f"{BASE}/account/list.json")
     route.respond(429, headers={"Retry-After": "120"}, text="Too Many Requests")

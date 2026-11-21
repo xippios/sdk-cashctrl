@@ -213,6 +213,8 @@ class FakeCashCtrl:
             return _list(self.custom_fields)
         if path == "account/costcenter/list.json":
             return _list(self.cost_centres)
+        # NOT RECORDED: the documented 404 of an unknown endpoint, composed with a body of no
+        # shape upstream sends (conventions §10, kinds 2 and 5).
         return httpx.Response(404, text="unknown endpoint")
 
     def post(self, path: str, form: dict[str, str]) -> httpx.Response:
