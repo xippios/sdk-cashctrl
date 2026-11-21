@@ -44,14 +44,16 @@ DOCUMENTED_REJECTION = {
 }
 
 
-def response(path: str, status: int, body: bytes, headers: dict[str, str]) -> httpx.Response:
+def response(
+    path: str, status: int, body: bytes, headers: dict[str, str], method: str = "GET"
+) -> httpx.Response:
     return httpx.Response(
-        status, headers=headers, content=body, request=httpx.Request("GET", f"{BASE}{path}")
+        status, headers=headers, content=body, request=httpx.Request(method, f"{BASE}{path}")
     )
 
 
-def refusal(path: str, payload: dict[str, object]) -> httpx.Response:
-    return response(path, 200, json.dumps(payload).encode(), JSON)
+def refusal(path: str, payload: dict[str, object], method: str = "GET") -> httpx.Response:
+    return response(path, 200, json.dumps(payload).encode(), JSON, method)
 
 
 def recorded(fixtures_dir: Path, endpoint: str, case: str) -> httpx.Response:
@@ -60,7 +62,7 @@ def recorded(fixtures_dir: Path, endpoint: str, case: str) -> httpx.Response:
 
 
 def test_the_documented_rejection_names_every_field() -> None:
-    error = classify(refusal("/journal/create.json", DOCUMENTED_REJECTION))
+    error = classify(refusal("/journal/create.json", DOCUMENTED_REJECTION, "POST"))
     assert isinstance(error, RequestRejected)
     assert error.errors == [
         FieldError(field="debitId", message="This field cannot be empty."),
@@ -71,7 +73,7 @@ def test_the_documented_rejection_names_every_field() -> None:
     assert str(error) == (
         "CashCtrl rejected the request: debitId: This field cannot be empty.; "
         "creditId: This field cannot be empty.; amount: This field cannot be empty. "
-        "(GET /api/v1/journal/create.json)"
+        "(POST /api/v1/journal/create.json)"
     )
     assert error.source == "cashctrl"
 
