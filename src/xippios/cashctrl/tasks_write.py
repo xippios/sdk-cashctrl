@@ -34,7 +34,8 @@ into ``False``, and refuses anything else. The decisions taken for these tools:
    take.
 5. **Live tests mark, delete and sweep** (``tests/test_live.py``).
 6. **Deletes** preview the record they would delete. A journal delete reads the entry,
-   confirmed or not, and refuses one an order or a salary run booked (2026-10-24).
+   confirmed or not, and refuses one an order or a salary run booked
+   (https://github.com/xippios/sdk-cashctrl/pull/9).
 7. Core's form bodies (``data=``) carry the fields (``api/_form.py``).
 8. **Order statuses and payments**: ``update_order_status`` and
    ``create_order_payment`` send the fields they are given, nothing read first, so a

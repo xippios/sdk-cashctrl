@@ -83,12 +83,13 @@ BASE_URL_TEMPLATE = "https://{subdomain}.cashctrl.com/api/v1"
 RATE_LIMIT = RateLimit(per_minute=60, burst=1)
 """Per organisation and self-imposed: upstream documents only a 429 and "add delays".
 
-One request at a time, then one a second: CashCtrl documents no burst either. Every
-response carries ``x-cashctrl-requests-left`` (299, a 401
-included, ``docs/upstream/OBSERVED.md``); its window and scope are not documented, so
-nothing here reads it, and no
-``QuotaPolicy`` is installed (sdk-core ADR-0037, decision 2): with no documented window, its default
-of an hour would turn one 429 without ``Retry-After`` into an hour of refusals.
+One request at a time, then one a second: CashCtrl documents no burst either. A 429's
+``retry_after`` comes from ``Retry-After`` when upstream sends it: CashCtrl documents no
+fallback. Every response carries ``x-cashctrl-requests-left`` (299, a 401 included,
+``docs/upstream/OBSERVED.md``); its window and scope are not documented, so nothing here
+reads it, and no ``QuotaPolicy`` is installed (sdk-core ADR-0037, decision 2): with no
+documented window, its default of an hour would turn one 429 without ``Retry-After`` into
+an hour of refusals.
 """
 DEMO = "demo"
 """The reserved organisation, declared by its own two variables and never listed."""

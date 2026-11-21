@@ -14,7 +14,8 @@ current period is 2025, and the orders are in 2026.
 
 The write tools are tested live per resource, one test that calls each of its write
 tools once with ``confirm=True`` (create, update, delete), so that every record a test
-creates is deleted by the same test (decision 5 of the wave 2 interview, 2026-10-23):
+creates is deleted by the same test, as decision 5 of
+https://github.com/xippios/sdk-cashctrl/pull/8 has it:
 
 - every record carries the marker ``xippios-live`` (``MARK``) in its title, company or
   description, and ``nr`` where it has one, so that no sequence number advances;
@@ -35,7 +36,7 @@ That refusal is checked live once, read-only: a delete without ``confirm`` of an
 seeded purchase order booked, found with GET calls, is refused before any preview.
 
 ``update_order_status`` and ``create_order_payment`` are tested on one marked purchase
-order of a seeded vendor (G5 (8) of 2026-10-28; Johannes, 2026-10-28): created, its
+order of a seeded vendor (https://github.com/xippios/sdk-cashctrl/pull/21): created, its
 status set to another status of its category (the purchase categories listed live),
 read back, its payment created, the order deleted. Upstream documents no payment
 delete, so a payment of a deleted order is the accepted residue (no book entry, no
@@ -61,13 +62,14 @@ order alone.
 The file tasks tested live write into pytest's temporary directory and assert the file's
 size and content type only: one seeded sales order's document, its id from the list, the
 journal of 2025 as CSV, at most five entries (``limit=5``), and the persons as CSV with
-the columns ``export_persons`` names by default, which upstream must accept (queue row
-235). The two exports stand for the four, which share one download path (G5 (7) of
-2026-10-28): ``export_accounts`` and ``export_orders`` have no live test of their own.
+the columns ``export_persons`` names by default, which upstream must accept. The two
+exports stand for the four, which share one download path, as
+https://github.com/xippios/sdk-cashctrl/pull/20 decided: ``export_accounts`` and
+``export_orders`` have no live test of their own.
 One more asks for the document of an order that does not exist and expects
 ``NotFoundError`` and no file: CashCtrl answers it with HTTP 404 (observed on
 2026-10-29), which ``classify`` maps to ``NotFoundError`` on a ``read.pdf`` by ``ids``
-(queue row 235).
+(``docs/upstream/OBSERVED.md``).
 
 The report files (https://github.com/xippios/sdk-cashctrl/issues/45), their ids from the
 tree ``report_tree`` reads once: the balance sheet of 2025 and the system collection
@@ -347,7 +349,7 @@ async def test_export_persons_with_the_default_columns(demo_org: str, tmp_path: 
 
 
 async def test_the_document_of_an_unknown_order_is_not_found(demo_org: str, tmp_path: Path) -> None:
-    # Upstream answers HTTP 404, NotFoundError for a read.pdf by ids (queue row 235);
+    # Upstream answers HTTP 404, NotFoundError for a read.pdf by ids (docs/upstream/OBSERVED.md);
     # anything else fails here: a file written, another error, or no error.
     dest = tmp_path / "missing.pdf"
     with pytest.raises(NotFoundError) as info:
@@ -875,11 +877,12 @@ async def test_order_status_payment_delete(
     books (upstream's default, as the seeded purchase orders show), and set to the next
     status that names no follow-up action (``action_id`` empty), an open one first. Its
     payment pays every open amount (``PAYMENT_TYPE``, ``CASH_PDF``). The payment's
-    residue is accepted (Johannes, 2026-10-28): upstream documents no payment delete, so
-    once the order is deleted the test checks that no journal entry of the order is left and probes
-    ``order/payment/download`` once with the payment's parameters through the demo
-    client, a binary answer never recorded: whether the payment survived its order's
-    deletion is recorded as the property ``payment_download``, ``file`` or ``refusal``.
+    residue is accepted (https://github.com/xippios/sdk-cashctrl/pull/21): upstream
+    documents no payment delete, so once the order is deleted the test checks that no
+    journal entry of the order is left and probes ``order/payment/download`` once with the
+    payment's parameters through the demo client, a binary answer never recorded: whether
+    the payment survived its order's deletion is recorded as the property
+    ``payment_download``, ``file`` or ``refusal``.
 
     Observed on 2026-10-29, the first run: the status set ("Status changed"), the
     ``CASH_PDF`` payment created ("Payment order created", no ``insertId``), the order

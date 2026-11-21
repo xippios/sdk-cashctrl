@@ -2,11 +2,19 @@
 
 The lock is core's (``TenantLock``, ``bind_tasks``, ``tenant_instructions``) and so is the
 serve command (``serve_tenants``); core's ``tests/test_tenant_lock.py`` and
-``tests/mcp/test_cli.py`` test them. What stays here is the package's own wiring: its
-tasks bound, ``--org`` with ``check_org`` on both entry points, the instructions they
-end with, and the write server held to loopback. Every tool call goes through
-``xippios.core.testing.mcp_call``, an in-process ``mcp.Client``, so core's argument check
-runs as it does for a real client.
+``tests/mcp/test_cli.py`` test them. The lock is no middleware but a wrapper:
+``build(TenantLock(TENANTS, org))`` in ``mcp.py`` and in ``mcp_write.py`` returns the tool
+set whose tasks ``bind_tasks`` binds, one tool per task with ``org`` bound at build, the
+same ``__name__`` (the tool names and the ``MCP_CAPS`` keys stay), the docstring without
+its ``org`` line and a signature without ``org``. A bound server's instructions are its
+module's ``BOUND_INSTRUCTIONS``, without the clause that a tool takes ``org``, and core ends
+them with the sentence that names the organisation (``SENTENCE``); ``list_organisations``
+lists the bound organisation alone, with ``meta.tenant`` ``None``.
+
+What stays here is the package's own wiring: its tasks bound, ``--org`` with ``check_org``
+on both entry points, the instructions they end with, and the write server held to
+loopback. Every tool call goes through ``xippios.core.testing.mcp_call``, an in-process
+``mcp.Client``, so core's argument check runs as it does for a real client.
 """
 
 import inspect

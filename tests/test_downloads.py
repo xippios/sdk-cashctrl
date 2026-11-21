@@ -1,14 +1,13 @@
 """The file tasks: an order's document, the list exports and the reports, on synthetic bytes.
 
-G5 (5), (6) and (7) of 2026-10-28, and the reports' PDF and Excel files of
-https://github.com/xippios/sdk-cashctrl/issues/45, each refused by type on the recorded
-report tree before its download. A file cannot be recorded: the recorder refuses an
-endpoint without ``.json`` and a body that is not UTF-8 text, so no file wrapper has a
-fixture directory. As core's own download tests do, each test mounts a small made-up body
-with respx under the content type upstream is assumed to send (``BODIES``) and checks the
-request's path and query (``sent_query``), the bytes at ``dest``, the ``Downloaded``
-fields and ``meta``. A JSON answer, a refusal sent as HTTP 200, is raised and leaves no
-file (queue row 142).
+The order document and the list exports of https://github.com/xippios/sdk-cashctrl/pull/20,
+and the reports' PDF and Excel files of https://github.com/xippios/sdk-cashctrl/issues/45,
+each refused by type on the recorded report tree before its download. The recorder keeps no
+file, only the refusals of five file paths, so each test mounts a small made-up body with
+respx under the content type upstream is assumed to send (``BODIES``), as core's own
+download tests do, and checks the request's path and query (``sent_query``), the bytes at
+``dest``, the ``Downloaded`` fields and ``meta``. A JSON answer, a refusal sent as HTTP 200,
+is raised and leaves no file, as the same pull request decided.
 """
 
 import inspect
@@ -163,7 +162,7 @@ def test_there_is_a_wrapper_for_every_format_of_every_export() -> None:
     assert set(FILE_WRAPPERS) == expected | {"order_document_read_pdf"} | REPORT_WRAPPERS
 
 
-# The order document (G5 (5) of 2026-10-28; Johannes, 2026-10-28: ids, one PDF a call).
+# The order document: ids, one PDF a call (https://github.com/xippios/sdk-cashctrl/pull/20).
 
 
 def test_download_order_document_writes_the_pdf_where_the_caller_says(
@@ -229,7 +228,7 @@ def test_download_order_document_refuses_ids_before_anything_is_sent(
     assert files(tmp_path) == []
 
 
-# The list exports (G5 (6) of 2026-10-28).
+# The list exports (https://github.com/xippios/sdk-cashctrl/pull/20).
 
 
 @pytest.mark.parametrize("format", BODIES)
@@ -399,7 +398,7 @@ def test_the_account_export_takes_no_limit_as_upstream_documents_none() -> None:
 def test_the_person_export_names_the_projections_columns_without_identifiers(
     respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
-    """Johannes, 2026-10-28: ``PersonProjection``'s fields under upstream's names, sent."""
+    """``PersonProjection``'s fields under upstream's names, sent, as ``PERSON_COLUMNS``."""
     route = mount(respx_mock, "person/list.pdf", *BODIES["pdf"])
     tasks.export_persons(DEMO, "pdf", tmp_path / "persons.pdf")
     columns = sent_query(route)["columns"].split(",")
@@ -461,8 +460,9 @@ def test_every_export_checks_format_and_columns(
     assert not respx_mock.calls
 
 
-# A refusal sent as HTTP 200 (queue row 142): core writes a 2xx body unread, so the file
-# task reads the answer's content type before the file becomes dest.
+# A refusal sent as HTTP 200 (https://github.com/xippios/sdk-cashctrl/pull/20): core writes
+# a 2xx body unread, so the file task reads the answer's content type before the file
+# becomes dest.
 
 
 def test_an_unknown_order_is_not_found_and_nothing_is_written(
@@ -543,7 +543,7 @@ def test_json_that_is_no_refusal_is_raised_too(
 def test_any_other_content_type_is_kept_as_the_file(
     respx_mock: respx.MockRouter, tmp_path: Path, content_type: str | None
 ) -> None:
-    """The content type decides (row 142's rule): even a refusal's text under another type."""
+    """The content type decides: even a refusal's text under another type is the file."""
     body = b'{"success":false}'
     mount(respx_mock, "order/list.csv", body, content_type)
     result = tasks.export_orders(DEMO, "csv", tmp_path / "orders.csv")
@@ -768,7 +768,11 @@ def test_a_payroll_or_people_report_is_refused_before_its_download(
 def test_the_debtor_report_passes_as_get_report_data_reads_it(
     respx_mock: respx.MockRouter, fixtures_dir: Path, tmp_path: Path
 ) -> None:
-    """``OPEN_DEBTORS`` names business partners as ``list_persons`` does (0.3.0, row 225)."""
+    """``OPEN_DEBTORS`` names business partners as ``list_persons`` does, so it is read.
+
+    https://github.com/xippios/sdk-cashctrl/pull/19 passed the debtor and creditor reports,
+    with the drop of every identifier key as their guard.
+    """
     mount_tree(respx_mock, fixtures_dir)
     route = mount_report(respx_mock, "report/element/download.pdf", "pdf")
     tasks.download_report(DEMO, 12, "pdf", tmp_path / "debtors.pdf", fiscal_period=FP2025)
