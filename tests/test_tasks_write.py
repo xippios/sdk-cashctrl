@@ -269,8 +269,9 @@ def test_a_refused_create_names_the_field(replay_fixture: ReplayFixture) -> None
     assert raised.value.errors == [
         FieldError(field="debitId", message="This field cannot be empty.")
     ]
-    assert (
-        str(raised.value) == "CashCtrl rejected the request: debitId: This field cannot be empty."
+    assert str(raised.value) == (
+        "CashCtrl rejected the request: debitId: This field cannot be empty. "
+        "(POST /api/v1/journal/create.json)"
     )
 
 
@@ -532,6 +533,10 @@ def test_deleting_a_gone_entry_is_refused(replay_fixture: ReplayFixture) -> None
         tasks_write.delete_journal_entry(DEMO, JOURNAL_ENTRY, confirm=True)
     assert raised.value.errors == []
     assert raised.value.upstream_message == "This book entry does not exist."
+    assert str(raised.value) == (
+        "CashCtrl rejected the request: This book entry does not exist. "
+        "(POST /api/v1/journal/delete.json)"
+    )
 
 
 @pytest.mark.parametrize("confirm", [False, True])
@@ -1578,6 +1583,9 @@ def test_a_refused_payment_names_the_date_and_the_bank_accounts(
     assert str(refused.value).startswith(
         "CashCtrl rejected the request: date: The date cannot be in the past.; "
     )
+    assert str(refused.value).endswith(
+        "Sender: BIC must be set. (POST /api/v1/order/payment/create.json)"
+    )
 
 
 @pytest.mark.parametrize(
@@ -2453,7 +2461,7 @@ async def test_a_refusal_through_the_write_server(
     )
     assert rejected == (
         "error: RequestRejected: CashCtrl rejected the request: "
-        "debitId: This field cannot be empty."
+        "debitId: This field cannot be empty. (POST /api/v1/journal/create.json)"
     )
 
 

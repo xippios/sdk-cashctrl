@@ -521,6 +521,10 @@ def test_a_refusal_with_a_message_on_an_export_is_no_absence(
     with pytest.raises(RequestRejected) as info:
         tasks.export_persons(DEMO, "xlsx", tmp_path / "persons.xlsx")
     assert info.value.upstream_message == "Not allowed."
+    assert (
+        str(info.value)
+        == "CashCtrl rejected the request: Not allowed. (GET /api/v1/person/list.xlsx)"
+    )
     assert files(tmp_path) == []
 
 
