@@ -35,6 +35,7 @@ from xippios.core import (
     InvalidRequestError,
     ValidationError,
     XippiosError,
+    request_description,
 )
 
 from xippios.cashctrl._client import NEUTRAL_HOST, SOURCE, classify, client_for
@@ -79,8 +80,8 @@ def _refusal(
     if error is not None:
         return error
     return ValidationError(
-        f"{SOURCE}: {endpoint} answered JSON that is neither a file nor a refusal; "
-        "nothing was written",
+        "CashCtrl: the answer is JSON that is neither a file nor a refusal; nothing was "
+        f"written ({request_description(answer)})",
         raw=head[:BODY_LIMIT].decode("utf-8", errors="replace"),
         source=SOURCE,
     )
