@@ -95,7 +95,8 @@ any amount; it still scrubs e-mail addresses, API user tags, token-like body fie
 fixture), and refuses any method but GET and POST, a POST to anything but the fourteen
 write paths, a GET to a path `docs/upstream/` does not document as a GET, a create
 without the marker `xippios-live`, an order write naming an unmarked order or a book
-entry's update or delete whose order is unmarked, and any endpoint but `.json`. Writes
+entry's update or delete whose order is unmarked, and any endpoint but `.json` and the
+five `FILE_PATHS`, whose refusals alone it writes. Writes
 against demo create a record marked `xippios-live`, update it and delete it again,
 nothing else but a payment of a deleted order (see Write tools). The demo subdomain is
 treated like a key: never in a file, a commit, a log line or a report. The repository is
@@ -531,10 +532,9 @@ through core's `download` into a temporary file beside `dest` and renames it the
 file lands where the caller says, and nothing is read into a result, held in memory or
 cached. Core writes a 2xx body unread, so `download` reads `Content-Type`
 first: JSON is a refusal sent as HTTP 200, whose head goes through `classify`; the file
-is removed and `dest` left as it was. The recorder never records a binary body or a
-file endpoint, so a file wrapper has no fixture directory: `tests/test_downloads.py`
-mounts synthetic bytes; `test_live.py` downloads one order document, two exports and
-the five report files, and expects an unknown order's and an unknown report's refusal.
+is removed and `dest` left as it was. The recorder writes no file, so
+`tests/test_downloads.py` mounts synthetic bytes; `test_live.py` downloads one order
+document, two exports and the five report files, and expects an unknown order's and an unknown report's refusal.
 
 ### How to record a fixture
 

@@ -66,10 +66,20 @@ never shows a value, and exits with status 1:
   behind: after a book entry, the entry's delete before its orders'; upstream documents
   no delete of a payment, so after one it asks for the orders' delete, which leaves the
   payment behind.
-- ``.json`` only. An endpoint without the extension answers a bare number or a document
-  (``account/balance``, ``account/costcenter/balance``, ``fiscalperiod/result``,
-  ``setting/get``) and an export (``.pdf``, ``.xlsx``, ``.csv``, ``.zip``) a file; both
-  are refused before a request is sent.
+- ``.json`` only, and five file paths for their refusals. An endpoint without the
+  extension answers a bare number or a document (``account/balance``,
+  ``account/costcenter/balance``, ``fiscalperiod/result``, ``setting/get``) and an export
+  (``.pdf``, ``.xlsx``, ``.csv``, ``.zip``) a file; both are refused before a request is
+  sent. ``FILE_PATHS`` names the five file paths a GET may be recorded for, the downloads
+  whose 404 for an id no record has ``_client.classify`` maps: ``order/document/read.pdf``
+  and the PDF and Excel files of a report element and of a report collection
+  (https://github.com/xippios/coordinate-sdk/issues/123,
+  https://github.com/xippios/coordinate-sdk/issues/124). Their answer is written only when
+  it is no file: an answer of HTTP 2xx whose content type is not JSON (``FILE``) is
+  refused after its one request and nothing is written, so the recorder never keeps a
+  file; a 404 page or CashCtrl's JSON refusal is recorded. Give such a path an id no record
+  has, ``elementId=999999999``, and a case named after its format, ``unknown_id_pdf``:
+  the fixture's directory drops the extension.
 - No e-mail addresses. Every e-mail-shaped string in the request URL, the request
   body, the response header values and the response body becomes ``user@example.com``,
   with ``@`` written plainly, as ``%40`` or as the HTML entities ``&#64;``, ``&#x40;``
@@ -106,7 +116,8 @@ fixture in memory with ``Scrub(secrets=[key, its basic-auth token])`` (conventio
 credentials scrubbed, the key and its token made ``REDACTED`` where they appear as given,
 and a plain verify that refuses the exchange when either is still there as given; core
 also refuses a body that is not UTF-8 text, which no scrub can read (exports are out of
-scope for fixtures, which the recorder's message says first). Then the recorder's own
+scope for fixtures, which the recorder's message says first), after the recorder has
+refused any file a file path answered. Then the recorder's own
 step, ``TenantScrub``, runs on the ``Fixture`` core returns (sdk-core ADR-0042, decision 4): the
 demo host (``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``, in any case, IDNA or
 percent-encoded) becomes ``demo.cashctrl.com``, the host offline tests replay against, in
@@ -228,6 +239,21 @@ WRITE_PATHS = frozenset(
     }
 )
 """The endpoints a POST may be recorded for: exactly those the write tools call."""
+FILE_PATHS = frozenset(
+    {
+        "order/document/read.pdf",
+        "report/element/download.pdf",
+        "report/element/download.xlsx",
+        "report/collection/download.pdf",
+        "report/collection/download.xlsx",
+    }
+)
+"""The file paths a GET may be recorded for, its answer only when it is no file (``is_a_file``).
+
+The downloads whose 404 for an id no record has ``_client.classify`` maps to
+``NotFoundError`` (https://github.com/xippios/coordinate-sdk/issues/124).
+"""
+_JSON = "application/json"
 MARK = "xippios-live"
 """The marker a recorded create must carry in one of its values (title, company, ...)."""
 ORDER_WRITES = {
@@ -412,10 +438,10 @@ def refusal(method: str, endpoint: str) -> str | None:
     """Why the request must not be sent at all, else ``None``.
 
     Refused: a method other than GET and POST; a POST to anything but ``WRITE_PATHS``;
-    a GET to one of ``WRITE_PATHS``; an endpoint without ``.json``; a GET to any other
-    path the snapshot does not document as a GET alone (``documented_methods``), since
-    whether upstream acts on a GET to a POST path is unverified
-    (https://github.com/xippios/sdk-cashctrl/issues/27).
+    a GET to one of ``WRITE_PATHS``; an endpoint without ``.json`` but ``FILE_PATHS``; a
+    GET to any other path the snapshot does not document as a GET alone
+    (``documented_methods``), since whether upstream acts on a GET to a POST path is
+    unverified (https://github.com/xippios/sdk-cashctrl/issues/27).
     """
     if method.upper() not in ("GET", "POST"):
         return (
@@ -428,7 +454,7 @@ def refusal(method: str, endpoint: str) -> str | None:
             f"a POST is recorded only for one of the fourteen write paths the write tools "
             f"call ({', '.join(sorted(WRITE_PATHS))}), not {endpoint}"
         )
-    if not endpoint.endswith(".json"):
+    if not endpoint.endswith(".json") and endpoint not in FILE_PATHS:
         return (
             f"only .json endpoints are recorded, not {endpoint}: one without the extension "
             "answers a bare number or a document, and an export is a file"
@@ -466,6 +492,16 @@ async def exchange_async(
 
 
 exchange = sync(exchange_async)
+
+
+def is_a_file(response: httpx.Response) -> bool:
+    """Whether an answer is a file: HTTP 2xx with a content type other than JSON.
+
+    A file path's answer is recorded only when it is no file, a 404 page or CashCtrl's
+    refusal as JSON, never the file an id fetched.
+    """
+    media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    return response.is_success and media_type != _JSON
 
 
 def order_ids(text: str) -> list[int] | None:
@@ -1136,6 +1172,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     response = exchange(client, method, f"/{args.endpoint}", args.params)
     if method == "POST":
         print(changed_reminder(args.endpoint, response))  # noqa: T201
+    if args.endpoint in FILE_PATHS and is_a_file(response):
+        content_type = response.headers.get("content-type") or "no content type"
+        print(  # noqa: T201
+            f"not written {path.relative_to(ROOT)}: {args.endpoint} answered with a file "
+            f"(HTTP {response.status_code}, {content_type}); a file path is recorded only for "
+            "an answer that is no file, such as the 404 of an id no record has"
+        )
+        return 1
     try:
         fixture = scrubbed(response, key, subdomain)
     except ValueError as refused_by_scrub:  # names what and where, never a value
