@@ -21,18 +21,23 @@ or ``FETCHED.md``'s, in any letter case, stops the run (conventions §3).
 Every table on the page is a two-column parameter table (a ``<th>`` name, a ``<td>`` with
 labels and description). It becomes a pipe table, or an HTML table where it nests another
 table. ``split`` stops on any other table shape, on a tag in a table cell outside
-``CELL_TAGS``, on an unknown icon, on a footer whose copyright notice is not ``NOTICE`` and
-on any other change to the page's structure, so that a new construct is looked at before it
-is converted; it also stops unless every section shows the same words, in the same order,
-on the page and in the Markdown. The same page gives the same snapshot files on any day;
-only ``FETCHED.md`` carries the time.
+``CELL_TAGS``, on an unknown icon and on any other change to the page's structure, so that
+a new construct is looked at before it is converted; it also stops unless every section
+shows the same words, in the same order, on the page and in the Markdown. The same page
+gives the same snapshot files on any day; only ``FETCHED.md`` carries the time.
 
-The port to the frame gave up four things the frame carries for no single source (sdk-core
-ADR-0046, decision 2): a run from a saved copy of the page (``--from-file``), a
-``User-Agent`` of its own, the page asked for gzipped, and the removal of an entry's file at
-the top of ``docs/upstream/`` once the table of contents drops the entry. The frame removes
-a file it no longer produces from the subdirectories it writes to alone, so such a file is
-removed by hand, and ``--check`` names no leftover. No key is needed or read. Run from the
+The frame checks the attribution on every run: the footer's copyright notice, ``NOTICE``,
+in the alternative text of its logo, and the error handling's link to the terms.
+
+The port to the frame gave up six things the frame carries for no single source (sdk-core
+ADR-0046, decisions 2 and 7): a run from a saved copy of the page (``--from-file``), a
+``User-Agent`` of its own, the page asked for gzipped, the removal of an entry's file at
+the top of ``docs/upstream/`` once the table of contents drops the entry, the fragment of
+the entry in each file's row of ``FETCHED.md``, which names the page's URL while the file's
+first line keeps the fragment, and its check that the notice stands in the footer's logo,
+since the frame checks it on the page as a whole. The frame removes a file it no longer
+produces from the subdirectories it writes to alone, so such a file is removed by hand, and
+``--check`` names no leftover. No key is needed or read. Run from the
 repository root, in the project's environment, whose dev group holds the converter::
 
     uv run scripts/refresh_upstream.py
@@ -67,8 +72,7 @@ OBSERVED = "OBSERVED.md"
 """The notes on what upstream does but never documents, written by hand (conventions §3)."""
 
 PAGE_URL = "https://app.cashctrl.com/static/help/en/api/index.html"
-YEAR = "2026"
-NOTICE = f"\N{COPYRIGHT SIGN} {YEAR} CashCtrl Ltd."
+NOTICE = "\N{COPYRIGHT SIGN} 2026 CashCtrl Ltd."
 """The footer's copyright notice as the page prints it, in its logo's alt text."""
 TERMS = "https://cashctrl.com/en/about/terms"
 """CashCtrl's terms, which the error handling's text links as "Terms of Service"."""
@@ -111,7 +115,6 @@ _WORD = re.compile(r"\w+")
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 _LINK_TARGET = re.compile(r"\]\([^()\s]*\)")
 _MARKUP_TAG = re.compile(r"(?<!\\)</?[A-Za-z][A-Za-z0-9]*(?=[\s/>])[^<>]*>")
-_COPYRIGHT = re.compile(r"\N{COPYRIGHT SIGN} (\d{4}) CashCtrl Ltd\.+")
 
 
 @dataclass(frozen=True)
@@ -232,16 +235,6 @@ def split_page(soup: BeautifulSoup) -> list[Part]:
     if empty or len(set(names)) != len(names) or {"fetched.md", OBSERVED.lower()} & set(names):
         raise _page_changed(f"entries without sections {empty} or clashing file names {names}")
     return parts
-
-
-def copyright_year(soup: BeautifulSoup) -> str:
-    """The year in the footer's copyright notice, which is the alt text of its logo."""
-    logo = soup.select_one("main.content > footer img[alt]")
-    notice = re.sub(r"\s+", " ", str(logo.get("alt"))).strip() if logo else ""
-    match = _COPYRIGHT.fullmatch(notice)
-    if match is None:
-        raise _page_changed(f"the footer's copyright notice is {notice!r}")
-    return match[1]
 
 
 class _Converter(MarkdownConverter):
@@ -572,9 +565,9 @@ def _headings(markdown: str) -> int:
 def split(page: Page, response: Response) -> Mapping[str, bytes]:
     """The snapshot's files from the page: one Markdown file per entry of its contents.
 
-    The page must be HTML in UTF-8 whose footer states ``NOTICE``; every section's words
-    must be the same on the page and in the Markdown, and every ``h2`` and ``h3`` heading
-    converted, or the run stops before anything is written.
+    The page must be HTML in UTF-8; every section's words must be the same on the page and
+    in the Markdown, and every ``h2`` and ``h3`` heading converted, or the run stops before
+    anything is written.
     """
     content_type = (response.content_type or "").split(";")[0].strip().lower()
     if content_type != "text/html":
@@ -587,9 +580,6 @@ def split(page: Page, response: Response) -> Mapping[str, bytes]:
         print(f"  kept as text, not HTML elements: {', '.join(sorted(set(stray)))}")  # noqa: T201
     soup = BeautifulSoup(source, "html.parser")
     parts = split_page(soup)
-    year = copyright_year(soup)
-    if year != YEAR:
-        raise _page_changed(f"the footer's copyright notice is of {year}, not {YEAR}")
     expected = sum(len(s.select("h2, h3")) for part in parts for s in part.sections)
     files: dict[str, str] = {}
     words = 0
@@ -656,14 +646,7 @@ SNAPSHOT = Snapshot(
     slug="cashctrl",
     pages=(Page(PAGE_URL, split=True),),
     attribution=(
-        Statement(
-            NOTICE,
-            "",
-            where=(
-                "the alt text of the logo in the page's footer, which the frame does not "
-                "read; the script's split stops the run when the notice differs"
-            ),
-        ),
+        Statement(NOTICE, PAGE_URL, where="the alternative text of the logo in the page's footer"),
         Statement(
             "Terms of Service",
             PAGE_URL,
