@@ -150,11 +150,11 @@ tests/
   test_entry_points.py  the servers' entry points, -read and -write, and the text that names them
   test_record_fixture.py  the recorder never writes the demo host, subdomain or key
   test_seed_demo.py       the seeder refuses unsafe states before any write, offline
-  test_refresh_upstream.py  the capture script keeps and lists OBSERVED.md, offline
+  test_refresh_upstream.py  the capture script's declaration and hooks on core's frame, offline
   test_observed.py  OBSERVED.md's notes and probes
   test_claude_md.py  this file stays under 37,000 characters
-  test_built_answers.py  every answer a test builds names its kind of conventions §10
-  replay_census.py  the replays that answer another request, read by test_built_answers.py
+  test_built_answers.py  core's check that every answer a test builds names its kind of
+                   conventions §10, and its census of the replays, collected in one line
   test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
 docs/
   upstream/        documentation snapshot, FETCHED.md, OBSERVED.md
@@ -372,9 +372,10 @@ semantics or the shape of the public API.
 
 The sections above and the commands under `.claude/commands/` hold here as well. The
 subsections below hold cashctrl's own lines, and where a command and this section differ,
-this section is cashctrl's form. `/refresh-upstream`'s capture script is cashctrl's own, not
-the skeleton, and has no `--check`: run it as its docstring says (`--out`, `--from-file`),
-the pins of its script block and of the dev group moving together.
+this section is cashctrl's form. `/refresh-upstream`'s capture script declares its snapshot
+on core's frame (sdk-core ADR-0046), its own code the hooks `split` and `note`: run it as its
+docstring says, `--out` and `--check` the frame's options, in the project's environment,
+whose dev group pins the converter its hooks use.
 
 ### How to add an endpoint
 

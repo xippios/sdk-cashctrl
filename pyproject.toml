@@ -48,7 +48,7 @@ dev = [
   "respx>=0.22",
   "anyio>=4",
   "detect-secrets>=1.5",
-  # Pinned to scripts/refresh_upstream.py's PEP 723 block, for mypy --strict over it.
+  # The converter scripts/refresh_upstream.py's hooks use, run in this environment.
   "beautifulsoup4==4.15.0",
   "markdownify==1.2.3",
 ]
