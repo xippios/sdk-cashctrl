@@ -14,11 +14,12 @@ as underscores and without its extension: ``tests/fixtures/account_read/unknown_
 as upstream names them, sent in the order given.
 
 The organisation is not a parameter. The recorder removes ``CASHCTRL_ORGS`` from its own
-environment and always records through ``client_for("demo")``'s configuration, so it
-cannot reach a productive organisation, in a client of its own that never retries
-(``recording_client``, ``RetryPolicy(max_attempts=1)``): a 5xx is recorded as it came and
+environment and always records through ``client_for("demo")``, the demo organisation's own
+client, so it cannot reach a productive organisation, and sends its one request with core's
+``send_once``, which never retries and never answers from the cache, whatever the client's
+``RetryPolicy`` says (sdk-core ADR-0048, decision 3): a 5xx is recorded as it came and
 spends no request on a retry. ``--wrong-key`` sends ``not-a-valid-key`` instead of the
-real key, through the same kind of client, to record a 401 without touching the real key.
+real key, as that one request's ``auth=``, to record a 401 without touching the real key.
 
 The demo organisation holds synthetic books only, seeded by ``scripts/seed_demo.py`` and
 described in ``docs/demo-org.md``: invented companies on placeholder streets,
@@ -53,7 +54,7 @@ never shows a value, and exits with status 1:
   text to mark, and a book entry carries its order's marker
   (https://github.com/xippios/sdk-cashctrl/issues/44). The recorder reads every order
   their ``ids`` or ``orderIds`` name (``order/read.json``, one GET each, through the
-  recording client) and refuses the write, before it is sent, unless each order is
+  demo organisation's own client) and refuses the write, before it is sent, unless each order is
   marked as the live tests mark theirs, ``MARK`` in its ``description`` or ``MARK`` as
   its ``nr``; an order that cannot be read refuses it too (``unmarked_orders``).
   ``order/bookentry/update.json`` and ``order/bookentry/delete.json`` name book entries
@@ -77,11 +78,15 @@ never shows a value, and exits with status 1:
   maintainer decided on 2026-11-21, so that the mapping rests on recorded answers. Their
   answer is written only when it is no file: an error of HTTP 4xx or 5xx whose body is
   text, or at HTTP 2xx CashCtrl's refusal, a JSON object with ``success`` false. Any other
-  answer, a 1xx or 3xx, any other 2xx and any answer whose body is binary, whatever its
-  content type says, is refused after its one request and nothing is written
-  (``kept_at_a_file_path``), so the recorder never keeps a file. Give such a path an id no
+  2xx and any answer whose body is binary, whatever its content type says, is refused
+  after its one request and nothing is written (``kept_at_a_file_path``), so the recorder
+  never keeps a file. Give such a path an id no
   record has, ``elementId=999999999``; its fixture lands in its wrapper's directory, the
   extension the last word: ``tests/fixtures/report_element_download_pdf/unknown_id.json``.
+- No 1xx or 3xx, at any path. Core's ``send_once`` refuses an answer of a 1xx or a 3xx
+  status, which is no final answer of its operation, after its one request: nothing is
+  written, and the message names the method, the path, the status and what to record
+  instead (sdk-core ADR-0048, decision 4).
 - No e-mail addresses. Every e-mail-shaped string in the request URL, the request
   body, the response header values and the response body becomes ``user@example.com``,
   with ``@`` written plainly, as ``%40`` or as the HTML entities ``&#64;``, ``&#x40;``
@@ -112,15 +117,17 @@ such tag becomes ``API:REDACTED``,
   scrub does not reach, so such a write is not recorded. A compound name
   (``publicHash``) is not scrubbed; it is written for review.
 
-Nothing unscrubbed touches disk. The request goes through the real client with
-``raise_on_error=False``, and core's ``fixture_from_response`` turns the exchange into a
-fixture in memory with ``Scrub(secrets=[key, its basic-auth token])`` (conventions §10):
+Nothing unscrubbed touches disk. The request goes through the demo organisation's own
+client with core's ``send_once``, which returns the answer whatever its final status, and
+core's ``fixture_from_response`` turns the exchange into a fixture in memory with
+``Scrub(secrets=[key, its basic-auth token])`` (conventions §10):
 credentials scrubbed, the key and its token made ``REDACTED`` where they appear as given,
 and a plain verify that refuses the exchange when either is still there as given; core
 also refuses a body that is not UTF-8 text, which no scrub can read (exports are out of
 scope for fixtures, which the recorder's message says first), after the recorder has
 refused any file a file path answered. Then the recorder's own
-step, ``TenantScrub``, runs on the ``Fixture`` core returns (sdk-core ADR-0042, decision 4): the
+step, ``TenantScrub``, passed as ``rewrite=``, runs on the ``Fixture`` core returns (sdk-core
+ADR-0042, decision 4; ADR-0048, decision 1), and core checks what it returns: the
 demo host (``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``, in any case, IDNA or
 percent-encoded) becomes ``demo.cashctrl.com``, the host offline tests replay against, in
 the URL, the headers and both bodies; the key and its token become ``REDACTED`` in any
@@ -147,8 +154,8 @@ means nothing is written and the exit status is 1. A
 key-like name whose value is not ``REDACTED`` is written for review, also with exit
 status 1. Only the status and the scrubbed URL are printed.
 
-The write is the recorder's own, not core's ``record``: ``record`` writes as soon as
-core's verify passes, before the recorder's step and final check could run.
+The write is the recorder's own, not core's ``record``: ``record`` writes as soon as the
+step and core's check pass, before the recorder's final check could run.
 
 Before committing, check again from the repository root, never echoing a value::
 
@@ -183,7 +190,6 @@ default chart of accounts is too large for one fixture.
 
 import argparse
 import base64
-import dataclasses
 import json
 import os
 import re
@@ -194,7 +200,7 @@ from typing import Any
 from urllib.parse import parse_qsl
 
 import httpx
-from xippios.core import AsyncClient, BasicKeyAuth, RetryPolicy, sync
+from xippios.core import AsyncClient, BasicKeyAuth, sync
 from xippios.core.testing import (
     REDACTED,
     Fixture,
@@ -202,6 +208,7 @@ from xippios.core.testing import (
     fixture_from_response,
     fixture_path,
     fixture_text,
+    send_once,
     write_fixture,
 )
 
@@ -482,22 +489,30 @@ def refusal(method: str, endpoint: str) -> str | None:
 
 
 async def exchange_async(
-    client: AsyncClient, method: str, path: str, params: dict[str, str]
+    client: AsyncClient,
+    method: str,
+    path: str,
+    params: dict[str, str],
+    auth: httpx.Auth | None = None,
 ) -> httpx.Response:
-    """One request through the real client; an error status is returned, not raised.
+    """The recording's one request, sent once by core's ``send_once``; any final status returned.
 
     A GET sends ``params`` as the query; a POST sends them as the form body, as the
-    write tools send theirs (``api/_form.py``), and no query.
+    write tools send theirs (``api/_form.py``), and no query. ``auth`` replaces the client's
+    credentials for this request (``--wrong-key``); ``None`` keeps the client's.
+
+    Raises:
+        ValueError: Core refused an answer of a 1xx or a 3xx status after the request,
+            naming the method, the path and the status, never a value.
     """
-    if is_write(method):
-        return await client.request(
-            "POST",
-            path,
-            data=params,
-            headers={"Content-Type": FORM_CONTENT_TYPE},
-            raise_on_error=False,
-        )
-    return await client.request(method, path, params=params, raise_on_error=False)
+    sent: dict[str, Any] = (
+        {"method": "POST", "data": params, "headers": {"Content-Type": FORM_CONTENT_TYPE}}
+        if is_write(method)
+        else {"method": method, "params": params}
+    )
+    if auth is not None:
+        sent["auth"] = auth
+    return await send_once(client, path, **sent)
 
 
 exchange = sync(exchange_async)
@@ -507,8 +522,9 @@ def kept_at_a_file_path(response: httpx.Response) -> bool:
     """Whether a file path's answer is written: a text error, or CashCtrl's refusal.
 
     An error of HTTP 4xx or 5xx whose body is UTF-8 text, whatever its content type says,
-    or at HTTP 2xx a JSON object with ``success`` false. Never a 1xx or 3xx, another 2xx,
-    or an answer whose body is binary: the file an id fetched is never recorded.
+    or at HTTP 2xx a JSON object with ``success`` false. Never another 2xx or an answer
+    whose body is binary: the file an id fetched is never recorded. Core refuses a 1xx or
+    a 3xx before this is asked.
     """
     if 400 <= response.status_code < 600:
         return _is_text(response.content)
@@ -543,15 +559,18 @@ def marked_order(order: object) -> bool:
 
 async def _read_record(
     client: AsyncClient, path: str, record_id: int
-) -> tuple[dict[str, Any] | None, int]:
+) -> tuple[dict[str, Any] | None, str]:
     """``(record, status)`` of one ``read.json`` by ``id``; the record ``None`` unless read.
 
     Read means HTTP 200 with ``"success": true`` and a ``data`` object for this id. The
-    answer is returned to be checked and is never printed or kept.
+    read is sent once by core's ``send_once``, as the recording is, so a 5xx spends no
+    second request; the status reads ``HTTP 500``, or names a 1xx or 3xx that core refused.
+    The answer is returned to be checked and is never printed or kept.
     """
-    response = await client.request(
-        "GET", path, params={"id": str(record_id)}, raise_on_error=False
-    )
+    try:
+        response = await send_once(client, path, params={"id": str(record_id)})
+    except ValueError:  # core's refusal of a 1xx or 3xx, which names no value either
+        return None, "a 1xx or 3xx, no final answer"
     try:
         answer = response.json()
     except ValueError:
@@ -564,14 +583,14 @@ async def _read_record(
         and isinstance(record, dict)
         and record.get("id") == record_id
     )
-    return (record if readable else None), response.status_code
+    return (record if readable else None), f"HTTP {response.status_code}"
 
 
 async def _unmarked_order(client: AsyncClient, order_id: int, named: str) -> str | None:
     """Why the order ``order_id`` does not admit a write, ``named`` as the reason says it."""
     order, status = await _read_record(client, "/order/read.json", order_id)
     if order is None:
-        return f"{named} could not be read (HTTP {status}), so its marker is unknown"
+        return f"{named} could not be read ({status}), so its marker is unknown"
     if not marked_order(order):
         return f"{named} carries no marker (its description holds no {MARK}, its nr is not {MARK})"
     return None
@@ -583,8 +602,8 @@ async def unmarked_orders_async(
     """Why an order write must not be sent: an order it acts on is not marked; else ``None``.
 
     For ``ORDER_WRITES``: every id of its ids field is read with ``order/read.json``,
-    one GET each, through ``client``. For ``BOOK_ENTRY_WRITES``: every entry its field
-    names is read with ``order/bookentry/read.json``, and the order its ``orderId``
+    one GET each, sent once through ``client``. For ``BOOK_ENTRY_WRITES``: every entry its
+    field names is read with ``order/bookentry/read.json``, and the order its ``orderId``
     names with ``order/read.json``, two GETs per entry. The write is refused unless each
     answer is HTTP 200 with ``"success": true`` for the id asked and each order is
     marked (``marked_order``). Fails closed: no ids, an id that is not a whole number,
@@ -617,7 +636,7 @@ async def unmarked_orders_async(
         entry, status = await _read_record(client, "/order/bookentry/read.json", entry_id)
         if entry is None:
             return (
-                f"{refused}book entry {entry_id} could not be read (HTTP {status}), so its "
+                f"{refused}book entry {entry_id} could not be read ({status}), so its "
                 "order is unknown"
             )
         its_order = entry.get("orderId")
@@ -967,11 +986,17 @@ class TenantScrub:
         )
         return fixture.model_copy(update={"request": request, "response": response})
 
-    def apply(self, fixture: Fixture) -> Fixture:
-        """``rewrite``, then ``verify``: the fixture as the recorder writes it."""
+    def apply(self, fixture: Fixture) -> tuple[Fixture, list[str]]:
+        """``rewrite``, then ``verify``: the fixture as the recorder writes it, as core's step.
+
+        Passed as ``rewrite=`` of core's ``fixture_from_response`` (sdk-core ADR-0048,
+        decision 1), it returns no value of its own for core's check: its verify by pattern
+        refuses what survives, the subdomain in any case and the encoded forms among them,
+        which a search for each value as given would miss.
+        """
         rewritten = self.rewrite(fixture)
         self.verify(rewritten)
-        return rewritten
+        return rewritten, []
 
     def verify(self, fixture: Fixture) -> None:
         r"""Refuse a rewritten fixture that still holds the demo host, the subdomain or a secret.
@@ -1024,18 +1049,17 @@ class TenantScrub:
 
 
 def scrubbed(response: httpx.Response, key: str, subdomain: str) -> Fixture:
-    """The exchange as the recorder writes it: core's scrub, then ``TenantScrub``.
+    """The exchange as the recorder writes it: core's scrub, then ``TenantScrub`` as its step.
 
     Raises:
         ValueError: Core refused it (a body that is not UTF-8 text, the key or its token
             left as given) or the recorder's step did; the message names what and where,
             never a value.
     """
-    fixture = fixture_from_response(response, scrub=scrub(key))
     step = TenantScrub(
         response.request.url, subdomain=subdomain, secrets=secrets_of(key), text_rewrite=scrub_text
     )
-    return step.apply(fixture)
+    return fixture_from_response(response, scrub=scrub(key), rewrite=step.apply)
 
 
 def redacted_a_secret(response: httpx.Response, written: Fixture, key: str, subdomain: str) -> bool:
@@ -1150,22 +1174,6 @@ def changed_reminder(endpoint: str, response: httpx.Response) -> str:
     )
 
 
-def recording_client(*, wrong_key: bool = False) -> AsyncClient:
-    """The client the recorder sends through: the demo organisation's, never retrying.
-
-    ``client_for("demo")``'s configuration (base URL, pace, ``classify``) with
-    ``RetryPolicy(max_attempts=1)``, so a 5xx or a timeout is recorded as it came and
-    spends no further request on a retry; core's ``record`` takes
-    no ``retry=``, so the client carries it. The key is read from
-    ``CASHCTRL_DEMO_API_KEY`` on the request, as the package's own client reads it, or is
-    ``WRONG_KEY`` with ``wrong_key``.
-    """
-    config = dataclasses.replace(client_for(DEMO).config, retry=RetryPolicy(max_attempts=1))
-    key_var = TENANTS.var(DEMO, "API_KEY")
-    auth = BasicKeyAuth(key_var, key=WRONG_KEY if wrong_key else None, source=SOURCE)
-    return AsyncClient(config, auth=auth)
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Refuse or record, scrub in memory, check, write; return the exit status."""
     args = parse_args(argv)
@@ -1176,7 +1184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"not recorded: {refused}")  # noqa: T201
         return 1
     os.environ.pop(TENANTS.list_var, None)  # the recorder sees the demo organisation only
-    client = recording_client(wrong_key=args.wrong_key)
+    client = client_for(DEMO)
     refused = unmarked_orders(client, args.method, args.endpoint, args.params)
     if refused:
         print(f"not recorded: {refused}")  # noqa: T201
@@ -1186,7 +1194,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     key = os.environ.get(key_var, "")
     subdomain = TENANTS.field(DEMO, "SUBDOMAIN")
     method = "POST" if is_write(args.method) else "GET"
-    response = exchange(client, method, f"/{args.endpoint}", args.params)
+    auth = BasicKeyAuth(key_var, key=WRONG_KEY, source=SOURCE) if args.wrong_key else None
+    try:
+        response = exchange(client, method, f"/{args.endpoint}", args.params, auth)
+    except ValueError as no_final_answer:  # core's refusal of a 1xx or 3xx, never a value
+        print(f"not written {path.relative_to(ROOT)}: {no_final_answer}")  # noqa: T201
+        return 1
     if method == "POST":
         print(changed_reminder(args.endpoint, response))  # noqa: T201
     if args.endpoint in FILE_PATHS and not kept_at_a_file_path(response):
