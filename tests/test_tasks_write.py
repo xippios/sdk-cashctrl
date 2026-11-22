@@ -183,6 +183,7 @@ async def test_the_write_server_serves_write_tasks_only() -> None:
         source=SOURCE,
         read_server=read_server,
         router=router,
+        preview_reads=True,
     )
 
 
@@ -2685,3 +2686,129 @@ def test_a_preview_carries_the_form_fields_only_once(replay_fixture: ReplayFixtu
     replay_fixture("journal_create", "ok")
     performed = create_the_recorded_journal_entry(confirm=True)
     assert performed.model_dump_json().count('"title":"xippios-live fixture"') == 1
+
+
+# What a preview read -------------------------------------------------------------------
+
+PREVIEW_READS: dict[str, list[str]] = {
+    "create_journal_entry": [],
+    "update_journal_entry": ["journal/read.json"],
+    "delete_journal_entry": ["journal/read.json"],
+    "create_person": [],
+    "update_person": ["person/read.json"],
+    "delete_person": ["person/read.json"],
+    "create_order": [],
+    "update_order": ["order/read.json"],
+    "delete_order": ["order/read.json"],
+    "update_order_status": [],
+    "create_order_payment": [],
+    "create_order_book_entry": [],
+    "update_order_book_entry": ["order/bookentry/read.json"],
+    "delete_order_book_entry": ["order/bookentry/read.json"],
+}
+"""What each write task's preview reads, by the operation: one ``read.json`` or nothing."""
+
+PREVIEW_CALLS: dict[str, dict[str, Any]] = {
+    "create_journal_entry": {
+        "org": DEMO,
+        "date_added": "2026-10-24",
+        "amount": "100.00",
+        "debit_id": 3,
+        "credit_id": 42,
+        "title": "xippios-live fixture",
+        "tax_id": 9,
+    },
+    "update_journal_entry": {"org": DEMO, "id": JOURNAL_ENTRY, "title": "x"},
+    "delete_journal_entry": {"org": DEMO, "id": JOURNAL_ENTRY},
+    "create_person": {"org": DEMO, "company": "xippios-live Fixture GmbH"},
+    "update_person": {"org": DEMO, "id": PERSON, "company": "xippios-live Fixture AG"},
+    "delete_person": {"org": DEMO, "id": PERSON},
+    "create_order": {"org": DEMO, "associate_id": 7, "category_id": 4, "date": "2026-10-24"},
+    "update_order": {"org": DEMO, "id": ORDER, "due_days": 30},
+    "delete_order": {"org": DEMO, "id": 3},
+    "update_order_status": {"org": DEMO, "ids": [PAID], "status_id": REMINDED},
+    "create_order_payment": {
+        "org": DEMO,
+        "date": "2026-10-24",
+        "order_ids": [PAID],
+        "type": "CASH_PDF",
+    },
+    "create_order_book_entry": {
+        "org": DEMO,
+        "account_id": 3,
+        "order_ids": [BOOKED],
+        "amount": "50.00",
+        "date": "2026-10-24",
+        "description": "xippios-live payment",
+    },
+    "update_order_book_entry": {"org": DEMO, "id": BOOK_ENTRY, "description": "x"},
+    "delete_order_book_entry": {"org": DEMO, "id": BOOK_ENTRY},
+}
+"""A call of each write tool without ``confirm``, as an agent previews it, by the task's name."""
+
+PREVIEW_RECORDINGS = [
+    ("journal_read", "for_update"),
+    ("person_read", "for_update"),
+    ("order_read", "for_update"),
+    ("order_read", "by_id"),
+    ("order_bookentry_read", "for_update"),
+]
+"""The recorded reads the previews of ``PREVIEW_CALLS`` send, each for its own id."""
+
+
+def serve_the_preview_reads(replay_fixture: ReplayFixture) -> None:
+    """Each recorded read at its own path, matched by its ``id``, as recorded."""
+    for endpoint, case in PREVIEW_RECORDINGS:
+        replay_fixture(endpoint, case, match_params=["id"])
+
+
+def test_every_write_task_has_its_preview_call_and_reads() -> None:
+    assert PREVIEW_CALLS.keys() == PREVIEW_READS.keys() == WRITE_TASKS.keys()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("name", PREVIEW_READS, ids=PREVIEW_READS)
+async def test_every_preview_names_what_it_read(replay_fixture: ReplayFixture, name: str) -> None:
+    """``reads`` holds the record's ``read.json`` for the eight that read it, ``[]`` for six.
+
+    https://github.com/xippios/sdk-cashctrl/issues/88: an agent sees what the preview cost.
+    """
+    serve_the_preview_reads(replay_fixture)
+    payload = await mcp_call(
+        write_server, tool_name(SOURCE, WRITE_TASKS[name]), PREVIEW_CALLS[name]
+    )
+    assert payload["data"]["performed"] is False
+    assert payload["data"]["reads"] == PREVIEW_READS[name]
+
+
+@pytest.mark.anyio
+async def test_no_preview_sends_a_write_and_each_names_its_reads(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter
+) -> None:
+    """Core's dry run calls every write tool without ``confirm`` (sdk-core ADR-0050).
+
+    A preview sends no request but a read, a ``GET``, and its ``reads`` is empty exactly when
+    it sent none.
+    """
+    serve_the_preview_reads(replay_fixture)
+    await assert_write_tools(
+        write_server,
+        list(WRITE_TASKS.values()),
+        source=SOURCE,
+        preview_reads=True,
+        dry_run=PREVIEW_CALLS,
+        sent=respx_mock,
+    )
+
+
+@pytest.mark.parametrize("name", PREVIEW_READS, ids=PREVIEW_READS)
+def test_every_write_docstring_says_whether_its_preview_reads(name: str) -> None:
+    """The tool's description says what its preview costs (conventions §8, sdk-core ADR-0050)."""
+    doc = " ".join((inspect.getdoc(WRITE_TASKS[name]) or "").split())
+    reads = PREVIEW_READS[name]
+    if not reads:
+        assert "The preview sends no request, and its ``reads`` is empty." in doc
+    else:
+        (read,) = reads
+        said = rf"The preview reads the [a-z ]+ once with ``{re.escape(read)}``, one request, "
+        assert re.search(said + r"and names it in ``reads``\.", doc), doc[:200]
