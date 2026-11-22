@@ -1,30 +1,27 @@
-"""The capture script and ``docs/upstream/OBSERVED.md``, offline: nothing is fetched.
+"""The capture script's own code and its declaration on core's frame, offline: nothing is fetched.
 
-``OBSERVED.md`` is the one file under ``docs/upstream/`` written by hand, the notes on what
-upstream does but never documents (conventions §3): the script lists it in ``FETCHED.md``
-where it exists, never writes or removes it, and refuses a page entry that would take its
-name.
+The fetch, the attribution check, ``FETCHED.md``, the write and ``--check`` are the frame's,
+``xippios.core.refresh``, which core's tests hold (sdk-core ADR-0046). What stays here is
+the script's own: the declaration of its one page, split into one Markdown file per entry
+of the table of contents, and its ``split`` and ``note`` hooks. ``OBSERVED.md`` is the one
+file under ``docs/upstream/`` written by hand (conventions §3): an entry whose file would
+take its name stops the run, in any letter case.
 """
 
 import importlib.util
-import re
-import types
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 from bs4 import BeautifulSoup
+from xippios.core.refresh import Page, Response, Statement
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "refresh_upstream.py"
-ROW = (
-    "| OBSERVED.md | - | - | written by hand: what upstream does but never documents; "
-    "not fetched or checked |"
-)
 
 
 @pytest.fixture(scope="module")
 def script() -> ModuleType:
-    """``scripts/refresh_upstream.py`` imported as a module; ``main`` is not run."""
+    """``scripts/refresh_upstream.py`` imported as a module; the frame's ``run`` is not called."""
     spec = importlib.util.spec_from_file_location("refresh_upstream", SCRIPT)
     assert spec is not None
     assert spec.loader is not None
@@ -33,110 +30,81 @@ def script() -> ModuleType:
     return module
 
 
-def page(*labels: str) -> BeautifulSoup:
+def page(*labels: str, notice: str = "\N{COPYRIGHT SIGN} 2026 CashCtrl Ltd.") -> str:
     """A page of the documentation's shape, one general entry and one section per label."""
     entries = "".join(
         f'<li class="manual"><a href="#e{index}">{label}</a></li>'
         for index, label in enumerate(labels)
     )
     sections = "".join(
-        f'<section><a id="e{index}"></a><h2>{label}</h2></section>'
+        f'<section><a id="e{index}"></a><h2>{label}</h2><p>About {label}.</p></section>'
         for index, label in enumerate(labels)
     )
-    return BeautifulSoup(
-        f'<aside><nav class="toc"><ul>{entries}</ul></nav></aside>'
-        f'<main class="content">{sections}</main>',
-        "html.parser",
+    return (
+        f'<html><body><aside><nav class="toc"><ul>{entries}</ul></nav></aside>'
+        f'<main class="content">{sections}<footer><img alt="{notice}"></footer></main>'
+        "</body></html>"
     )
 
 
-def fetched(script: ModuleType, *, observed: bool) -> str:
-    """``FETCHED.md`` as the script renders it for a made-up page of one entry: the page
-    and its answer are inputs of the test, not answers from CashCtrl."""
-    parts = script.split_page(page("Introduction"))
-    files = {part.file: "Source: <x>\n" for part in parts}
-    response = script.Response(status=200, body=b"<html></html>", etag=None, last_modified=None)
-    return str(
-        script.render_fetched(
-            parts, files, response, "2026-11-20T00:00:00Z", "2026", observed=observed
-        )
+def answer(script: ModuleType, body: str, content_type: str = "text/html") -> Response:
+    """The page's answer, as the frame hands it to a hook: an input of the test, not an
+    answer from CashCtrl."""
+    return Response(
+        url=script.PAGE_URL,
+        status=200,
+        body=body.encode(),
+        content_type=f"{content_type}; charset=utf-8",
+        etag=None,
+        last_modified=None,
+        redirects=(),
     )
 
 
-def test_fetched_lists_observed_in_a_row_of_its_own_where_it_exists(script: ModuleType) -> None:
-    with_file = fetched(script, observed=True)
-    assert with_file.splitlines()[-1] == ROW
-    assert "never edited by hand but `OBSERVED.md`, where it exists" in with_file.replace("\n", " ")
-    without = fetched(script, observed=False)
-    assert "| OBSERVED.md |" not in without
-    assert without.splitlines()[-1].startswith("| introduction.md |")
+def test_the_snapshot_declares_its_one_page_split_by_the_script(script: ModuleType) -> None:
+    snapshot = script.SNAPSHOT
+    assert snapshot.pages == (Page(script.PAGE_URL, split=True),)
+    assert snapshot.split is script.split
+    assert snapshot.note is script.note
+    assert (snapshot.name, snapshot.slug) == ("CashCtrl", "cashctrl")
+    assert snapshot.out == SCRIPT.parents[1] / "docs" / "upstream"
 
 
-def test_a_snapshot_keeps_observed_and_removes_a_stale_file(
-    script: ModuleType, tmp_path: Path
-) -> None:
-    (tmp_path / "FETCHED.md").write_text("old\n", encoding="utf-8")
-    (tmp_path / "OBSERVED.md").write_text("a note\n", encoding="utf-8")
-    (tmp_path / "gone.md").write_text("stale\n", encoding="utf-8")
-    script.write_snapshot(tmp_path, {"introduction.md": "Source: <x>\n"}, "new\n")
-    assert sorted(path.name for path in tmp_path.iterdir()) == [
-        "FETCHED.md",
-        "OBSERVED.md",
-        "introduction.md",
-    ]
-    assert (tmp_path / "OBSERVED.md").read_text(encoding="utf-8") == "a note\n"
+def test_the_attribution_records_the_notice_and_the_terms(script: ModuleType) -> None:
+    """The footer's notice stands in its logo's alt text, which the frame does not read, so
+    ``split`` checks it; the link to the terms is in the page's text, which the frame checks."""
+    notice, terms = script.SNAPSHOT.attribution
+    assert notice == Statement(script.NOTICE, "", where=notice.where)
+    assert "split" in notice.where
+    assert terms.text == "Terms of Service"
+    assert (terms.source, terms.link) == (script.PAGE_URL, "https://cashctrl.com/en/about/terms")
+
+
+def test_split_writes_one_file_per_entry_under_its_url(script: ModuleType) -> None:
+    files = script.split(script.SNAPSHOT.pages[0], answer(script, page("Introduction", "Account")))
+    assert list(files) == ["introduction.md", "account.md"]
+    assert files["introduction.md"].decode() == (
+        f"Source: <{script.PAGE_URL}#e0>\n\n## Introduction\n\nAbout Introduction.\n"
+    )
+
+
+def test_split_stops_on_another_notice_or_another_type(script: ModuleType) -> None:
+    first = script.SNAPSHOT.pages[0]
+    with pytest.raises(SystemExit, match=r"the footer's copyright notice is "):
+        script.split(first, answer(script, page("Introduction", notice="(c) 2027 CashCtrl")))
+    with pytest.raises(SystemExit, match=r"expected text/html, got 'application/json'"):
+        script.split(first, answer(script, page("Introduction"), "application/json"))
+
+
+def test_the_note_names_the_files_that_keep_a_table_as_html(script: ModuleType) -> None:
+    def row(content: bytes) -> object:
+        return type("Row", (), {"content": content, "note": ""})()
+
+    assert script.note(row(b"Source: <x>\n\n<table>\n</table>\n")) == "nested tables kept as HTML"
+    assert script.note(row(b"Source: <x>\n\n| a | b |\n")) == ""
 
 
 def test_an_entry_that_would_be_written_as_observed_is_refused(script: ModuleType) -> None:
+    """In lower case too, where the frame refuses ``OBSERVED.md`` and ``FETCHED.md`` by name."""
     with pytest.raises(SystemExit, match=r"clashing file names .*observed\.md"):
-        script.split_page(page("Introduction", "Observed"))
-
-
-def found(pattern: str, text: str) -> tuple[str, ...]:
-    """The groups of ``pattern``'s one match in ``text``, a line pattern."""
-    match = re.search(pattern, text, re.MULTILINE)
-    assert match is not None, pattern
-    return match.groups()
-
-
-def committed_fetched(script: ModuleType, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
-    """``FETCHED.md`` as committed, and as ``render_fetched`` writes it for the committed snapshot.
-
-    Nothing is fetched. The page the snapshot was made from is not committed, so its byte
-    count, sha256, ETag and the run's time are read from the committed file and given to
-    the renderer, the digest through a stand-in for ``hashlib`` that answers the committed
-    one; every file's row and note come from the committed snapshot's files themselves.
-    The answer handed to the renderer is an input of the test, not an answer from CashCtrl:
-    its size and ETag are the committed file's, its body that many zero bytes.
-    """
-    out = SCRIPT.parents[1] / "docs" / "upstream"
-    committed = (out / "FETCHED.md").read_text(encoding="utf-8")
-    size, digest = found(r"^- (\d+) bytes, sha256 `([0-9a-f]{64})`$", committed)
-    (etag,) = found(r"^- HTTP 200, ETag `(.+)`, Last-Modified not sent$", committed)
-    (year,) = found(r"The documentation is \N{COPYRIGHT SIGN} (\d{4}) CashCtrl Ltd\.", committed)
-    rows = re.findall(r"^\| (\S+\.md) \| (https://\S+) \| (\S+Z) \|", committed, re.M)
-    parts = [
-        script.Part(
-            name.removesuffix(".md").replace("-", " "), url.removeprefix(script.PAGE_URL), ()
-        )
-        for name, url, _ in rows
-    ]
-    assert [part.file for part in parts] == [name for name, _, _ in rows]
-    files = {part.file: (out / part.file).read_text(encoding="utf-8") for part in parts}
-    stand_in = types.SimpleNamespace(
-        sha256=lambda _: types.SimpleNamespace(hexdigest=lambda: digest)
-    )
-    monkeypatch.setattr(script, "hashlib", stand_in)
-    response = script.Response(status=200, body=bytes(int(size)), etag=etag, last_modified=None)
-    observed = (out / script.OBSERVED).is_file()
-    rendered = script.render_fetched(parts, files, response, rows[0][2], year, observed)
-    return committed, str(rendered)
-
-
-def test_the_committed_fetched_md_is_the_scripts_text(
-    script: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Written offline by ``render_fetched`` alone, ``OBSERVED.md``'s row included."""
-    committed, rendered = committed_fetched(script, monkeypatch)
-    assert committed == rendered
-    assert committed.splitlines()[-1] == ROW
+        script.split_page(BeautifulSoup(page("Introduction", "Observed"), "html.parser"))
