@@ -12,7 +12,6 @@ core's at sdk-core ``cb8ecdf`` (``tests/testing/test_scrub.py``, ``test_fixtures
 """
 
 import base64
-import dataclasses
 import importlib.util
 import json
 import re
@@ -131,29 +130,18 @@ def test_wrong_key_never_sends_the_real_key(
     assert route.calls.last.request.headers["Authorization"] == f"Basic {token}"
 
 
-@pytest.mark.parametrize("wrong_key", [False, True])
-def test_the_recording_client_never_retries(recorder: ModuleType, wrong_key: bool) -> None:
-    """The demo organisation's configuration with ``RetryPolicy(max_attempts=1)``.
-
-    https://github.com/xippios/sdk-cashctrl/pull/19 gave the recorder a client that never
-    retries, so a 5xx is recorded as it came.
-    """
-    client = recorder.recording_client(wrong_key=wrong_key)
-    assert client.config.retry.max_attempts == 1
-    demo = client_for(DEMO).config
-    assert demo.retry.max_attempts > 1, "the package's own client retries"
-    assert dataclasses.replace(client.config, retry=demo.retry) == demo, "nothing else differs"
-    assert client is not client_for(DEMO)
-
-
 def test_a_5xx_is_recorded_after_one_request(
     recorder: ModuleType, respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
     """A GET that the package's client would retry is sent once and recorded as it came.
 
+    The recorder sends through the demo organisation's own client with core's ``send_once``,
+    which never retries, so it builds no client of its own (sdk-core ADR-0048, decision 3).
+
     NOT RECORDED: the documented 503 of error-handling.md, composed as CashCtrl's status pages
     were recorded, a line that starts CashCtrl - under text/plain (conventions §10, kind 2).
     """
+    assert client_for(DEMO).config.retry.max_attempts > 1, "the package's own client retries"
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(
         return_value=httpx.Response(
@@ -166,6 +154,31 @@ def test_a_5xx_is_recorded_after_one_request(
     assert route.call_count == 1
     written = tmp_path / "tests" / "fixtures" / "account_list" / "unavailable.json"
     assert json.loads(written.read_text())["response"]["status"] == 503
+
+
+def test_a_3xx_is_refused_at_every_path_and_nothing_is_written(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A redirect is no final answer: core refuses it after the one request, at a .json path too.
+
+    The refusal is core's on every path (sdk-core ADR-0048, decision 4), where the recorder's
+    own reached its five file paths alone.
+
+    NOT RECORDED: a redirect of no shape upstream was seen to send, composed to show the
+    refusal (conventions §10, kind 5).
+    """
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
+    route.mock(return_value=httpx.Response(302, headers={"Location": "/login"}))
+    assert recorder.main(["account/list.json", "moved"]) == 1
+    assert route.call_count == 1
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    out = capsys.readouterr().out
+    assert out.startswith("not written tests/fixtures/account_list/moved.json: GET ")
+    assert "answered HTTP 302 Found, no final answer of its operation" in out
+    assert REAL not in out.lower()
 
 
 @pytest.mark.parametrize("leak", [REAL, REAL.upper()])
@@ -2311,7 +2324,8 @@ def test_secrets_are_redacted_plain_and_percent_encoded(recorder: ModuleType) ->
         request=request,
     )
     core = fixture_from_response(response, scrub=Scrub(secrets=[secret]))
-    fixture = step(recorder, str(request.url), secrets=[secret]).apply(core)
+    fixture, replaced = step(recorder, str(request.url), secrets=[secret]).apply(core)
+    assert replaced == [], "the step's verify by pattern refuses what survives, not core's check"
     assert "s3cr3t" not in fixture.model_dump_json()
     assert fixture.request.url == f"https://demo.cashctrl.com/api/v1/{REDACTED}?q={REDACTED}"
     assert fixture.request.body == f"note={REDACTED}"
@@ -2336,13 +2350,13 @@ def test_the_host_then_the_secrets_then_the_rewrite(recorder: ModuleType) -> Non
 
     request = httpx.Request("POST", f"https://{HOST}/api/v1/x.json?u=signed", data={"k": KEY})
     response = httpx.Response(
-        302,
+        200,
         headers={"Location": f"https://{HOST}/signed"},
         content=f'{{"home": "https://{HOST}/", "k": "{ENCODED_KEY}"}}'.encode(),
         request=request,
     )
     core = fixture_from_response(response, scrub=recorder.scrub(KEY))
-    fixture = step(recorder, str(request.url), text_rewrite=spy).apply(core)
+    fixture, _ = step(recorder, str(request.url), text_rewrite=spy).apply(core)
     assert fixture.request.url == "https://demo.cashctrl.com/api/v1/x.json?u=neutral"
     assert fixture.request.body == f"k={REDACTED}"
     assert dict(fixture.response.headers)["location"] == "https://demo.cashctrl.com/neutral"
@@ -2432,9 +2446,8 @@ def test_the_verify_passes_a_clean_fixture(recorder: ModuleType) -> None:
         request=request,
     )
     core = fixture_from_response(response, scrub=Scrub(secrets=["ACT"]))
-    fixture: Fixture = step(recorder, str(request.url), secrets=["ACT"], subdomain="demo").apply(
-        core
-    )
+    fixture: Fixture
+    fixture, _ = step(recorder, str(request.url), secrets=["ACT"], subdomain="demo").apply(core)
     assert json.loads(fixture.response.body) == {
         "name": f"Caf\u00e9 {REDACTED}",
         "home": "https://demo.cashctrl.com/",
