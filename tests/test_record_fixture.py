@@ -1501,9 +1501,13 @@ def test_a_file_path_writes_no_answer_but_an_error_or_a_refusal(
     out = capsys.readouterr().out
     assert out.startswith("not written tests/fixtures/")
     content_type = answer.headers["content-type"]
-    assert (
-        f"{endpoint} answered HTTP {answer.status_code} ({content_type}), which a file path" in out
-    )
+    if answer.is_redirect:  # core's refusal of a 3xx comes first, on every path (ADR-0048)
+        assert f"GET /api/v1/{endpoint} answered HTTP 302 Found, no final answer" in out
+    else:
+        assert (
+            f"{endpoint} answered HTTP {answer.status_code} ({content_type}), which a file path"
+            in out
+        )
     assert REAL not in out
 
 
