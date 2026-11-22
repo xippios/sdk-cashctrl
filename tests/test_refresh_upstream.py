@@ -14,8 +14,7 @@ from types import ModuleType
 
 import pytest
 from bs4 import BeautifulSoup
-from xippios.core import refresh
-from xippios.core.refresh import Page, Statement
+from xippios.core.refresh import Page, Response, Statement
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "refresh_upstream.py"
 
@@ -48,14 +47,10 @@ def page(*labels: str, notice: str = "\N{COPYRIGHT SIGN} 2026 CashCtrl Ltd.") ->
     )
 
 
-def answer(script: ModuleType, body: str, content_type: str = "text/html") -> refresh.Response:
+def answer(script: ModuleType, body: str, content_type: str = "text/html") -> Response:
     """The page's answer, as the frame hands it to a hook: an input of the test, not an
-    answer from CashCtrl.
-
-    Core's own ``Response``, named by its module: the check of a built answer reads a bare
-    ``Response(...)`` as httpx's, an answer a route serves.
-    """
-    return refresh.Response(
+    answer from CashCtrl."""
+    return Response(
         url=script.PAGE_URL,
         status=200,
         body=body.encode(),
@@ -76,11 +71,12 @@ def test_the_snapshot_declares_its_one_page_split_by_the_script(script: ModuleTy
 
 
 def test_the_attribution_records_the_notice_and_the_terms(script: ModuleType) -> None:
-    """The footer's notice stands in its logo's alt text, which the frame does not read, so
-    ``split`` checks it; the link to the terms is in the page's text, which the frame checks."""
+    """Both from the page, which the frame checks on every run: the footer's notice in its
+    logo's alternative text, and the error handling's link to the terms (sdk-core ADR-0046,
+    decision 7)."""
     notice, terms = script.SNAPSHOT.attribution
-    assert notice == Statement(script.NOTICE, "", where=notice.where)
-    assert "split" in notice.where
+    assert notice == Statement(script.NOTICE, script.PAGE_URL, where=notice.where)
+    assert script.NOTICE == "\N{COPYRIGHT SIGN} 2026 CashCtrl Ltd."
     assert terms.text == "Terms of Service"
     assert (terms.source, terms.link) == (script.PAGE_URL, "https://cashctrl.com/en/about/terms")
 
@@ -93,12 +89,14 @@ def test_split_writes_one_file_per_entry_under_its_url(script: ModuleType) -> No
     )
 
 
-def test_split_stops_on_another_notice_or_another_type(script: ModuleType) -> None:
+def test_split_stops_on_another_type_and_leaves_the_notice_to_the_frame(
+    script: ModuleType,
+) -> None:
     first = script.SNAPSHOT.pages[0]
-    with pytest.raises(SystemExit, match=r"the footer's copyright notice is "):
-        script.split(first, answer(script, page("Introduction", notice="(c) 2027 CashCtrl")))
     with pytest.raises(SystemExit, match=r"expected text/html, got 'application/json'"):
         script.split(first, answer(script, page("Introduction"), "application/json"))
+    other = answer(script, page("Introduction", notice="(c) 2027 CashCtrl"))
+    assert list(script.split(first, other)) == ["introduction.md"], "the frame checks it"
 
 
 def test_the_note_names_the_files_that_keep_a_table_as_html(script: ModuleType) -> None:
