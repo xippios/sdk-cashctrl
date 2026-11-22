@@ -14,7 +14,8 @@ from types import ModuleType
 
 import pytest
 from bs4 import BeautifulSoup
-from xippios.core.refresh import Page, Response, Statement
+from xippios.core import refresh
+from xippios.core.refresh import Page, Statement
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "refresh_upstream.py"
 
@@ -47,10 +48,14 @@ def page(*labels: str, notice: str = "\N{COPYRIGHT SIGN} 2026 CashCtrl Ltd.") ->
     )
 
 
-def answer(script: ModuleType, body: str, content_type: str = "text/html") -> Response:
+def answer(script: ModuleType, body: str, content_type: str = "text/html") -> refresh.Response:
     """The page's answer, as the frame hands it to a hook: an input of the test, not an
-    answer from CashCtrl."""
-    return Response(
+    answer from CashCtrl.
+
+    Core's own ``Response``, named by its module: the check of a built answer reads a bare
+    ``Response(...)`` as httpx's, an answer a route serves.
+    """
+    return refresh.Response(
         url=script.PAGE_URL,
         status=200,
         body=body.encode(),
