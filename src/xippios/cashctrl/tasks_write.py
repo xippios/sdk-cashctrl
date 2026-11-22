@@ -190,12 +190,14 @@ def _preview[T](
     endpoint: str,
     payload: dict[str, str],
     *,
+    reads: Sequence[str],
     before: T | None = None,
     changes: dict[str, str] | None = None,
 ) -> Result[WritePreview[T] | WriteResult]:
     preview = WritePreview[T](
         endpoint=endpoint,
         payload=_shown(payload),
+        reads=list(reads),
         before=before,
         changes=None if changes is None else _shown(changes),
     )
@@ -618,6 +620,8 @@ async def create_journal_entry_async(
     checks the entry and refuses it naming the fields, e.g. ``debitId: This field cannot
     be empty.``; nothing is checked here that upstream checks itself.
 
+    The preview sends no request, and its ``reads`` is empty.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         date_added: The date of the entry, e.g. ``2026-10-24``.
@@ -690,7 +694,7 @@ async def create_journal_entry_async(
     )
     endpoint = "journal/create.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.journal_create(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -744,6 +748,9 @@ async def update_journal_entry_async(
     the lists ``create_journal_entry`` names: ``list_accounts``, ``list_tax_codes``,
     ``list_persons``, ``list_currencies``, ``list_cost_centers`` and
     ``list_custom_fields`` (``JOURNAL``).
+
+    The preview reads the entry once with ``journal/read.json``, one request, and names it in
+    ``reads``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -840,7 +847,9 @@ async def update_journal_entry_async(
     endpoint = "journal/update.json"
     if confirm is not True:
         before = _journal_entry_detail(entry)
-        return _preview(org, endpoint, fields, before=before, changes=changes)
+        return _preview(
+            org, endpoint, fields, reads=["journal/read.json"], before=before, changes=changes
+        )
     answer = await api.journal_update(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -864,6 +873,9 @@ async def delete_journal_entry_async(
     refused by upstream with ``RequestRejected`` ("This book entry does not exist.",
     observed).
 
+    The preview reads the entry once with ``journal/read.json``, one request, and names it in
+    ``reads``.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The entry's ``id`` from ``list_journal_entries``, e.g. ``52``.
@@ -877,7 +889,9 @@ async def delete_journal_entry_async(
     if booked is not None:
         raise booked
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=_journal_entry_detail(entry))
+        return _preview(
+            org, endpoint, fields, reads=["journal/read.json"], before=_journal_entry_detail(entry)
+        )
     answer = await api.journal_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 
@@ -1142,6 +1156,8 @@ async def create_person_async(
     ``superior_id`` from ``list_persons`` and custom field names from
     ``list_custom_fields`` with ``type`` ``PERSON``.
 
+    The preview sends no request, and its ``reads`` is empty.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         company: The company name, at most 100 characters, e.g. ``"Muster AG"``.
@@ -1255,7 +1271,7 @@ async def create_person_async(
     )
     endpoint = "person/create.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.person_create(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -1330,6 +1346,9 @@ async def update_person_async(
     from the lists ``create_person`` names: ``list_person_categories``,
     ``list_person_titles``, ``list_locations``, ``list_persons`` and
     ``list_custom_fields`` (``PERSON``).
+
+    The preview reads the person once with ``person/read.json``, one request, and names it in
+    ``reads``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1472,7 +1491,9 @@ async def update_person_async(
     endpoint = "person/update.json"
     if confirm is not True:
         before = _person_detail(person)
-        return _preview(org, endpoint, fields, before=before, changes=changes)
+        return _preview(
+            org, endpoint, fields, reads=["person/read.json"], before=before, changes=changes
+        )
     answer = await api.person_update(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -1485,6 +1506,9 @@ async def delete_person_async(org: str, id: int, *, confirm: bool = False) -> Re
     ``payload``, ``ids`` with this one id. ``confirm=true`` deletes the person, without
     reading it first; upstream decides whether a person with bookings or orders may go.
 
+    The preview reads the person once with ``person/read.json``, one request, and names it in
+    ``reads``.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The person's ``id`` from ``list_persons``, e.g. ``13``; not its number ``nr``.
@@ -1495,7 +1519,9 @@ async def delete_person_async(org: str, id: int, *, confirm: bool = False) -> Re
     endpoint = "person/delete.json"
     if confirm is not True:
         person = await api.person_read(org, id)
-        return _preview(org, endpoint, fields, before=_person_detail(person))
+        return _preview(
+            org, endpoint, fields, reads=["person/read.json"], before=_person_detail(person)
+        )
     answer = await api.person_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 
@@ -1554,6 +1580,8 @@ async def create_order_async(
     ``unit_price`` was read as gross, VAT included, on the demo organisation. Without
     ``nr`` upstream numbers the order from the category's sequence, if it has one, and
     refuses it otherwise.
+
+    The preview sends no request, and its ``reads`` is empty.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1649,7 +1677,7 @@ async def create_order_async(
     )
     endpoint = "order/create.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.order_create(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -1859,6 +1887,9 @@ async def update_order_async(
     from ``list_custom_fields`` with ``type`` ``ORDER``. The items' ``unit_price`` was
     read as gross, VAT included, on the demo organisation.
 
+    The preview reads the order once with ``order/read.json``, one request, and names it in
+    ``reads``.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The order's ``id`` from ``list_orders``, e.g. ``7``; not its number ``nr``.
@@ -1968,7 +1999,14 @@ async def update_order_async(
     fields = api.order_fields(id=order.id, **merged)
     endpoint = "order/update.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=_order_detail(order), changes=changes)
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["order/read.json"],
+            before=_order_detail(order),
+            changes=changes,
+        )
     answer = await api.order_update(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -1982,6 +2020,9 @@ async def delete_order_async(org: str, id: int, *, confirm: bool = False) -> Res
     the order, without reading it first; upstream decides what happens to the journal
     entries a booked order made.
 
+    The preview reads the order once with ``order/read.json``, one request, and names it in
+    ``reads``.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The order's ``id`` from ``list_orders``, e.g. ``7``; not its number ``nr``.
@@ -1992,7 +2033,7 @@ async def delete_order_async(org: str, id: int, *, confirm: bool = False) -> Res
     endpoint = "order/delete.json"
     if confirm is not True:
         order = _order_detail(await api.order_read(org, id))
-        return _preview(org, endpoint, fields, before=order)
+        return _preview(org, endpoint, fields, reads=["order/read.json"], before=order)
     answer = await api.order_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 
@@ -2018,6 +2059,8 @@ async def update_order_status_async(
     asks the user first, not what this call does, and the live test avoids such
     statuses. Upstream checks the change and refuses it with its message.
 
+    The preview sends no request, and its ``reads`` is empty.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         ids: The orders, their ``id`` from ``list_orders``, e.g. ``[20]`` or ``[20, 21]``;
@@ -2031,7 +2074,7 @@ async def update_order_status_async(
     fields = api.order_update_status_fields(ids=orders, status_id=status_id)
     endpoint = "order/update_status.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.order_update_status(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -2064,6 +2107,8 @@ async def create_order_payment_async(
     date in the past and for a sender or recipient without a bank account or BIC, where
     ``CASH_PDF`` for the same order and date was created.
 
+    The preview sends no request, and its ``reads`` is empty.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         date: The execution date of the payment, e.g. ``2026-10-30``; ``PAIN`` refuses a
@@ -2093,7 +2138,7 @@ async def create_order_payment_async(
     )
     endpoint = "order/payment/create.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.order_payment_create(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -2133,6 +2178,8 @@ async def create_order_book_entry_async(
     ``book_templates`` of the orders' category in ``list_order_categories``. Upstream
     checks the entry and refuses it naming the fields.
 
+    The preview sends no request, and its ``reads`` is empty.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         account_id: The contra account, a bank or cash account, an ``id`` from
@@ -2166,7 +2213,7 @@ async def create_order_book_entry_async(
     )
     endpoint = "order/bookentry/create.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.order_bookentry_create(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -2272,6 +2319,9 @@ async def update_order_book_entry_async(
     update cannot send. The entry's id comes from ``list_order_book_entries``, the other
     ids from the lists ``create_order_book_entry`` names.
 
+    The preview reads the book entry once with ``order/bookentry/read.json``, one
+    request, and names it in ``reads``.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The entry's ``id`` from ``list_order_book_entries``, e.g. ``31``.
@@ -2328,7 +2378,14 @@ async def update_order_book_entry_async(
     fields = api.order_bookentry_fields(id=entry.id, **merged)
     endpoint = "order/bookentry/update.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=entry, changes=changes)
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["order/bookentry/read.json"],
+            before=entry,
+            changes=changes,
+        )
     answer = await api.order_bookentry_update(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -2348,6 +2405,9 @@ async def delete_order_book_entry_async(
     An unknown id raises ``NotFoundError`` at the read. The entry's id comes from
     ``list_order_book_entries``.
 
+    The preview reads the book entry once with ``order/bookentry/read.json``, one
+    request, and names it in ``reads``.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The entry's ``id`` from ``list_order_book_entries``, e.g. ``31``.
@@ -2361,7 +2421,7 @@ async def delete_order_book_entry_async(
     if not_manual is not None:
         raise not_manual
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=entry)
+        return _preview(org, endpoint, fields, reads=["order/bookentry/read.json"], before=entry)
     answer = await api.order_bookentry_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 
