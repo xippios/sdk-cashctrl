@@ -299,9 +299,11 @@ order or report id, which CashCtrl answers with HTTP 404.
 - **Cut at 100.** Upstream exports at most `limit` records, 100 when `limit` is left
   out (the account export, like its list, takes no `limit`): read the list task's
   `meta.total` first and pass a `limit` of at least that.
-- **Personal identifiers.** Without `columns`, the person export names the fields
-  `list_persons` returns as its columns, so `ssn` and `iban` stay out of the file; a
-  caller that names them in `columns` gets them, deliberately (sdk-core ADR-0017). An order
+- **Personal identifiers.** Without `columns`, `download_persons` sends none, and the
+  file holds upstream's default columns, ten labels such as `Name` and `E-Mail Work`,
+  none of them `ssn` or an `iban` (`docs/upstream/OBSERVED.md`); `tasks.PERSON_COLUMNS`
+  names the fields `list_persons` returns. A caller that names `ssn` or `iban` in
+  `columns` gets them, deliberately (sdk-core ADR-0017). An order
   document is what its recipient gets: an invoice's QR-bill may carry the
   organisation's IBAN or QR-IBAN and the recipient's name and address. Where a file
   goes is the caller's choice.
@@ -376,7 +378,7 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET order/document/read.pdf` (Download PDF) | `download_order_document` | none, Python only | available; one PDF to `dest`; an invoice's QR-bill may carry the organisation's IBAN or QR-IBAN and the recipient's address |
 | `GET journal/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `download_journal_entries` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100 |
 | `GET account/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `download_accounts` | none, Python only | available; a file to `dest`; every matching account |
-| `GET person/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `download_persons` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100; without `ssn` and `iban` unless `columns` names them |
+| `GET person/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `download_persons` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100; upstream's default columns, without `ssn` and `iban`, unless `columns` names them |
 | `GET order/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `download_orders` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100 |
 | `GET report/element/download.pdf`, `download.xlsx` (Download PDF, Excel) | `download_report` | none, Python only | available; a file to `dest`; payroll and people reports refused |
 | `GET report/collection/download.pdf`, `download.xlsx` (Download PDF, Excel) | `download_report_collection` | none, Python only | available; a file to `dest`; refused whole when it holds a payroll or people report |

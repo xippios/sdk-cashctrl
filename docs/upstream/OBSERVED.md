@@ -376,6 +376,18 @@ the one location created then is `tests/fixtures/location_list/default.json`, re
 
 ## Files
 
+### The person file's default columns are ten labels
+
+Without `columns`, `person/list.csv` writes upstream's own default columns: ten, named
+by their labels and not by field names, separated by semicolons,
+`No.;Name;E-Mail Work;Phone Work;Address;Zip;Location;Country;Attachments;Notes`, under
+`text/csv;charset=UTF-8`. None of them is `ssn` or an `iban`. The demo organisation's
+labels came in English; their language was not varied, and no `lang` was sent.
+
+Probe: 2026-11-24, `GET person/list.csv?limit=1` with no `columns`, the one request
+under the demo organisation's key, of which the header row alone was read, kept no
+answer: a file is not recorded, and the one person the file held was not read.
+
 ### A report file's type and name
 
 A report element's PDF comes as `application/pdf;charset=UTF-8` named after the report and
