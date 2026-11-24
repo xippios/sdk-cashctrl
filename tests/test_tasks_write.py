@@ -31,7 +31,7 @@ import json
 import re
 import typing
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -39,9 +39,17 @@ from urllib.parse import parse_qsl
 
 import pytest
 import respx
-from xippios.core import InvalidRequestError, NotFoundError, Result, XippiosError, tool_name
+from xippios.core import (
+    Answer,
+    InvalidRequestError,
+    NotFoundError,
+    Result,
+    XippiosError,
+    tool_name,
+)
 from xippios.core.testing import (
     ReplayFixture,
+    assert_time_between,
     assert_write_tools,
     load_fixture,
     mcp_call,
@@ -77,6 +85,7 @@ from xippios.cashctrl.models import (
     PersonAddressInput,
     PersonDetail,
     PersonDetailProjection,
+    ReadResponse,
     WritePreview,
     WriteResult,
 )
@@ -248,6 +257,39 @@ def test_a_confirmed_write_is_sent_once_whatever_upstream_answers(
         assert "The request was sent once and its outcome is unknown." in str(info.value)
     doc = " ".join((inspect.getdoc(tasks_write.create_journal_entry) or "").split())
     assert "``list_journal_entries`` shows whether it was booked" in doc
+
+
+def test_a_preview_carries_the_time_of_its_read(
+    fixtures_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``meta.retrieved_at`` of a preview that read first is the read's, the client's time.
+
+    The read is replaced by one that answers the recorded entry, parsed, with a time of its
+    own, so the preview's choice shows (conventions §4).
+    """
+    body = load_fixture(fixtures_dir / "journal_read" / "for_update.json").response.body
+    entry = ReadResponse[JournalEntryDetail].model_validate_json(body).data
+    read_at = datetime(2026, 11, 24, 9, 0, 1, tzinfo=UTC)
+
+    async def journal_read(org: str, id: int) -> Answer[JournalEntryDetail]:
+        return Answer(entry, read_at)
+
+    monkeypatch.setattr(api, "journal_read", journal_read)
+    preview = tasks_write.update_journal_entry(DEMO, JOURNAL_ENTRY, title="x")
+    assert isinstance(preview.data, WritePreview)
+    assert preview.meta.retrieved_at == read_at
+
+
+def test_a_performed_write_carries_the_time_its_result_was_built(
+    replay_fixture: ReplayFixture,
+) -> None:
+    """Core's ``post_json`` answers without a time, so a written result takes its own."""
+    replay_fixture("journal_create", "ok")
+    before = datetime.now(UTC)
+    result = create_the_recorded_journal_entry(confirm=True)
+    after = datetime.now(UTC)
+    assert isinstance(result.data, WriteResult)
+    assert_time_between(result.meta.retrieved_at, before, after)
 
 
 def test_create_journal_entry_with_confirm_replays_the_recorded_create(
