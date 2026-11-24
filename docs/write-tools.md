@@ -75,13 +75,20 @@ values given into the stored XML (`merge_custom`).
 
 ## The docstring
 
-A write task's docstring is its tool's description, so it says what an agent needs to call
-the tool right:
+A write task's docstring is its tool's description, its text before `Args:` under 1,000
+characters, which core's family check holds, and each argument's text under `Args:` stands
+in the tool's input schema (conventions §8). So the description says what an agent needs
+to call the tool right, and what one argument needs stands on that argument's line:
 
 - a journal `amount` with a `tax_id` is gross, VAT included, and an order item's `unitPrice`
   was read as gross;
 - a preview is free, and `confirm=true` writes;
-- the ids come from `list_accounts`, `list_tax_codes`, `list_persons`,
+- a write is sent once and never repeated, and the description names the read that shows
+  whether a write that failed with its outcome unknown was applied; an update or a delete
+  that reads first says that a confirmed call sends two requests, five with the read's
+  retries;
+- the ids come from the lists that each id's line under `Args:` names, among them
+  `list_accounts`, `list_tax_codes`, `list_persons`,
   `list_order_categories`, `list_currencies` and the discovery lists:
   `list_person_categories` (a person's `category_id`), `list_person_titles` (`title_id`),
   `list_locations` (an employee's `location_id`), `list_account_categories` (the
