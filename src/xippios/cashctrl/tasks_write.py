@@ -66,7 +66,7 @@ as ``before`` is the read tasks' projection, without ``ssn`` and ``iban``.
 
 import json
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, TypeGuard, get_args
 
@@ -292,6 +292,15 @@ def _choices(**named: tuple[object, tuple[str, ...]]) -> None:
             raise refused(f"{name} must be one of {', '.join(allowed)}, not {value!r}")
 
 
+def _day(value: datetime | None) -> date | None:
+    """A date the read gives with its time, as the date an update sends (``YYYY-MM-DD``).
+
+    Upstream sends a record's dates with a time of day (``2026-10-24 00:00:00.0``), which
+    the read models keep, and documents its update parameters as dates.
+    """
+    return None if value is None else value.date()
+
+
 def _custom(custom: Mapping[str, str] | None) -> str | None:
     """A create's ``custom``: upstream's XML, or ``None`` (not sent) when none is given."""
     return api.custom_xml(custom) if custom else None
@@ -485,9 +494,9 @@ def _journal_values(entry: JournalEntryDetail) -> tuple[dict[str, Any], dict[str
         "currency_id": entry.currency_id,
         "currency_rate": entry.currency_rate,
         "custom": entry.custom,
-        "date_added": entry.date_added,
+        "date_added": _day(entry.date_added),
         "days_before": entry.days_before,
-        "end_date": entry.end_date,
+        "end_date": _day(entry.end_date),
         "items": items,
         "notes": entry.notes,
         "notify_email": entry.notify_email,
@@ -496,7 +505,7 @@ def _journal_values(entry: JournalEntryDetail) -> tuple[dict[str, Any], dict[str
         "notify_user_id": entry.notify_user_id,
         "recurrence": entry.recurrence,
         "reference": entry.reference,
-        "start_date": entry.start_date,
+        "start_date": _day(entry.start_date),
         "tax_id": entry.tax_id,
         "title": entry.title,
     }
@@ -974,7 +983,7 @@ def _person_values(
         "color": person.color,
         "contacts": contacts,
         "custom": person.custom,
-        "date_birth": person.date_birth,
+        "date_birth": _day(person.date_birth),
         "department": person.department,
         "discount_percentage": person.discount_percentage,
         "industry": person.industry,
@@ -1705,7 +1714,7 @@ def _order_values(order: OrderDetail) -> tuple[dict[str, Any], dict[str, str | N
     values: dict[str, Any] = {
         "associate_id": order.associate_id,
         "category_id": order.category_id,
-        "date": order.date,
+        "date": _day(order.date),
         "account_id": order.account_id,
         "currency_id": order.currency_id,
         "currency_rate": order.currency_rate,
@@ -1714,7 +1723,7 @@ def _order_values(order: OrderDetail) -> tuple[dict[str, Any], dict[str, str | N
         "description": order.description,
         "discount_percentage": order.discount_percentage,
         "due_days": order.due_days,
-        "end_date": order.end_date,
+        "end_date": _day(order.end_date),
         "group_id": order.group_id,
         "is_display_item_gross": order.is_display_item_gross,
         "items": items,
@@ -1729,7 +1738,7 @@ def _order_values(order: OrderDetail) -> tuple[dict[str, Any], dict[str, str | N
         "recurrence": order.recurrence,
         "responsible_person_id": order.responsible_person_id,
         "rounding_id": order.rounding_id,
-        "start_date": order.start_date,
+        "start_date": _day(order.start_date),
         "status_id": order.status_id,
     }
     stored = {
@@ -2187,7 +2196,7 @@ def _book_entry_values(entry: OrderBookEntry) -> tuple[dict[str, Any], dict[str,
         "amount": entry.amount,
         "currency_id": entry.currency_id,
         "currency_rate": entry.currency_rate,
-        "date": entry.date,
+        "date": _day(entry.date),
         "description": entry.description,
         "reference": entry.reference,
         "tax_id": entry.tax_id,

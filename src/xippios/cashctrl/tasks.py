@@ -447,7 +447,8 @@ async def list_fiscal_periods_async(org: str) -> Result[list[FiscalPeriod]]:
 async def get_fiscal_period_async(org: str, id: int | None = None) -> Result[FiscalPeriod]:
     """Read one fiscal period of an organisation by its id, or the current one.
 
-    The period comes back with its ``name``, ``start`` and ``end`` as dates, whether it is
+    The period comes back with its ``name``, ``start`` and ``end`` with the time upstream
+    sends (``2026-12-31T23:59:59``, no zone), whether it is
     closed and the months still open or closed (``open_month_ids``, ``closed_month_ids``,
     as ``YYYY-MM``). Without ``id`` upstream reads the API user's current fiscal period,
     the one the lists and balances answer for when given no ``fiscal_period_id``: its

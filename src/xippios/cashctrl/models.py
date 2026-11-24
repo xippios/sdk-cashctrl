@@ -43,11 +43,14 @@ synthetic one only. What those answers showed:
 
 - Timestamps come as ``YYYY-MM-DD HH:MM:SS.f`` (``2026-10-23 07:06:39.0``) without a zone;
   they are kept as naive ``datetime``.
-- Dates come in the same form (``2025-12-31 23:59:59.0`` for the end of a fiscal period);
-  the date part is kept (``2025-12-31``), the documented ``YYYY-MM-DD`` of the parameters.
-  ``lastEntryDate``, which no table describes, stays a ``datetime``: the first demo
-  organisation sent it with a time of day (``00:00:02``), the synthetic one at midnight
-  (``2025-12-15 00:00:00.0``).
+- Dates come in the same form (``2025-12-31 23:59:59.0`` for the end of a fiscal period)
+  and are kept whole, as naive ``datetime`` too, with no text beside them: the type that
+  keeps everything upstream sends, naive since upstream names no zone
+  (https://github.com/xippios/sdk-usda-esr/issues/60, part 3). Midnight is the time of
+  most; a fiscal period's ``end`` and ``salaryEnd`` are at ``23:59:59``. A write sends
+  the date part, the documented ``YYYY-MM-DD`` of the parameters. ``lastEntryDate``,
+  which no table describes, was seen with a time of day (``00:00:02``) by the first demo
+  organisation and at midnight (``2025-12-15 00:00:00.0``) by the synthetic one.
 - Localised texts (``name``, ``description``) arrive as upstream stores them, plain or as
   ``<values><de>...</de><en>...</en></values>``, and are kept verbatim.
 - A field that may be absent or ``null`` is ``X | None`` and defaults to ``None``. A
@@ -144,13 +147,6 @@ __all__ = [
 ]
 
 
-def _date_part(value: object) -> object:
-    """``"2024-12-31 23:59:59.0"`` → ``"2024-12-31"``: upstream sends dates as timestamps."""
-    if isinstance(value, str) and len(value) > 10 and value[10] in " T":
-        return value[:10]
-    return value
-
-
 def is_identifier_key(name: str) -> bool:
     """Whether a payload key names a personal identifier this package keeps out (sdk-core ADR-0017).
 
@@ -162,9 +158,6 @@ def is_identifier_key(name: str) -> bool:
     lowered = name.lower()
     return lowered == "ssn" or lowered.endswith("iban")
 
-
-UpstreamDate = Annotated[date, BeforeValidator(_date_part)]
-"""A date upstream sends with a time of day; the date part is kept."""
 
 API_USER_MASK = "API:REDACTED"
 """What an API user tag in ``created_by`` or ``last_updated_by`` becomes (``AuditUser``)."""
@@ -256,10 +249,10 @@ class FiscalPeriod(UpstreamModel):
     id: int
     name: str | None = None
     short_name: str | None = Field(default=None, validation_alias="shortName")
-    start: UpstreamDate
-    end: UpstreamDate
-    salary_start: UpstreamDate | None = Field(default=None, validation_alias="salaryStart")
-    salary_end: UpstreamDate | None = Field(default=None, validation_alias="salaryEnd")
+    start: datetime
+    end: datetime
+    salary_start: datetime | None = Field(default=None, validation_alias="salaryStart")
+    salary_end: datetime | None = Field(default=None, validation_alias="salaryEnd")
     last_entry_date: datetime | None = Field(default=None, validation_alias="lastEntryDate")
     closed: bool
     current: bool
@@ -341,7 +334,7 @@ class TaxRate(UpstreamModel):
 
     id: int
     percentage: Decimal
-    date_valid: UpstreamDate | None = Field(default=None, validation_alias="dateValid")
+    date_valid: datetime | None = Field(default=None, validation_alias="dateValid")
     percentage_flat: Decimal | None = Field(default=None, validation_alias="percentageFlat")
 
 
@@ -573,7 +566,7 @@ class _JournalEntryFields(UpstreamModel):
 
     id: int
     type: str
-    date_added: UpstreamDate = Field(validation_alias="dateAdded")
+    date_added: datetime = Field(validation_alias="dateAdded")
     title: str | None = None
     reference: str | None = None
     amount: Decimal
@@ -603,8 +596,8 @@ class _JournalEntryFields(UpstreamModel):
     imported: JsonValue = None
     imported_by: JsonValue = Field(default=None, validation_alias="importedBy")
     recurrence: str | None = None
-    start_date: UpstreamDate | None = Field(default=None, validation_alias="startDate")
-    end_date: UpstreamDate | None = Field(default=None, validation_alias="endDate")
+    start_date: datetime | None = Field(default=None, validation_alias="startDate")
+    end_date: datetime | None = Field(default=None, validation_alias="endDate")
     days_before: int | None = Field(default=None, validation_alias="daysBefore")
     notify_type: str | None = Field(default=None, validation_alias="notifyType")
     notify_person_id: int | None = Field(default=None, validation_alias="notifyPersonId")
@@ -621,7 +614,8 @@ class JournalEntry(_JournalEntryFields):
 
     A book entry, manual or made by another module (orders, salary, imports). Typed from
     the tables of ``journal/create.json`` and ``update.json``: ``date_added`` (the date of
-    the entry, ``YYYY-MM-DD``), ``title``, ``reference``, ``amount``, ``debit_id``,
+    the entry, sent as ``YYYY-MM-DD`` and read with its time), ``title``, ``reference``,
+    ``amount``, ``debit_id``,
     ``credit_id``, ``associate_id`` (documented as TEXT, an id or a name; seen as a
     number), ``tax_id``, ``currency_id``, ``currency_rate``, ``custom`` (XML), ``notes``
     (HTML), ``recurrence``, ``start_date``, ``end_date``, ``days_before`` and the
@@ -760,7 +754,7 @@ class _PersonFields(UpstreamModel):
     vat_uid: str | None = Field(default=None, validation_alias="vatUid")
     bank_data: str | None = Field(default=None, validation_alias="bankData")
     discount_percentage: Decimal | None = Field(default=None, validation_alias="discountPercentage")
-    date_birth: UpstreamDate | None = Field(default=None, validation_alias="dateBirth")
+    date_birth: datetime | None = Field(default=None, validation_alias="dateBirth")
     color: str | None = None
     superior_id: int | None = Field(default=None, validation_alias="superiorId")
     user_id: int | None = Field(default=None, validation_alias="userId")
@@ -1081,7 +1075,7 @@ class _OrderFields(UpstreamModel):
     id: int
     type: str
     nr: str | None = None
-    date: UpstreamDate
+    date: datetime
     description: str | None = None
     associate_id: int | None = Field(default=None, validation_alias="associateId")
     associate_name: str | None = Field(default=None, validation_alias="associateName")
@@ -1129,8 +1123,8 @@ class _OrderFields(UpstreamModel):
     downloaded: JsonValue = None
     downloaded_by: JsonValue = Field(default=None, validation_alias="downloadedBy")
     recurrence: str | None = None
-    start_date: UpstreamDate | None = Field(default=None, validation_alias="startDate")
-    end_date: UpstreamDate | None = Field(default=None, validation_alias="endDate")
+    start_date: datetime | None = Field(default=None, validation_alias="startDate")
+    end_date: datetime | None = Field(default=None, validation_alias="endDate")
     days_before: int | None = Field(default=None, validation_alias="daysBefore")
     notify_type: str | None = Field(default=None, validation_alias="notifyType")
     notify_person_id: int | None = Field(default=None, validation_alias="notifyPersonId")
@@ -1159,7 +1153,8 @@ class Order(_OrderFields):
     An offer, invoice, delivery note or other order document, sales or purchase. Typed
     from the tables of ``order/create.json`` and ``update.json``: ``associate_id``
     (documented as the comma-separated ids of the business partners; one id per order
-    here), ``category_id``, ``date`` (``YYYY-MM-DD``), ``account_id``, ``nr``,
+    here), ``category_id``, ``date`` (sent as ``YYYY-MM-DD``, read with its time),
+    ``account_id``, ``nr``,
     ``description``, ``status_id``, ``group_id``, ``previous_id``,
     ``responsible_person_id`` (documented as TEXT, an id; only seen ``null``),
     ``rounding_id``, ``language`` (``DE``, ``EN``, ``FR``, ``IT``), ``due_days``,
@@ -1327,7 +1322,8 @@ class OrderBookEntry(UpstreamModel):
     for example" (``docs/upstream/order.md``, Book entry). Typed from the tables of
     ``order/bookentry/create.json`` and ``update.json``: ``account_id`` (the contra
     account to the category's), ``amount``, ``currency_id``, ``currency_rate``, ``date``
-    (``YYYY-MM-DD``), ``description``, ``reference``, ``tax_id`` and ``template_id``.
+    (sent as ``YYYY-MM-DD``, read with its time), ``description``, ``reference``,
+    ``tax_id`` and ``template_id``.
 
     Typed from observation (``docs/upstream/OBSERVED.md``), the entry a seeded purchase order booked
     (``tests/fixtures/order_bookentry_list/booked.json``): ``id``, ``order_id``,
@@ -1344,7 +1340,7 @@ class OrderBookEntry(UpstreamModel):
     id: int
     order_id: int | None = Field(default=None, validation_alias="orderId")
     type: str | None = None
-    date: UpstreamDate | None = None
+    date: datetime | None = None
     description: str | None = None
     reference: str | None = None
     name: str | None = None
