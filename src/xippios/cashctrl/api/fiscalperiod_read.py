@@ -11,16 +11,16 @@ dates. An unknown id is answered with HTTP 200 and ``"success": false`` ("This f
 period does not exist."), which ``_client.classify`` raises as ``NotFoundError``.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.api._params import present
 from xippios.cashctrl.models import FiscalPeriod, ReadResponse
 
 __all__ = ["fiscalperiod_read"]
 
 
-async def fiscalperiod_read(org: str, id: int | None = None) -> FiscalPeriod:
+async def fiscalperiod_read(org: str, id: int | None = None) -> Answer[FiscalPeriod]:
     """Call ``fiscalperiod/read.json`` for organisation ``org`` and return the period.
 
     Args:
@@ -31,8 +31,10 @@ async def fiscalperiod_read(org: str, id: int | None = None) -> FiscalPeriod:
     Raises:
         NotFoundError: No fiscal period has this id.
     """
-    raw = await client_for(org).get_json("/fiscalperiod/read.json", params=present({"id": id}))
-    response = parse(
-        ReadResponse[FiscalPeriod], raw, source=SOURCE, endpoint="fiscalperiod/read.json"
+    answer = await client_for(org).get_answer(
+        "/fiscalperiod/read.json",
+        params=present({"id": id}),
+        parse=ReadResponse[FiscalPeriod],
+        endpoint="fiscalperiod/read.json",
     )
-    return response.data
+    return Answer(answer.payload.data, answer.retrieved_at)

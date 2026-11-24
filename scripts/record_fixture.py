@@ -121,22 +121,21 @@ Nothing unscrubbed touches disk. The request goes through the demo organisation'
 client with core's ``send_once``, which returns the answer whatever its final status, and
 core's ``fixture_from_response`` turns the exchange into a fixture in memory with
 ``Scrub(secrets=[key, its basic-auth token])`` (conventions §10):
-credentials scrubbed, the key and its token made ``REDACTED`` where they appear as given,
-and a plain verify that refuses the exchange when either is still there as given; core
-also refuses a body that is not UTF-8 text, which no scrub can read (exports are out of
+credentials scrubbed, the key and its token made ``REDACTED`` plain and in their encoded
+forms, and a verify that refuses the exchange when either is still there in any of them;
+core also refuses a body that is not UTF-8 text, which no scrub can read (exports are out of
 scope for fixtures, which the recorder's message says first), after the recorder has
 refused any file a file path answered. Then the recorder's own
 step, ``TenantScrub``, passed as ``rewrite=``, runs on the ``Fixture`` core returns (sdk-core
 ADR-0042, decision 4; ADR-0048, decision 1), and core checks what it returns: the
 demo host (``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``, in any case, IDNA or
 percent-encoded) becomes ``demo.cashctrl.com``, the host offline tests replay against, in
-the URL, the headers and both bodies; the key and its token become ``REDACTED`` in any
-percent-encoded form too; and ``scrub_text`` runs over the URL, every response header
+the URL, the headers and both bodies; and ``scrub_text`` runs over the URL, every response header
 value and both bodies: every e-mail address becomes ``user@example.com``, every API user
 tag ``API:REDACTED`` and every token-like field's value ``REDACTED``. Its verify then
 searches the URL, every header name and value and both bodies, raw and, for a JSON body,
-every decoded string, for the demo host, the subdomain on its own and the key or its
-token, plain or percent-encoded, behind a JSON escape included, and refuses the fixture
+every decoded string, for the demo host and the subdomain on its own, plain or
+percent-encoded, behind a JSON escape included, and refuses the fixture
 in its own words. A refusal prints its reason, never a value. A response in which the
 key or its basic-auth token was redacted is written, since nothing of either is left, but
 goes to review with exit status 1: upstream should never send them back.
@@ -200,7 +199,7 @@ from typing import Any
 from urllib.parse import parse_qsl
 
 import httpx
-from xippios.core import AsyncClient, BasicKeyAuth, sync
+from xippios.core import AsyncClient, KeyAuth, sync
 from xippios.core.testing import (
     REDACTED,
     Fixture,
@@ -512,7 +511,7 @@ async def exchange_async(
     )
     if auth is not None:
         sent["auth"] = auth
-    return await send_once(client, path, **sent)
+    return await send_once.async_fn(client, path, **sent)
 
 
 exchange = sync(exchange_async)
@@ -568,7 +567,7 @@ async def _read_record(
     The answer is returned to be checked and is never printed or kept.
     """
     try:
-        response = await send_once(client, path, params={"id": str(record_id)})
+        response = await send_once.async_fn(client, path, params={"id": str(record_id)})
     except ValueError:  # core's refusal of a 1xx or 3xx, which names no value either
         return None, "a 1xx or 3xx, no final answer"
     try:
@@ -811,19 +810,18 @@ def secrets_of(key: str) -> list[str]:
 
 
 def scrub(key: str) -> Scrub:
-    """What core removes besides credentials: the key and its basic-auth token, as given.
+    """What core removes besides credentials: the key and its basic-auth token.
 
     Args:
         key: The demo key, ``""`` when none is set; with its basic-auth token, it becomes
-            ``REDACTED`` wherever it appears as given, and core refuses the exchange if it
-            survives as given. Every other form is the recorder's step (``TenantScrub``).
+            ``REDACTED`` wherever it appears, plain or in its encoded forms, and core refuses
+            the exchange if either survives in any of them.
     """
     return Scrub(secrets=secrets_of(key), allow_binary=False)
 
 
 _HOST_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?")
 SUBDOMAIN_VAR = TENANTS.var(DEMO, "SUBDOMAIN")
-KEY_VAR = TENANTS.var(DEMO, "API_KEY")
 
 
 def _percent_encoded(char: str) -> str:
@@ -873,26 +871,23 @@ class TenantScrub:
 
     - the request's host, in any letter case, in its IDNA form too where that differs,
       plain or percent-encoded, becomes ``host``, and the URL's host is set to it;
-    - each of ``secrets``, plain or percent-encoded (either hex case, ``+`` for a space,
-      ``\/`` for ``/``), the longest first, in the letter case given, becomes ``REDACTED``;
     - then ``text_rewrite`` (the recorder's ``scrub_text``) runs over the URL, every
       response header value and both bodies.
 
-    Header names and the request's content type get the host and the secrets, not the
-    rewrite. A body stored base64 is left alone: core refuses one first, since the
-    recorder never sets ``allow_binary``.
+    The key and its token are core's: its ``Scrub`` replaces and verifies a secret plain
+    and in its encoded forms (``scrub``), so this step takes no secrets. Header names and
+    the request's content type get the host, not the rewrite. A body stored base64 is left
+    alone: core refuses one first, since the recorder never sets ``allow_binary``.
 
     Args:
         url: The request's URL as sent, whose host is the demo organisation's.
         subdomain: The demo organisation's subdomain, searched for on its own by the verify.
-        secrets: The values never written, e.g. ``secrets_of(key)``.
         host: The placeholder host, ``demo.cashctrl.com``.
-        text_rewrite: The text hook applied after the host and the secrets.
+        text_rewrite: The text hook applied after the host.
 
     Raises:
-        ValueError: ``host`` is no plain host name, a secret is empty, ``host`` contains a
-            secret in any letter case, or ``host`` is the request's own host; the
-            message names neither the host nor a value.
+        ValueError: ``host`` is no plain host name or is the request's own host; the
+            message names neither.
     """
 
     def __init__(
@@ -900,20 +895,12 @@ class TenantScrub:
         url: httpx.URL,
         *,
         subdomain: str,
-        secrets: Sequence[str],
         host: str = REPLAY_HOST,
         text_rewrite: Callable[[str], str] | None = None,
     ) -> None:
         if not _HOST_NAME.fullmatch(host):
             raise ValueError(
                 "the replay host must be a plain host name such as 'demo.example.test'"
-            )
-        if any(not value for value in secrets):
-            raise ValueError("the secrets must not contain an empty string")
-        if any(value.lower() in host.lower() for value in secrets):
-            raise ValueError(
-                "the replay host contains one of the secrets, and would write it into every "
-                "recorded URL"
             )
         forms = {form for form in (url.host, url.raw_host.decode("ascii")) if form}
         if host.lower() in {form.lower() for form in forms}:
@@ -931,22 +918,12 @@ class TenantScrub:
             if subdomain
             else None
         )
-        self._secrets = [
-            re.compile(_plain_or_encoded(value)) for value in sorted(secrets, key=len, reverse=True)
-        ]
         self._rewrite = text_rewrite
 
     def text(self, text: str) -> str:
-        """``text`` with the request's host made the placeholder, then the secrets redacted.
-
-        A ``REDACTED`` core already wrote is kept as it is: a secret found inside it (a
-        short one, such as ``ACT``) is not redacted again.
-        """
+        """``text`` with the request's host made the placeholder."""
         placeholder = self._placeholder
-        parts = self._host.sub(lambda _: placeholder, text).split(REDACTED)
-        for pattern in self._secrets:
-            parts = [pattern.sub(lambda _: REDACTED, part) for part in parts]
-        return REDACTED.join(parts)
+        return self._host.sub(lambda _: placeholder, text)
 
     def rewritten(self, text: str) -> str:
         """``text`` scrubbed, then passed through ``text_rewrite``."""
@@ -967,7 +944,7 @@ class TenantScrub:
         return [(self.text(name), self.rewritten(value)) for name, value in items]
 
     def rewrite(self, fixture: Fixture) -> Fixture:
-        """``fixture`` with the host, the secrets and ``text_rewrite`` applied; not verified."""
+        """``fixture`` with the host and ``text_rewrite`` applied; not verified."""
         sent = fixture.request
         body = sent.body
         request = sent.model_copy(
@@ -999,11 +976,11 @@ class TenantScrub:
         return rewritten, []
 
     def verify(self, fixture: Fixture) -> None:
-        r"""Refuse a rewritten fixture that still holds the demo host, the subdomain or a secret.
+        r"""Refuse a rewritten fixture that still holds the demo host or the subdomain.
 
         The URL, the content type, every response header name and value and both bodies
         are searched raw with the step's patterns (the host and the subdomain in any letter
-        case, each value plain or percent-encoded); a body that is JSON is searched decoded
+        case, plain or percent-encoded); a body that is JSON is searched decoded
         as well, every key and string in it, so a value behind a ``\uXXXX`` escape is found.
         The placeholder host and ``REDACTED`` are masked first and never count.
 
@@ -1043,8 +1020,6 @@ class TenantScrub:
                 return "the demo organisation's host"
             if self._subdomain is not None and self._subdomain.search(masked):
                 return f"the value of {SUBDOMAIN_VAR}"
-            if any(pattern.search(masked) for pattern in self._secrets):
-                return f"the value of {KEY_VAR} or its basic-auth token"
         return None
 
 
@@ -1056,9 +1031,7 @@ def scrubbed(response: httpx.Response, key: str, subdomain: str) -> Fixture:
             left as given) or the recorder's step did; the message names what and where,
             never a value.
     """
-    step = TenantScrub(
-        response.request.url, subdomain=subdomain, secrets=secrets_of(key), text_rewrite=scrub_text
-    )
+    step = TenantScrub(response.request.url, subdomain=subdomain, text_rewrite=scrub_text)
     return fixture_from_response(response, scrub=scrub(key), rewrite=step.apply)
 
 
@@ -1066,14 +1039,14 @@ def redacted_a_secret(response: httpx.Response, written: Fixture, key: str, subd
     """Whether the key or its basic-auth token was redacted in the response.
 
     The response is scrubbed once more without the secrets, through the same step, and
-    compared, so the scrub's own patterns decide (plain or percent-encoded); only the
-    answer leaves this function.
+    compared, so core's scrub decides (plain or encoded); only the answer leaves this
+    function.
     """
     if not key:
         return False
-    plain = TenantScrub(
-        response.request.url, subdomain=subdomain, secrets=(), text_rewrite=scrub_text
-    ).rewrite(fixture_from_response(response, scrub=Scrub()))
+    plain = TenantScrub(response.request.url, subdomain=subdomain, text_rewrite=scrub_text).rewrite(
+        fixture_from_response(response, scrub=Scrub())
+    )
     return plain.response != written.response
 
 
@@ -1194,7 +1167,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     key = os.environ.get(key_var, "")
     subdomain = TENANTS.field(DEMO, "SUBDOMAIN")
     method = "POST" if is_write(args.method) else "GET"
-    auth = BasicKeyAuth(key_var, key=WRONG_KEY, source=SOURCE) if args.wrong_key else None
+    wrong = KeyAuth(key_var, location="basic", key=WRONG_KEY, source=SOURCE)
+    auth = wrong if args.wrong_key else None
     try:
         response = exchange(client, method, f"/{args.endpoint}", args.params, auth)
     except ValueError as no_final_answer:  # core's refusal of a 1xx or 3xx, never a value

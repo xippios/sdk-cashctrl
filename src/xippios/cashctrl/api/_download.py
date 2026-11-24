@@ -34,12 +34,13 @@ from xippios.core import (
     Downloaded,
     ValidationError,
     XippiosError,
+    check_dest,
     request_description,
 )
 
-from xippios.cashctrl._client import NEUTRAL_HOST, SOURCE, classify, client_for, refused
+from xippios.cashctrl._client import NEUTRAL_HOST, SOURCE, classify, client_for
 
-__all__ = ["JSON_MEDIA_TYPE", "check_dest", "download", "export_params", "is_json"]
+__all__ = ["JSON_MEDIA_TYPE", "download", "export_params", "is_json"]
 
 JSON_MEDIA_TYPE = "application/json"
 """The media type of CashCtrl's JSON answers, a refusal of a download among them."""
@@ -86,24 +87,6 @@ def _refusal(
     )
 
 
-def check_dest(dest: str | os.PathLike[str]) -> Path:
-    """``dest`` as a ``Path``, once it names a file in a directory that exists.
-
-    A task that sends a request of its own before the download (a report's tree) checks
-    ``dest`` first, so that a bad one sends nothing; ``download`` checks it again.
-
-    Raises:
-        InvalidRequestError: ``dest`` is a directory, or its directory does not exist,
-            a bad argument (conventions §5); nothing was sent.
-    """
-    target = Path(dest)
-    if target.is_dir():
-        raise refused("dest is a directory; name the file to write")
-    if not target.parent.is_dir():
-        raise refused("dest's directory does not exist; create it first")
-    return target
-
-
 async def download(
     org: str,
     params: Mapping[str, str | int],
@@ -133,14 +116,14 @@ async def download(
         XippiosError: Core's taxonomy for any other failure; ``dest`` stays as it was.
     """
     client = client_for(org)
-    target = check_dest(dest)
+    target = check_dest(dest, source=SOURCE)
     handle, name = tempfile.mkstemp(
         dir=target.parent, prefix=f".{target.name}.", suffix=".download"
     )
     os.close(handle)
     partial = Path(name)
     try:
-        got = await client.download(str(httpx.URL(f"/{endpoint}", params=params)), partial)
+        got = await client.download(f"/{endpoint}", partial, params=params)
         if is_json(got.content_type):
             raise _refusal(partial, endpoint, params, got.content_type or JSON_MEDIA_TYPE)
         partial.replace(target)

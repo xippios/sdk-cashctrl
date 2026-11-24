@@ -72,8 +72,7 @@ from decimal import Decimal
 from typing import Any, TypeGuard, get_args
 
 from pydantic import BaseModel, JsonValue, ValidationError
-from xippios.core import InvalidRequestError, Result, sync
-from xippios.core.models import REDACTED
+from xippios.core import REDACTED, InvalidRequestError, Result, sync
 
 from xippios.cashctrl import api
 from xippios.cashctrl._client import nothing_written, refused
@@ -193,6 +192,7 @@ def _preview[T](
     reads: Sequence[str],
     before: T | None = None,
     changes: dict[str, str] | None = None,
+    retrieved_at: datetime | None = None,
 ) -> Result[WritePreview[T] | WriteResult]:
     preview = WritePreview[T](
         endpoint=endpoint,
@@ -201,14 +201,15 @@ def _preview[T](
         before=before,
         changes=None if changes is None else _shown(changes),
     )
-    return Result[WritePreview[T] | WriteResult](data=preview, meta=_meta(org, endpoint, {}))
+    meta = _meta(org, endpoint, {}, retrieved_at=retrieved_at)
+    return Result[WritePreview[T] | WriteResult](data=preview, meta=meta)
 
 
 def _performed[T](
     org: str, endpoint: str, payload: dict[str, str], answer: WriteAnswer
 ) -> Result[WritePreview[T] | WriteResult]:
     result = WriteResult(insert_id=answer.insert_id, message=answer.message)
-    meta = _meta(org, endpoint, _shown(payload))
+    meta = _meta(org, endpoint, _shown(payload), retrieved_at=None)
     return Result[WritePreview[T] | WriteResult](data=result, meta=meta)
 
 
@@ -823,7 +824,8 @@ async def update_journal_entry_async(
     _choices(notify_type=(notify_type, NOTIFY_TYPES), recurrence=(recurrence, RECURRENCES))
     cleared = _clear_names(clear, JOURNAL_UPDATE, given, custom)
     changes = _changes(api.journal_fields, JOURNAL_UPDATE, given, cleared, custom)
-    entry = await api.journal_read(org, id)
+    read = await api.journal_read(org, id)
+    entry = read.payload
     booked = _booked(entry, "updated")
     if booked is not None:
         raise booked
@@ -848,7 +850,13 @@ async def update_journal_entry_async(
     if confirm is not True:
         before = _journal_entry_detail(entry)
         return _preview(
-            org, endpoint, fields, reads=["journal/read.json"], before=before, changes=changes
+            org,
+            endpoint,
+            fields,
+            reads=["journal/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=before,
+            changes=changes,
         )
     answer = await api.journal_update(org, fields)
     return _performed(org, endpoint, fields, answer)
@@ -884,13 +892,19 @@ async def delete_journal_entry_async(
     _check_id(id)
     fields = api.delete_fields([id])
     endpoint = "journal/delete.json"
-    entry = await api.journal_read(org, id)
+    read = await api.journal_read(org, id)
+    entry = read.payload
     booked = _booked(entry, "deleted")
     if booked is not None:
         raise booked
     if confirm is not True:
         return _preview(
-            org, endpoint, fields, reads=["journal/read.json"], before=_journal_entry_detail(entry)
+            org,
+            endpoint,
+            fields,
+            reads=["journal/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=_journal_entry_detail(entry),
         )
     answer = await api.journal_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
@@ -1465,7 +1479,8 @@ async def update_person_async(
     _choices(language=(language, LANGUAGES), color=(color, COLORS))
     cleared = _clear_names(clear, PERSON_UPDATE, given, custom)
     changes = _changes(api.person_fields, PERSON_UPDATE, given, cleared, custom)
-    person = await api.person_read(org, id)
+    read = await api.person_read(org, id)
+    person = read.payload
     values, stored, unknown = _person_values(person)
     decided = [*given, *cleared]
     blocked = _blocked(stored, decided)
@@ -1492,7 +1507,13 @@ async def update_person_async(
     if confirm is not True:
         before = _person_detail(person)
         return _preview(
-            org, endpoint, fields, reads=["person/read.json"], before=before, changes=changes
+            org,
+            endpoint,
+            fields,
+            reads=["person/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=before,
+            changes=changes,
         )
     answer = await api.person_update(org, fields)
     return _performed(org, endpoint, fields, answer)
@@ -1518,9 +1539,15 @@ async def delete_person_async(org: str, id: int, *, confirm: bool = False) -> Re
     fields = api.delete_fields([id])
     endpoint = "person/delete.json"
     if confirm is not True:
-        person = await api.person_read(org, id)
+        read = await api.person_read(org, id)
+        person = read.payload
         return _preview(
-            org, endpoint, fields, reads=["person/read.json"], before=_person_detail(person)
+            org,
+            endpoint,
+            fields,
+            reads=["person/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=_person_detail(person),
         )
     answer = await api.person_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
@@ -1986,7 +2013,8 @@ async def update_order_async(
     )
     cleared = _clear_names(clear, ORDER_UPDATE, given, custom)
     changes = _changes(api.order_fields, ORDER_UPDATE, given, cleared, custom)
-    order = await api.order_read(org, id)
+    read = await api.order_read(org, id)
+    order = read.payload
     values, stored = _order_values(order)
     blocked = _blocked(stored, [*given, *cleared])
     if blocked is not None:
@@ -2004,6 +2032,7 @@ async def update_order_async(
             endpoint,
             fields,
             reads=["order/read.json"],
+            retrieved_at=read.retrieved_at,
             before=_order_detail(order),
             changes=changes,
         )
@@ -2032,8 +2061,16 @@ async def delete_order_async(org: str, id: int, *, confirm: bool = False) -> Res
     fields = api.delete_fields([id])
     endpoint = "order/delete.json"
     if confirm is not True:
-        order = _order_detail(await api.order_read(org, id))
-        return _preview(org, endpoint, fields, reads=["order/read.json"], before=order)
+        read = await api.order_read(org, id)
+        order = _order_detail(read.payload)
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["order/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=order,
+        )
     answer = await api.order_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 
@@ -2355,7 +2392,8 @@ async def update_order_book_entry_async(
     )
     cleared = _clear_names(clear, BOOK_ENTRY_UPDATE, given, None)
     changes = _changes(api.order_bookentry_fields, BOOK_ENTRY_UPDATE, given, cleared, None)
-    entry = await api.order_bookentry_read(org, id)
+    read = await api.order_bookentry_read(org, id)
+    entry = read.payload
     not_manual = _not_manual(entry, "update")
     if not_manual is not None:
         raise not_manual
@@ -2383,6 +2421,7 @@ async def update_order_book_entry_async(
             endpoint,
             fields,
             reads=["order/bookentry/read.json"],
+            retrieved_at=read.retrieved_at,
             before=entry,
             changes=changes,
         )
@@ -2416,12 +2455,20 @@ async def delete_order_book_entry_async(
     _check_id(id)
     fields = api.delete_fields([id])
     endpoint = "order/bookentry/delete.json"
-    entry = await api.order_bookentry_read(org, id)
+    read = await api.order_bookentry_read(org, id)
+    entry = read.payload
     not_manual = _not_manual(entry, "delete")
     if not_manual is not None:
         raise not_manual
     if confirm is not True:
-        return _preview(org, endpoint, fields, reads=["order/bookentry/read.json"], before=entry)
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["order/bookentry/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=entry,
+        )
     answer = await api.order_bookentry_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 

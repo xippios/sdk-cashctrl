@@ -11,9 +11,9 @@ custom field of the type. Its answer for ``PERSON``, as ``docs/upstream/OBSERVED
 ``CustomField`` mirrors.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.api._params import present
 from xippios.cashctrl.models import CustomField, CustomFieldType, ListResponse
 
@@ -25,14 +25,16 @@ def customfield_list_params(type: CustomFieldType) -> dict[str, str | int]:
     return present({"type": type})
 
 
-async def customfield_list(org: str, type: CustomFieldType) -> ListResponse[CustomField]:
+async def customfield_list(org: str, type: CustomFieldType) -> Answer[ListResponse[CustomField]]:
     """Call ``customfield/list.json`` for organisation ``org``.
 
     Args:
         org: A declared organisation, e.g. ``"demo"``.
         type: ``type``, the module the custom fields belong to, e.g. ``PERSON``.
     """
-    raw = await client_for(org).get_json(
-        "/customfield/list.json", params=customfield_list_params(type)
+    return await client_for(org).get_answer(
+        "/customfield/list.json",
+        params=customfield_list_params(type),
+        parse=ListResponse[CustomField],
+        endpoint="customfield/list.json",
     )
-    return parse(ListResponse[CustomField], raw, source=SOURCE, endpoint="customfield/list.json")

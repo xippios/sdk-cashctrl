@@ -8,9 +8,9 @@ accounts."). Its documented parameters, all optional: ``categoryId``, ``dir``, `
 
 from collections.abc import Sequence
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.api._filter import encode_filter
 from xippios.cashctrl.api._params import flag, present
 from xippios.cashctrl.models import Account, Direction, Filter, ListResponse
@@ -63,7 +63,7 @@ async def account_list(
     only_notes: bool | None = None,
     query: str | None = None,
     sort: str | None = None,
-) -> ListResponse[Account]:
+) -> Answer[ListResponse[Account]]:
     """Call ``account/list.json`` for organisation ``org``.
 
     Args:
@@ -89,5 +89,9 @@ async def account_list(
         query=query,
         sort=sort,
     )
-    raw = await client_for(org).get_json("/account/list.json", params=params)
-    return parse(ListResponse[Account], raw, source=SOURCE, endpoint="account/list.json")
+    return await client_for(org).get_answer(
+        "/account/list.json",
+        params=params,
+        parse=ListResponse[Account],
+        endpoint="account/list.json",
+    )

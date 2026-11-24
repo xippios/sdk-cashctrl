@@ -13,9 +13,9 @@ journal entries."). Its documented parameters, all optional: ``accountId``,
 
 from collections.abc import Sequence
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.api._filter import encode_filter
 from xippios.cashctrl.api._params import flag, present
 from xippios.cashctrl.models import Direction, Filter, JournalEntry, ListResponse
@@ -95,7 +95,7 @@ async def journal_list(
     query: str | None = None,
     sort: str | None = None,
     start: int | None = None,
-) -> ListResponse[JournalEntry]:
+) -> Answer[ListResponse[JournalEntry]]:
     """Call ``journal/list.json`` for organisation ``org``: one page and upstream's total.
 
     Args:
@@ -139,5 +139,9 @@ async def journal_list(
         sort=sort,
         start=start,
     )
-    raw = await client_for(org).get_json("/journal/list.json", params=params)
-    return parse(ListResponse[JournalEntry], raw, source=SOURCE, endpoint="journal/list.json")
+    return await client_for(org).get_answer(
+        "/journal/list.json",
+        params=params,
+        parse=ListResponse[JournalEntry],
+        endpoint="journal/list.json",
+    )

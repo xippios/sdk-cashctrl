@@ -7,15 +7,15 @@ HTTP 200 and ``"success": false``, which ``_client.classify`` raises as
 (``docs/upstream/OBSERVED.md``), not for ``order``.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.models import OrderDetail, ReadResponse
 
 __all__ = ["order_read"]
 
 
-async def order_read(org: str, id: int) -> OrderDetail:
+async def order_read(org: str, id: int) -> Answer[OrderDetail]:
     """Call ``order/read.json`` for organisation ``org`` and return the order.
 
     Args:
@@ -25,6 +25,10 @@ async def order_read(org: str, id: int) -> OrderDetail:
     Raises:
         NotFoundError: No order has this id.
     """
-    raw = await client_for(org).get_json("/order/read.json", params={"id": id})
-    response = parse(ReadResponse[OrderDetail], raw, source=SOURCE, endpoint="order/read.json")
-    return response.data
+    answer = await client_for(org).get_answer(
+        "/order/read.json",
+        params={"id": id},
+        parse=ReadResponse[OrderDetail],
+        endpoint="order/read.json",
+    )
+    return Answer(answer.payload.data, answer.retrieved_at)

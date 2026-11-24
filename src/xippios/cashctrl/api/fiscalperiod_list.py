@@ -4,19 +4,22 @@ Reference: ``docs/upstream/meta.md``, "List fiscal periods" ("Returns a list of 
 fiscal periods."). The operation documents no parameters.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.models import FiscalPeriod, ListResponse
 
 __all__ = ["fiscalperiod_list"]
 
 
-async def fiscalperiod_list(org: str) -> ListResponse[FiscalPeriod]:
+async def fiscalperiod_list(org: str) -> Answer[ListResponse[FiscalPeriod]]:
     """Call ``fiscalperiod/list.json`` for organisation ``org``.
 
     Args:
         org: A declared organisation, e.g. ``"demo"``.
     """
-    raw = await client_for(org).get_json("/fiscalperiod/list.json")
-    return parse(ListResponse[FiscalPeriod], raw, source=SOURCE, endpoint="fiscalperiod/list.json")
+    return await client_for(org).get_answer(
+        "/fiscalperiod/list.json",
+        parse=ListResponse[FiscalPeriod],
+        endpoint="fiscalperiod/list.json",
+    )

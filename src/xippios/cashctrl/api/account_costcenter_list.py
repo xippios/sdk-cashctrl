@@ -13,9 +13,9 @@ on the new demo organisation, and after ``scripts/seed_demo.py --discovery`` cre
 
 from collections.abc import Sequence
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.api._filter import encode_filter
 from xippios.cashctrl.api._params import flag, present
 from xippios.cashctrl.models import CostCenter, Direction, Filter, ListResponse
@@ -65,7 +65,7 @@ async def account_costcenter_list(
     only_notes: bool | None = None,
     query: str | None = None,
     sort: str | None = None,
-) -> ListResponse[CostCenter]:
+) -> Answer[ListResponse[CostCenter]]:
     """Call ``account/costcenter/list.json`` for organisation ``org``.
 
     Args:
@@ -89,7 +89,9 @@ async def account_costcenter_list(
         query=query,
         sort=sort,
     )
-    raw = await client_for(org).get_json("/account/costcenter/list.json", params=params)
-    return parse(
-        ListResponse[CostCenter], raw, source=SOURCE, endpoint="account/costcenter/list.json"
+    return await client_for(org).get_answer(
+        "/account/costcenter/list.json",
+        params=params,
+        parse=ListResponse[CostCenter],
+        endpoint="account/costcenter/list.json",
     )

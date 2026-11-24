@@ -7,19 +7,20 @@ parameters. Its answer, as ``docs/upstream/OBSERVED.md`` notes:
 nodes of CashCtrl's default reports, each collection's elements nested under ``data``.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.models import ListResponse, ReportTreeNode
 
 __all__ = ["report_tree"]
 
 
-async def report_tree(org: str) -> ListResponse[ReportTreeNode]:
+async def report_tree(org: str) -> Answer[ListResponse[ReportTreeNode]]:
     """Call ``report/tree.json`` for organisation ``org``.
 
     Args:
         org: A declared organisation, e.g. ``"demo"``.
     """
-    raw = await client_for(org).get_json("/report/tree.json")
-    return parse(ListResponse[ReportTreeNode], raw, source=SOURCE, endpoint="report/tree.json")
+    return await client_for(org).get_answer(
+        "/report/tree.json", parse=ListResponse[ReportTreeNode], endpoint="report/tree.json"
+    )

@@ -7,15 +7,15 @@ HTTP 200 and ``"success": false``, which ``_client.classify`` raises as
 (``docs/upstream/OBSERVED.md``), not for ``person``.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.models import PersonDetail, ReadResponse
 
 __all__ = ["person_read"]
 
 
-async def person_read(org: str, id: int) -> PersonDetail:
+async def person_read(org: str, id: int) -> Answer[PersonDetail]:
     """Call ``person/read.json`` for organisation ``org`` and return the person.
 
     Args:
@@ -25,6 +25,10 @@ async def person_read(org: str, id: int) -> PersonDetail:
     Raises:
         NotFoundError: No person has this id.
     """
-    raw = await client_for(org).get_json("/person/read.json", params={"id": id})
-    response = parse(ReadResponse[PersonDetail], raw, source=SOURCE, endpoint="person/read.json")
-    return response.data
+    answer = await client_for(org).get_answer(
+        "/person/read.json",
+        params={"id": id},
+        parse=ReadResponse[PersonDetail],
+        endpoint="person/read.json",
+    )
+    return Answer(answer.payload.data, answer.retrieved_at)

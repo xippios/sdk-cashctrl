@@ -20,7 +20,7 @@ returns core's ``Downloaded``; an export takes its list's query, from ``*_list_p
 with ``columns`` added by ``export_params``.
 """
 
-from xippios.cashctrl.api._download import check_dest, export_params
+from xippios.cashctrl.api._download import export_params
 from xippios.cashctrl.api._filter import encode_filter
 from xippios.cashctrl.api._form import custom_xml, delete_fields, merge_custom
 from xippios.cashctrl.api.account_category_list import account_category_list
@@ -117,7 +117,6 @@ __all__ = [
     "account_list_pdf",
     "account_list_xlsx",
     "account_read",
-    "check_dest",
     "currency_list",
     "custom_xml",
     "customfield_list",

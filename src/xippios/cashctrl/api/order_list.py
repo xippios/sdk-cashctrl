@@ -16,9 +16,9 @@ task's business.
 
 from collections.abc import Sequence
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.api._filter import encode_filter
 from xippios.cashctrl.api._params import flag, present
 from xippios.cashctrl.models import Direction, Filter, ListResponse, Order, OrderType
@@ -92,7 +92,7 @@ async def order_list(
     start: int | None = None,
     status_id: int | None = None,
     type: OrderType | None = None,
-) -> ListResponse[Order]:
+) -> Answer[ListResponse[Order]]:
     """Call ``order/list.json`` for organisation ``org``: one page and upstream's total.
 
     Args:
@@ -132,5 +132,6 @@ async def order_list(
         status_id=status_id,
         type=type,
     )
-    raw = await client_for(org).get_json("/order/list.json", params=params)
-    return parse(ListResponse[Order], raw, source=SOURCE, endpoint="order/list.json")
+    return await client_for(org).get_answer(
+        "/order/list.json", params=params, parse=ListResponse[Order], endpoint="order/list.json"
+    )

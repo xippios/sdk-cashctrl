@@ -8,15 +8,15 @@ the document language"). An unknown id is assumed to be refused as ``order/read.
 refuses one, which ``_client.classify`` raises as ``NotFoundError``.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.models import OrderDocument, ReadResponse
 
 __all__ = ["order_document_read"]
 
 
-async def order_document_read(org: str, id: int) -> OrderDocument:
+async def order_document_read(org: str, id: int) -> Answer[OrderDocument]:
     """Call ``order/document/read.json`` for organisation ``org`` and return the document.
 
     Args:
@@ -26,8 +26,10 @@ async def order_document_read(org: str, id: int) -> OrderDocument:
     Raises:
         NotFoundError: No order has this id (assumed, as for ``order/read.json``).
     """
-    raw = await client_for(org).get_json("/order/document/read.json", params={"id": id})
-    response = parse(
-        ReadResponse[OrderDocument], raw, source=SOURCE, endpoint="order/document/read.json"
+    answer = await client_for(org).get_answer(
+        "/order/document/read.json",
+        params={"id": id},
+        parse=ReadResponse[OrderDocument],
+        endpoint="order/document/read.json",
     )
-    return response.data
+    return Answer(answer.payload.data, answer.retrieved_at)
