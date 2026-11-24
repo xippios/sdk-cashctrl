@@ -302,8 +302,8 @@ def test_an_export_streams_upstreams_file_to_dest(
     dest = tmp_path / f"{module}.{format}"
     result = export(DEMO, format, dest=dest)
     assert httpx.URL(sent_urls(route)[-1]).path == f"/api/v1/{module}/list.{format}"
-    person_columns = {"columns": ",".join(tasks.PERSON_COLUMNS)}
-    assert sent_query(route) == (person_columns if name == "download_persons" else {})
+    person_default = {} if PERSON_DEFAULT is None else {"columns": ",".join(PERSON_DEFAULT)}
+    assert sent_query(route) == (person_default if name == "download_persons" else {})
     assert dest.read_bytes() == body
     assert isinstance(result.data, Downloaded)
     assert (result.data.path, result.data.bytes) == (dest, len(body))
@@ -456,14 +456,41 @@ def test_the_account_export_takes_no_limit_as_upstream_documents_none() -> None:
     assert {"start", "limit"}.isdisjoint(inspect.signature(tasks.download_accounts).parameters)
 
 
-def test_the_person_export_names_the_projections_columns_without_identifiers(
-    respx_mock: respx.MockRouter, tmp_path: Path
+# THE ONE PLACE IN THE TESTS where the person file's default is decided
+# (https://github.com/xippios/sdk-cashctrl/issues/135, part 2). One request,
+# ``person/list.csv`` with ``limit=1`` and no ``columns``, reads upstream's default header:
+# if it names neither ``ssn`` nor a field ending in ``iban``, the default is upstream's
+# own (``None``, no ``columns`` sent); if it names one, the package's list stays
+# (``tasks.PERSON_COLUMNS``). Until the header is read, the package's list stands.
+PERSON_DEFAULT: tuple[str, ...] | None = tasks.PERSON_COLUMNS
+"""What ``download_persons`` sends as ``columns`` when its caller names none."""
+
+
+def test_the_person_files_default_is_the_one_decided() -> None:
+    assert tasks.PERSON_DEFAULT_COLUMNS == PERSON_DEFAULT
+
+
+@pytest.mark.parametrize("default", [None, tasks.PERSON_COLUMNS], ids=["upstreams", "packages"])
+def test_either_default_of_the_person_file_is_sent_as_it_stands(
+    respx_mock: respx.MockRouter,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    default: tuple[str, ...] | None,
 ) -> None:
-    """``PersonProjection``'s fields under upstream's names, sent, as ``PERSON_COLUMNS``."""
-    route = mount(respx_mock, "person/list.pdf", *BODIES["pdf"])
-    tasks.download_persons(DEMO, "pdf", dest=tmp_path / "persons.pdf")
-    columns = sent_query(route)["columns"].split(",")
-    assert columns == list(tasks.PERSON_COLUMNS)
+    """Both outcomes of the probe: no ``columns`` at all, or the package's list."""
+    monkeypatch.setattr(tasks, "PERSON_DEFAULT_COLUMNS", default)
+    route = mount(respx_mock, "person/list.csv", *BODIES["csv"])
+    result = tasks.download_persons(DEMO, "csv", dest=tmp_path / "persons.csv")
+    expected = {} if default is None else {"columns": ",".join(default)}
+    assert sent_query(route) == expected
+    assert result.meta.request == {"org": DEMO, **expected}
+    named = tasks.download_persons(DEMO, "csv", dest=tmp_path / "named.csv", columns=["nr"])
+    assert named.meta.request == {"org": DEMO, "columns": "nr"}, "named, sent as named"
+
+
+def test_the_packages_person_columns_are_the_projections_without_identifiers() -> None:
+    """``PersonProjection``'s fields under upstream's names, as ``PERSON_COLUMNS``."""
+    columns = list(tasks.PERSON_COLUMNS)
     assert len(columns) == len(PersonProjection.model_fields) == len(set(columns))
     assert {"firstName", "lastName", "emailWork", "isCustomer"} <= set(columns)
     assert not {name.lower() for name in columns} & {"ssn", "iban", "qriban"}
