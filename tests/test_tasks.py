@@ -6,7 +6,7 @@ import json
 import re
 import typing
 from collections.abc import Callable, Iterator
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -14,7 +14,7 @@ import httpx
 import pytest
 import respx
 from pydantic import BeforeValidator
-from xippios.core import InvalidRequestError, NotFoundError, Result, UpstreamModel, sync
+from xippios.core import Answer, InvalidRequestError, NotFoundError, Result, UpstreamModel, sync
 from xippios.core.mcp import build_server, tool_name
 from xippios.core.testing import (
     Fixture,
@@ -24,6 +24,7 @@ from xippios.core.testing import (
     mcp_call,
     mcp_call_text,
     recorded_query,
+    response_from_fixture,
     sent_query,
     sent_urls,
 )
@@ -740,17 +741,16 @@ def journal_2025_pages(fixtures_dir: Path) -> dict[int, dict[str, typing.Any]]:
     }
 
 
-def serve_by_start(
-    respx_mock: respx.MockRouter, pages: dict[int, dict[str, typing.Any]]
-) -> respx.Route:
-    """A route answering each request with the page recorded for its ``start``.
+def serve_by_start(respx_mock: respx.MockRouter, fixtures_dir: Path) -> respx.Route:
+    """A route answering each request with the 2025 page recorded for its ``start``.
 
     ``replay_fixture`` ignores query strings, so the multi-page replay dispatches on the
     ``start`` each request sends; a ``start`` nothing was recorded for fails the test.
     """
 
     def answer(request: httpx.Request) -> httpx.Response:
-        return answer_with(pages[int(request.url.params["start"])])
+        case = FP2025_PAGES[int(request.url.params["start"])]
+        return response_from_fixture(load_fixture(fixture_path(fixtures_dir, "journal_list", case)))
 
     return respx_mock.get(JOURNAL_LIST_URL).mock(side_effect=answer)
 
@@ -822,12 +822,10 @@ def test_a_page_past_the_end_is_empty_with_upstreams_total(
 
 
 def test_list_journal_entries_without_limit_collects_every_page(
-    respx_mock: respx.MockRouter,
-    journal_2025_pages: dict[int, dict[str, typing.Any]],
-    monkeypatch: pytest.MonkeyPatch,
+    respx_mock: respx.MockRouter, fixtures_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(tasks, "PAGE_SIZE", 5)  # the size the pages were recorded with
-    route = serve_by_start(respx_mock, journal_2025_pages)
+    route = serve_by_start(respx_mock, fixtures_dir)
     result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
     assert [dict(call.request.url.params) for call in route.calls] == [
         {"fiscalPeriodId": "2", "start": str(start), "limit": "5"} for start in (0, 5, 10)
@@ -840,12 +838,10 @@ def test_list_journal_entries_without_limit_collects_every_page(
 
 
 def test_start_without_limit_collects_every_page_from_start(
-    respx_mock: respx.MockRouter,
-    journal_2025_pages: dict[int, dict[str, typing.Any]],
-    monkeypatch: pytest.MonkeyPatch,
+    respx_mock: respx.MockRouter, fixtures_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(tasks, "PAGE_SIZE", 5)
-    route = serve_by_start(respx_mock, journal_2025_pages)
+    route = serve_by_start(respx_mock, fixtures_dir)
     result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025, start=5)
     assert starts(route) == [5, 10]
     assert [entry.id for entry in result.data] == [7, 6, 5, 4, 3, 2, 1]
@@ -899,9 +895,103 @@ def test_the_count_kept_is_the_last_pages_and_never_corrected(
     pages, the last one's ``total`` changed in memory (conventions §10, kind 4)."""
     monkeypatch.setattr(tasks, "PAGE_SIZE", 5)
     pages = {**journal_2025_pages, 10: {**journal_2025_pages[10], "total": 11}}
-    serve_by_start(respx_mock, pages)
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return answer_with(pages[int(request.url.params["start"])])
+
+    respx_mock.get(JOURNAL_LIST_URL).mock(side_effect=answer)
     result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
     assert (len(result.data), result.meta.total) == (12, 11)
+
+
+def serve_counted(
+    respx_mock: respx.MockRouter, entries: list[typing.Any], total: int
+) -> respx.Route:
+    """A route cutting ``entries`` by each request's ``start`` and ``limit``, counting ``total``.
+
+    The answers are recorded 2025 entries with upstream's count changed in memory, as a
+    longer list would answer (conventions §10, kind 4).
+    """
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        start, limit = (int(request.url.params[name]) for name in ("start", "limit"))
+        rows = [entries[index % len(entries)] for index in range(start, min(start + limit, total))]
+        return answer_with({"total": total, "data": rows})
+
+    return respx_mock.get(JOURNAL_LIST_URL).mock(side_effect=answer)
+
+
+def test_a_walk_fetches_at_most_24_pages(
+    respx_mock: respx.MockRouter,
+    journal_2025_pages: dict[int, dict[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """24 pages of one entry are 24 requests, the bound for Python and MCP alike."""
+    assert tasks.WALK_PAGES == 24
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 1)
+    route = serve_counted(respx_mock, journal_2025_pages[0]["data"], 24)
+    result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
+    assert (route.call_count, len(result.data), result.meta.total) == (24, 24, 24)
+
+
+WALK_REFUSAL = (
+    "the walk needs more than the 24 pages that one call fetches: upstream counts 25 records "
+    "on 25 pages of 1, and the walk reached page 1 of 25 after 1 request. It returns "
+    "nothing; pass start with limit to fetch one page at a time"
+)
+
+
+def test_a_walk_over_24_pages_is_refused_after_its_first_request(
+    respx_mock: respx.MockRouter,
+    journal_2025_pages: dict[int, dict[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal names the count, the bound, the paging arguments and the page reached."""
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 1)
+    route = serve_counted(respx_mock, journal_2025_pages[0]["data"], 25)
+    with pytest.raises(InvalidRequestError) as refused:
+        tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
+    assert route.call_count == 1
+    assert str(refused.value).startswith(WALK_REFUSAL)
+
+
+@pytest.mark.anyio
+async def test_a_tool_over_24_pages_is_refused_alike(
+    respx_mock: respx.MockRouter,
+    journal_2025_pages: dict[int, dict[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 1)
+    route = serve_counted(respx_mock, journal_2025_pages[0]["data"], 25)
+    arguments = {"org": DEMO, "fiscal_period_id": FP2025}
+    text = await mcp_call_text(server, "cashctrl_list_journal_entries", arguments)
+    assert route.call_count == 1
+    assert WALK_REFUSAL in text
+
+
+def test_a_task_carries_its_answers_time(
+    journal_2025_pages: dict[int, dict[str, typing.Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``meta.retrieved_at`` is the client's time of the answer, the oldest of a walk's.
+
+    The wrapper is replaced by one that answers the recorded 2025 pages, parsed, with a
+    time of its own for each, so the task's choice among them shows (conventions §4).
+    """
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 5)
+    times = {0: datetime(2026, 11, 24, 9, 0, 2), 5: datetime(2026, 11, 24, 9, 0, 1)}
+    times[10] = datetime(2026, 11, 24, 9, 0, 3)
+
+    async def journal_list(
+        org: str, *, start: int, limit: int, **_: object
+    ) -> Answer[models.ListResponse[models.JournalEntry]]:
+        page = models.ListResponse[models.JournalEntry].model_validate(journal_2025_pages[start])
+        return Answer(page, times[start].replace(tzinfo=UTC))
+
+    monkeypatch.setattr(api, "journal_list", journal_list)
+    walked = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
+    assert walked.meta.retrieved_at == times[5].replace(tzinfo=UTC), "the oldest page's"
+    one = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025, start=10, limit=5)
+    assert one.meta.retrieved_at == times[10].replace(tzinfo=UTC), "the one page's"
 
 
 @pytest.mark.anyio
@@ -1173,7 +1263,7 @@ async def test_the_person_list_wrapper_stays_faithful(
 ) -> None:
     """The endpoint wrapper keeps ``ssn`` and ``iban`` (``null`` in the fixture); the task not."""
     replay_fixture("person_list", "default")
-    listed = await api.person_list(DEMO, start=0, limit=100)
+    listed = (await api.person_list(DEMO, start=0, limit=100)).payload
     assert all(isinstance(person, Person) for person in listed.data)
     assert all((person.ssn, person.iban) == (None, None) for person in listed.data)
     result = await tasks.list_persons_async(DEMO)
@@ -1231,7 +1321,7 @@ async def test_get_person_leaves_out_ssn_and_each_iban(
     respx_mock.get(f"{BASE}/person/read.json").respond(
         200, json=person_with_identifiers(fixtures_dir)
     )
-    read = await api.person_read(DEMO, 3)
+    read = (await api.person_read(DEMO, 3)).payload
     assert (read.ssn, read.bank_accounts[0]) == (
         SSN,
         {"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"},
@@ -1415,7 +1505,7 @@ async def test_the_order_wrapper_stays_faithful(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     replay_fixture("order_read", "by_id")
-    order = await api.order_read(DEMO, 3)
+    order = (await api.order_read(DEMO, 3)).payload
     assert isinstance(order, models.OrderDetail)
     assert order.hash == "REDACTED", "scrubbed by the recorder, by its field name"
 
@@ -1473,7 +1563,7 @@ async def test_the_order_document_wrapper_stays_faithful(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     replay_fixture("order_document_read", "by_id")
-    document = await api.order_document_read(DEMO, 3)
+    document = (await api.order_document_read(DEMO, 3)).payload
     assert isinstance(document, models.OrderDocument)
     assert {name: getattr(document, name) for name in DOCUMENT_IBANS} == dict.fromkeys(
         DOCUMENT_IBANS
@@ -1499,7 +1589,8 @@ async def test_a_live_iban_on_an_order_document_never_reaches_a_result(
     assert made_up not in tasks.get_order_document(DEMO, 3).model_dump_json()
     payload = await mcp_call(server, "cashctrl_get_order_document", {"org": DEMO, "id": 3})
     assert made_up not in json.dumps(payload)
-    assert (await api.order_document_read(DEMO, 3)).recipient_iban == made_up, "read model"
+    read = (await api.order_document_read(DEMO, 3)).payload
+    assert read.recipient_iban == made_up, "read model"
 
 
 @pytest.mark.anyio
@@ -2175,7 +2266,7 @@ async def test_the_location_wrapper_stays_faithful(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     replay_fixture("location_list", "default")
-    (location,) = (await api.location_list(DEMO)).data
+    (location,) = (await api.location_list(DEMO)).payload.data
     assert isinstance(location, models.Location)
     assert (location.iban, location.qr_iban, location.bic) == (None, None, None), "seen null"
 
@@ -2309,7 +2400,7 @@ def test_get_report_data_drops_identifier_keys_at_any_depth(
     assert result.data.total == original["total"]
     assert SSN not in result.model_dump_json()
     assert IBAN not in result.model_dump_json()
-    faithful = sync(api.report_element_data)(DEMO, 1, fiscal_period=FP2025)
+    faithful = sync(api.report_element_data)(DEMO, 1, fiscal_period=FP2025).payload
     assert typing.cast(dict[str, typing.Any], faithful.data[0])["ssn"] == SSN
 
 
@@ -3089,7 +3180,7 @@ async def test_a_recorded_list_is_whole(
     """
     replay_fixture(*case.split("/"))
     wrapper, arguments = call
-    response = await wrapper(DEMO, **arguments)
+    response = (await wrapper(DEMO, **arguments)).payload
     assert response.total == len(response.data) > 0
 
 

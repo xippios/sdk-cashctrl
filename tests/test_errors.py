@@ -415,7 +415,7 @@ def tenant(monkeypatch: pytest.MonkeyPatch) -> str:
 
 async def raised(path: str) -> XippiosError:
     with pytest.raises(XippiosError) as info:
-        await client_for(DEMO).get_json(path)
+        await client_for(DEMO).get_answer(path)
     return info.value
 
 
@@ -563,7 +563,7 @@ async def test_wrong_key_replays_as_auth_error(
 ) -> None:
     replay_fixture("account_list", "wrong_key")
     with pytest.raises(AuthError) as info:
-        await client_for(DEMO).get_json("/account/list.json")
+        await client_for(DEMO).get_answer("/account/list.json")
     assert info.value.status == 401
 
 
@@ -572,7 +572,7 @@ async def test_unknown_id_replays_as_not_found(
 ) -> None:
     route = replay_fixture("account_read", "unknown_id")
     with pytest.raises(NotFoundError, match="This account does not exist"):
-        await client_for(DEMO).get_json("/account/read.json", params={"id": 999999999})
+        await client_for(DEMO).get_answer("/account/read.json", params={"id": 999999999})
     assert sent_query(route)["id"] == "999999999"
 
 
@@ -581,6 +581,6 @@ async def test_missing_id_replays_as_request_rejected(
 ) -> None:
     replay_fixture("account_read", "missing_id")
     with pytest.raises(RequestRejected) as info:
-        await client_for(DEMO).get_json("/account/read.json")
+        await client_for(DEMO).get_answer("/account/read.json")
     assert info.value.upstream_message == "ID missing."
     assert info.value.errors == []

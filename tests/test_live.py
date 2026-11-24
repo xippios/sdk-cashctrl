@@ -108,6 +108,7 @@ from typing import Any
 
 import pytest
 from xippios.core import InvalidRequestError, NotFoundError
+from xippios.core.testing import send_once
 
 from xippios.cashctrl import api, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
@@ -958,8 +959,8 @@ async def test_order_status_payment_delete(
     assert not [entry.id for entry in booked.data if entry.order_id == gone], (
         "a journal entry of the deleted order is left"
     )
-    response = await client_for(demo_org).request(
-        "GET", "/order/payment/download", params=paying.data.payload, raise_on_error=False
+    response = await send_once.async_fn(
+        client_for(demo_org), "/order/payment/download", params=paying.data.payload
     )
     assert response.status_code < 500, "upstream answered"
     kind = media_type(response.headers.get("content-type"))
@@ -1046,7 +1047,7 @@ async def test_order_book_entry_create_update_delete(
         )
         performed(updated)
         assert updated.meta.request == {"org": demo_org, **planned.data.payload}
-        read_back = book_entry_values(await api.order_bookentry_read(demo_org, entry))
+        read_back = book_entry_values((await api.order_bookentry_read(demo_org, entry)).payload)
         assert read_back["amount"] == Decimal("60")
         assert derived_except(read_back, "amount") == derived_except(stored, "amount")
         deleted = await tasks_write.delete_order_book_entry_async(demo_org, entry, confirm=True)

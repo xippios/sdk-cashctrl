@@ -1963,7 +1963,7 @@ def test_the_book_entry_wrappers_build_upstreams_fields() -> None:
 async def test_the_book_entry_read_stays_faithful(replay_fixture: ReplayFixture) -> None:
     """The read an update and a delete start from: the entry as upstream sends it."""
     route = replay_fixture("order_bookentry_read", "generated")
-    entry = await api.order_bookentry_read(DEMO, GENERATED_ENTRY)
+    entry = (await api.order_bookentry_read(DEMO, GENERATED_ENTRY)).payload
     assert isinstance(entry, OrderBookEntry)
     assert (entry.id, entry.order_id, entry.type, entry.account_id) == (5, 5, "GENERATED", 45)
     assert (entry.date, entry.amount, entry.tax_id) == (datetime(2026, 2, 2), Decimal("4650"), 13)
