@@ -2647,6 +2647,30 @@ def test_a_payroll_or_people_report_is_refused_before_any_data_request(
     assert (tree.call_count, data.call_count) == (1, 0)
 
 
+def test_a_refusal_by_the_kept_tree_says_that_nothing_was_sent(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """The tree is read once per organisation and kept: a second call reads no tree.
+
+    The first refusal follows this call's read of the tree, the second the kept tree's, so
+    it says that nothing was sent (conventions §5).
+    """
+    tree = replay_fixture("report_tree", "default")
+    data = replay_fixture("report_element_data", "balance_fp2025")
+    element_id, report_type = next(iter(REFUSED_ELEMENTS.items()))
+    subject = f"report element {element_id} is of type {report_type}: get_report_data refuses"
+    with pytest.raises(InvalidRequestError) as first:
+        tasks.get_report_data(DEMO, element_id, fiscal_period=FP2025)
+    assert first.value.message == f"{subject} {RULE}"
+    assert first.value.message.endswith(". Only the report tree was read.")
+    with pytest.raises(InvalidRequestError) as second:
+        tasks.get_report_data(DEMO, element_id, fiscal_period=FP2025)
+    assert second.value.message == f"{subject} {RULE}".replace(
+        "Only the report tree was read.", "Nothing was sent."
+    )
+    assert (tree.call_count, data.call_count) == (1, 0)
+
+
 @pytest.mark.parametrize(
     ("element_id", "report_type"),
     [
