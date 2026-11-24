@@ -164,8 +164,15 @@ def test_list_fiscal_periods_replays_the_recorded_list(
     assert result.meta.total == 2, "upstream's total (sdk-core ADR-0034)"
     assert [(period.id, period.name) for period in result.data] == [(2, "2025"), (1, "2026")]
     first = result.data[0]  # created by the seeder, as the API user
-    assert (first.start, first.end) == (date(2025, 1, 1), date(2025, 12, 31)), "date part kept"
-    assert first.salary_end == date(2025, 12, 31)
+    assert (first.start, first.end) == (
+        datetime(2025, 1, 1),
+        datetime(2025, 12, 31, 23, 59, 59),
+    ), "upstream sends a time of day, kept: naive, as upstream names no zone"
+    assert first.end.tzinfo is None
+    assert (first.salary_start, first.salary_end) == (
+        datetime(2025, 1, 1),
+        datetime(2025, 12, 31, 23, 59, 59),
+    )
     assert first.last_entry_date == datetime(2025, 12, 15), "undocumented: kept a datetime"
     assert first.created == datetime(2026, 10, 23, 10, 29, 24)
     assert first.created_by == "API:REDACTED", "the recorder scrubs the API user tag"
@@ -187,12 +194,36 @@ async def test_list_fiscal_periods_as_a_tool(
     assert "isCurrent" not in last, "never upstream's spelling: the adapters dump by alias"
     assert (last["id"], last["start"], last["end"], last["is_current"]) == (
         1,
-        "2026-01-01",
-        "2026-12-31",
+        "2026-01-01T00:00:00",
+        "2026-12-31T23:59:59",
         False,
-    )
+    ), "the time upstream sends, with no zone and no text beside it"
     assert payload["meta"]["endpoint"] == "fiscalperiod/list.json"
     assert payload["meta"]["request"] == {"org": DEMO}
+
+
+TIMED_FIELDS: dict[type[UpstreamModel], tuple[str, ...]] = {
+    models.FiscalPeriod: ("start", "end", "salary_start", "salary_end"),
+    models.TaxRate: ("date_valid",),
+    models.JournalEntry: ("date_added", "start_date", "end_date"),
+    models.PersonDetail: ("date_birth",),
+    models.Order: ("date", "start_date", "end_date"),
+    models.OrderBookEntry: ("date",),
+}
+"""The thirteen fields upstream sends as ``2025-12-31 23:59:59.0``, a date with a time of day."""
+
+
+@pytest.mark.parametrize("model", TIMED_FIELDS, ids=lambda model: model.__name__)
+def test_a_date_upstream_sends_with_its_time_is_read_whole(model: type[UpstreamModel]) -> None:
+    """A naive ``datetime``, the type that keeps everything upstream sends, with no text beside.
+
+    https://github.com/xippios/sdk-usda-esr/issues/60, part 3: upstream names no zone.
+    """
+    for name in TIMED_FIELDS[model]:
+        annotation = model.model_fields[name].annotation
+        assert annotation in (datetime, datetime | None), (name, annotation)
+        assert model.model_fields[name].metadata == [], f"{name}: no validator cuts it"
+    assert "UpstreamDate" not in dir(models)
 
 
 # fiscalperiod/read.json, recorded on 2026-11-17: by id (2026), without an id (the current
@@ -211,7 +242,7 @@ def test_get_fiscal_period_replays_the_recorded_read(
     assert (result.meta.tenant, result.meta.total) == (DEMO, None)
     period = result.data
     assert (period.id, period.name, period.created_by) == (FP2026, "2026", "SYSTEM")
-    assert (period.start, period.end) == (date(2026, 1, 1), date(2026, 12, 31))
+    assert (period.start, period.end) == (datetime(2026, 1, 1), datetime(2026, 12, 31, 23, 59, 59))
     assert (period.is_closed, period.closed_month_ids, len(period.open_month_ids)) == (
         False,
         [],
@@ -250,7 +281,7 @@ def test_get_fiscal_period_raises_not_found_for_an_unknown_id(
 async def test_get_fiscal_period_as_a_tool(replay_fixture: ReplayFixture) -> None:
     replay_fixture("fiscalperiod_read", "by_id", match_params=["id"])
     payload = await mcp_call(server, "cashctrl_get_fiscal_period", {"org": DEMO, "id": FP2026})
-    assert (payload["data"]["id"], payload["data"]["start"]) == (FP2026, "2026-01-01")
+    assert (payload["data"]["id"], payload["data"]["start"]) == (FP2026, "2026-01-01T00:00:00")
     assert payload["meta"]["request"] == {"org": DEMO, "id": FP2026}
 
 
@@ -742,11 +773,11 @@ def test_list_journal_entries_with_limit_is_one_page_and_upstreams_total(
     assert (len(result.data), result.meta.total) == (5, 38), "upstream's count, not len(data)"
     # Newest first (upstream's default: dateAdded, DESC).
     assert [entry.date_added for entry in result.data] == [
-        date(2026, 9, 30),
-        date(2026, 9, 22),
-        date(2026, 9, 15),
-        date(2026, 9, 4),
-        date(2026, 8, 31),
+        datetime(2026, 9, 30),
+        datetime(2026, 9, 22),
+        datetime(2026, 9, 15),
+        datetime(2026, 9, 4),
+        datetime(2026, 8, 31),
     ]
     fees, collective, invoice = result.data[:3]
     assert (fees.id, fees.type, fees.amount) == (48, "MANUAL", Decimal(45))
@@ -888,7 +919,7 @@ async def test_list_journal_entries_as_a_tool(
         "limit": 5,
     }
     first = payload["data"][0]
-    assert (first["id"], first["date_added"], first["amount"]) == (48, "2026-09-30", 45)
+    assert (first["id"], first["date_added"], first["amount"]) == (48, "2026-09-30T00:00:00", 45)
     refused = {"org": DEMO, "limit": "many"}
     assert await mcp_call_text(server, "cashctrl_list_journal_entries", refused) == (
         "error: InvalidRequestError: limit: "
@@ -913,7 +944,7 @@ def test_get_journal_entry_replays_a_taxed_entry(
     assert result.meta.request == {"org": DEMO, "id": 11}
     assert result.meta.total is None, "a read reports no count"
     entry = result.data
-    assert (entry.id, entry.type, entry.date_added) == (11, "MANUAL", date(2025, 10, 20))
+    assert (entry.id, entry.type, entry.date_added) == (11, "MANUAL", datetime(2025, 10, 20))
     assert (entry.title, entry.reference, entry.nr) == (
         "Rechnung RE-2025-003 Beispiel Logistik AG",
         "RE-2025-003",
@@ -1268,7 +1299,7 @@ def test_list_orders_replays_the_sales_orders(
         "RE-2026-101",
     ], "upstream's default order: by date, DESC"
     order = result.data[0]
-    assert (order.type, order.book_type, order.date) == ("SALES", "DEBIT", date(2026, 9, 7))
+    assert (order.type, order.book_type, order.date) == ("SALES", "DEBIT", datetime(2026, 9, 7))
     assert (order.associate_id, order.associate_name) == (12, "Probe Gastro GmbH")
     # 20 x 45.00 (docs/demo-org.md), the unit price read as gross, VAT 8.1 % included.
     assert (order.sub_total, order.tax, order.total) == (
@@ -1322,7 +1353,7 @@ def test_get_order_replays_the_recorded_read(
     assert (order.nr, order.type, order.date, order.associate_name) == (
         "RE-2026-103",
         "SALES",
-        date(2026, 6, 8),
+        datetime(2026, 6, 8),
         "Demo Bau AG",
     )
     assert (order.sub_total, order.tax, order.total, order.total_to_pay) == (
@@ -1485,7 +1516,11 @@ def test_list_order_book_entries_replays_a_booked_purchase_order(
     assert result.meta.request == {"org": DEMO, "id": BOOKED_ORDER}
     assert (result.meta.tenant, result.meta.total, len(result.data)) == (DEMO, 1, 1)
     (entry,) = result.data
-    assert (entry.order_id, entry.type, entry.date) == (BOOKED_ORDER, "GENERATED", date(2026, 2, 2))
+    assert (entry.order_id, entry.type, entry.date) == (
+        BOOKED_ORDER,
+        "GENERATED",
+        datetime(2026, 2, 2),
+    )
     assert (entry.amount, entry.net_amount, entry.tax_amount) == (
         Decimal(4650),
         Decimal("4301.57"),

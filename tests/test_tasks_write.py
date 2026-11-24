@@ -31,7 +31,7 @@ import json
 import re
 import typing
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -1963,7 +1963,7 @@ async def test_the_book_entry_read_stays_faithful(replay_fixture: ReplayFixture)
     entry = await api.order_bookentry_read(DEMO, GENERATED_ENTRY)
     assert isinstance(entry, OrderBookEntry)
     assert (entry.id, entry.order_id, entry.type, entry.account_id) == (5, 5, "GENERATED", 45)
-    assert (entry.date, entry.amount, entry.tax_id) == (date(2026, 2, 2), Decimal("4650"), 13)
+    assert (entry.date, entry.amount, entry.tax_id) == (datetime(2026, 2, 2), Decimal("4650"), 13)
     assert len(entry.rows) == 3
     assert route.call_count == 1
 
