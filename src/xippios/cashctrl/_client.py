@@ -412,7 +412,9 @@ def _build(org: str) -> AsyncClient:
 
     Called by ``TENANTS.client_for`` on first use and whenever one of the organisation's
     variables changed. The subdomain is read and checked here (``ConfigError`` when it is
-    missing or malformed); the key is read on the first request.
+    missing or malformed); the key is read on the first request. It takes no response
+    cache (``cache=None``), since every answer is one organisation's private books, which
+    no answer kept for a later call should hold.
     """
     subdomain = TENANTS.field(org, "SUBDOMAIN")
     config = ClientConfig(

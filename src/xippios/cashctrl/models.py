@@ -10,7 +10,8 @@ hygiene only: dates become ``datetime.date``/``datetime``, numbers become ``int`
 ``Decimal`` (sdk-core ADR-0031, decision 1: JSON numbers on the wire). Documented value
 sets are ``Literal`` types here, written by hand (``Direction``, ``Language``), so the
 tool schemas list them: the package packages no list, so no enumeration is generated
-(conventions §3). No cross-source normalisation (sdk-core ADR-0028, decision 1): an
+(conventions §3), and ``tests/test_tasks.py`` holds each of the sixteen against the
+snapshot in ``docs/upstream/``. No cross-source normalisation (sdk-core ADR-0028, decision 1): an
 upstream concept stays an upstream concept, and nothing is renamed or computed.
 
 These read models stay faithful, documented personal identifiers included: ``ssn`` and
