@@ -2,26 +2,14 @@
 
 ``mcp.build()`` and ``mcp_write.build()`` are the tool sets a host serves (conventions §8;
 sdk-core ADR-0026, amendment 2026-11-18, points c and d), and ``_client.ENV_VARS`` the
-variables the package reads, for that host.
+variables the package reads, for that host. Core's family check holds the read server's
+part and the entry points; what stays here is the package's own.
 """
-
-import importlib.util
-from pathlib import Path
 
 from xippios.core import EnvVar
 
-import xippios.cashctrl
-from xippios.cashctrl import mcp, mcp_write
+from xippios.cashctrl import mcp_write
 from xippios.cashctrl._client import ENV_VARS, TENANTS
-
-
-def test_the_package_ships_no_reference_scaffold() -> None:
-    """The package packages no list (``has_reference_data`` is false), so it has no
-    ``params`` or ``enums`` module and no ``reference/`` directory."""
-    for module in ("params", "enums"):
-        assert importlib.util.find_spec(f"xippios.cashctrl.{module}") is None, module
-    (package,) = xippios.cashctrl.__path__
-    assert not (Path(package) / "reference").exists()
 
 
 def test_env_vars_name_the_organisations_and_their_pair_secret() -> None:
@@ -36,5 +24,4 @@ def test_env_vars_name_the_organisations_and_their_pair_secret() -> None:
     assert {f"CASHCTRL_<NAME>_{field}" for field in TENANTS.fields} == {
         var.name_or_pattern for var in ENV_VARS[1:]
     }
-    assert mcp.ENV_VARS is ENV_VARS
-    assert mcp_write.ENV_VARS is ENV_VARS, "both servers name the client's list"
+    assert mcp_write.ENV_VARS is ENV_VARS, "the write server names the client's list"

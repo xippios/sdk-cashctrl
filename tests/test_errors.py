@@ -19,8 +19,6 @@ from xippios.core import (
     XippiosError,
 )
 from xippios.core.errors import request_description
-from xippios.core.http import status_for
-from xippios.core.mcp import error_to_text
 from xippios.core.testing import fixture_path, load_fixture, response_from_fixture, sent_query
 
 from xippios.cashctrl._client import DEMO, TENANTS, classify, client_for
@@ -84,12 +82,7 @@ def test_a_rejection_is_an_invalid_request_for_both_adapters() -> None:
     error = RequestRejected(
         [FieldError(field=None, message="Nope.")], request="POST /api/v1/journal/create.json"
     )
-    assert isinstance(error, InvalidRequestError)
-    assert status_for(error) == 422
-    assert error_to_text(error) == (
-        "error: RequestRejected: CashCtrl rejected the request: Nope. "
-        "(POST /api/v1/journal/create.json)"
-    )
+    assert isinstance(error, InvalidRequestError), "core's adapters answer it as one"
 
 
 def test_a_rejection_built_without_its_request_names_none() -> None:

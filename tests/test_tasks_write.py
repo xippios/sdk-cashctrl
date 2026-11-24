@@ -39,8 +39,7 @@ from urllib.parse import parse_qsl
 
 import pytest
 import respx
-from xippios.core import InvalidRequestError, NotFoundError, Result
-from xippios.core.mcp import tool_name
+from xippios.core import InvalidRequestError, NotFoundError, Result, tool_name
 from xippios.core.testing import (
     ReplayFixture,
     assert_write_tools,
@@ -50,7 +49,7 @@ from xippios.core.testing import (
     sent_bodies,
 )
 
-from xippios.cashctrl import api, tasks_write
+from xippios.cashctrl import api, mcp_write, tasks_write
 from xippios.cashctrl._client import DEMO, SOURCE
 from xippios.cashctrl.api._form import (
     FORM_CONTENT_TYPE,
@@ -178,27 +177,8 @@ async def test_the_write_server_serves_write_tasks_only() -> None:
         "delete_order_book_entry",
     } <= WRITE_TASKS.keys()
     await assert_write_tools(
-        write_server,
-        list(WRITE_TASKS.values()),
-        source=SOURCE,
-        read_server=read_server,
-        router=router,
-        preview_reads=True,
+        mcp_write.build(), list(WRITE_TASKS.values()), read_server=read_server, router=router
     )
-
-
-@pytest.mark.anyio
-async def test_write_tools_are_the_write_tasks_with_their_parameters() -> None:
-    """Each write tool takes its task's parameters, confirm among them, and says it writes."""
-    tools = {tool.name: tool for tool in await write_server.list_tools()}
-    for name, fn in WRITE_TASKS.items():
-        tool = tools[tool_name(SOURCE, fn)]
-        parameters = set(inspect.signature(fn).parameters)
-        assert set(tool.input_schema.get("properties", {})) == parameters, name
-        assert "confirm" in tool.input_schema["properties"], name
-        assert tool.description, f"{name} has no docstring; agents read it"
-        assert tool.annotations is not None
-        assert (tool.annotations.read_only_hint, tool.annotations.destructive_hint) == (False, True)
 
 
 # Journal entries ---------------------------------------------------------------------
@@ -2567,6 +2547,7 @@ async def test_the_write_tool_schemas_show_snake_case_inside_lists() -> None:
     schema = tools["cashctrl_create_order"].input_schema
     assert schema["properties"]["confirm"] == {
         "default": False,
+        "description": "``true`` creates the order; ``false`` (the default) only previews it.",
         "title": "Confirm",
         "type": "boolean",
     }
@@ -2792,12 +2773,7 @@ async def test_no_preview_sends_a_write_and_each_names_its_reads(
     """
     serve_the_preview_reads(replay_fixture)
     await assert_write_tools(
-        write_server,
-        list(WRITE_TASKS.values()),
-        source=SOURCE,
-        preview_reads=True,
-        dry_run=PREVIEW_CALLS,
-        sent=respx_mock,
+        mcp_write.build(), list(WRITE_TASKS.values()), dry_run=PREVIEW_CALLS, sent=respx_mock
     )
 
 

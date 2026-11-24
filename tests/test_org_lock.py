@@ -1,15 +1,16 @@
 """The --org lock's wiring: the package's tasks bound to one organisation, both entry points.
 
 The lock is core's (``TenantLock``, ``bind_tasks``, ``tenant_instructions``) and so is the
-serve command (``serve_tenants``); core's ``tests/test_tenant_lock.py`` and
-``tests/mcp/test_cli.py`` test them. The lock is no middleware but a wrapper:
-``build(TenantLock(TENANTS, org))`` in ``mcp.py`` and in ``mcp_write.py`` returns the tool
-set whose tasks ``bind_tasks`` binds, one tool per task with ``org`` bound at build, the
-same ``__name__`` (the tool names and the ``MCP_CAPS`` keys stay), the docstring without
-its ``org`` line and a signature without ``org``. A bound server's instructions are its
-module's ``BOUND_INSTRUCTIONS``, without the clause that a tool takes ``org``, and core ends
-them with the sentence that names the organisation (``SENTENCE``); ``list_organisations``
-lists the bound organisation alone, with ``meta.tenant`` ``None``.
+one entry, ``main``, which takes the registry and ``check_org``; core's
+``tests/test_tenant_lock.py`` and ``tests/mcp/test_cli.py`` test them. The lock is no
+middleware but a wrapper: ``build(TenantLock(TENANTS, org))`` in ``mcp.py`` and in
+``mcp_write.py`` returns the tool set whose tasks ``bind_tasks`` binds, one tool per task
+with ``org`` bound at build, the same ``__name__`` (the tool names and the ``MCP_CAPS``
+keys stay), the docstring without its ``org`` line and a signature without ``org``. A
+bound server's instructions are its tasks module's ``MCP_BOUND_INSTRUCTIONS``, without
+the clause that a tool takes ``org``, and core ends them with the sentence that names the
+organisation (``SENTENCE``); ``list_organisations`` lists the bound organisation alone,
+with ``meta.tenant`` ``None``.
 
 What stays here is the package's own wiring: its tasks bound, ``--org`` with ``check_org``
 on both entry points, the instructions they end with, and the write server held to
@@ -39,7 +40,7 @@ ENTRY_POINT = "xippios-cashctrl-mcp-read"
 SENTENCE = (
     "This server is bound to org demo; every tool acts on that organisation and takes no org."
 )
-LOCK = TenantLock(TENANTS, DEMO, noun="organisation")
+LOCK = TenantLock(TENANTS, DEMO)
 
 
 @pytest.fixture
@@ -100,22 +101,16 @@ async def test_the_organisation_list_shows_the_bound_organisation_only(
 async def test_the_bound_read_server_reaches_the_bound_organisation_only(
     monkeypatch: pytest.MonkeyPatch, replay_fixture: ReplayFixture
 ) -> None:
-    """A call that still names an organisation is refused before the tool runs.
+    """A call without ``org`` reaches the bound organisation alone, with another declared.
 
-    Core's argument check refuses an argument no tool of a bound server declares, ``org``
-    among them, and names the ones the tool takes; the call without it reaches the bound
-    organisation alone. The recorded currency list is replayed: the test asserts what was
-    sent and the meta.
+    Core's argument check refuses ``org`` on a bound server, as its own tests hold for
+    every source. The recorded currency list is replayed: the test asserts what was sent
+    and the meta.
     """
     monkeypatch.setenv(TENANTS.list_var, "xa")
     monkeypatch.setenv(TENANTS.var("xa", "SUBDOMAIN"), "xa-tenant")
     route = replay_fixture("currency_list", "default")
     server = build_server(mcp.build(LOCK))
-    refused = await mcp_call_text(server, "cashctrl_list_currencies", {"org": "xa"})
-    assert refused == (
-        "error: InvalidRequestError: org: Not an argument of this tool; it takes no arguments"
-    )
-    assert route.call_count == 0, "the refused call sends nothing"
     payload = await mcp_call(server, "cashctrl_list_currencies", {})
     assert (payload["meta"]["tenant"], payload["meta"]["request"]) == (DEMO, {"org": DEMO})
     assert route.call_count == 1, "the demo host, never xa's"
@@ -139,9 +134,12 @@ def test_both_entry_points_fail_fast_on_an_undeclared_org(
     assert runs == []
 
 
-@pytest.mark.parametrize("module", [mcp, mcp_write], ids=["mcp", "mcp_write"])
+@pytest.mark.parametrize(
+    ("module", "declared"), [(mcp, tasks), (mcp_write, tasks_write)], ids=["mcp", "mcp_write"]
+)
 async def test_both_entry_points_bind_to_the_org(
     module: Any,
+    declared: Any,
     monkeypatch: pytest.MonkeyPatch,
     runs: list[tuple[MCPServer, str, dict[str, Any]]],
 ) -> None:
@@ -153,9 +151,9 @@ async def test_both_entry_points_bind_to_the_org(
     assert server.name == module.server.name
     # The bound server's own text leaves out the clause that a tool takes org, which the
     # unbound server's keeps, and core's sentence names the organisation.
-    assert module.server.instructions == module.INSTRUCTIONS
-    assert "takes org" in module.INSTRUCTIONS
-    assert server.instructions == f"{module.BOUND_INSTRUCTIONS} {SENTENCE}"
+    assert module.server.instructions == declared.MCP_INSTRUCTIONS
+    assert "takes org" in declared.MCP_INSTRUCTIONS
+    assert server.instructions == f"{declared.MCP_BOUND_INSTRUCTIONS} {SENTENCE}"
     assert "takes org" not in server.instructions
     bound = {tool.name: tool for tool in await server.list_tools()}
     unbound = {tool.name: tool for tool in await module.server.list_tools()}

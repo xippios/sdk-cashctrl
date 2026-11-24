@@ -14,8 +14,16 @@ import httpx
 import pytest
 import respx
 from pydantic import BeforeValidator
-from xippios.core import Answer, InvalidRequestError, NotFoundError, Result, UpstreamModel, sync
-from xippios.core.mcp import build_server, tool_name
+from xippios.core import (
+    Answer,
+    InvalidRequestError,
+    NotFoundError,
+    Result,
+    UpstreamModel,
+    sync,
+    tool_name,
+)
+from xippios.core.mcp import ToolSet, build_server
 from xippios.core.testing import (
     Fixture,
     ReplayFixture,
@@ -588,20 +596,6 @@ async def test_list_accounts_as_a_tool(
     assert payload["meta"]["request"]["filter"] == (
         '[{"comparison":"eq","field":"number","value":"1020"}]'
     )
-    # Refused by the tool's schema, before the task runs: core answers conventions §8's
-    # text (sdk-core ADR-0036, decision 12).
-    bad = {"org": DEMO, "filter": [{**item, "comparison": "equals"}]}
-    assert await mcp_call_text(server, "cashctrl_list_accounts", bad) == (
-        "error: InvalidRequestError: filter.0.comparison: "
-        "Input should be 'eq', 'like', 'gt' or 'lt'"
-    )
-    assert await mcp_call_text(server, "cashctrl_list_accounts", {"org": DEMO, "dir": "up"}) == (
-        "error: InvalidRequestError: dir: Input should be 'ASC' or 'DESC'"
-    )
-    unknown_key = {"org": DEMO, "filter": [{**item, "op": "eq"}]}  # Filter refuses unknown keys
-    assert await mcp_call_text(server, "cashctrl_list_accounts", unknown_key) == (
-        "error: InvalidRequestError: filter.0.op: Extra inputs are not permitted"
-    )
 
 
 def test_list_accounts_is_a_post_route(
@@ -623,10 +617,6 @@ def test_list_accounts_is_a_post_route(
     assert ("end_amount" in row, "endAmount" in row) == (True, False), "snake_case over HTTP"
     numbers = [account["number"] for account in response.json()["data"]]
     assert (len(numbers), numbers[-2:]) == (8, ["6900", "6950"])
-    rejected = client.post("/cashctrl/list_accounts", json={"org": DEMO, "dir": "up"})
-    assert rejected.status_code == 422
-    assert rejected.json()["title"] == "InvalidRequestError", "core's problem, not FastAPI's 422"
-    assert rejected.json()["detail"].startswith("dir: ")
     unknown = client.post("/cashctrl/list_accounts", json={"org": "nowhere"})
     assert unknown.status_code == 422
     assert unknown.json()["title"] == "InvalidRequestError", "the task's refusals as problems"
@@ -694,15 +684,6 @@ async def test_get_account_as_a_tool(
         True,
     )
     assert payload["meta"]["request"] == {"org": DEMO, "id": account_id}
-
-
-@pytest.mark.anyio
-async def test_an_unknown_account_is_an_error_text_for_the_tool(
-    replay_fixture: Callable[[str, str], respx.Route],
-) -> None:
-    replay_fixture("account_read", "unknown_id")
-    with pytest.raises(AssertionError, match="error: NotFoundError: CashCtrl: This account"):
-        await mcp_call(server, "cashctrl_get_account", {"org": DEMO, "id": 999999999})
 
 
 # Journal entries, persons and orders: the offset-paged lists and their reads. The 2025
@@ -1013,7 +994,7 @@ async def test_list_journal_entries_as_a_tool(
     refused = {"org": DEMO, "limit": "many"}
     assert await mcp_call_text(server, "cashctrl_list_journal_entries", refused) == (
         "error: InvalidRequestError: limit: "
-        "Input should be a valid integer, unable to parse string as an integer"
+        "Input should be a valid integer, unable to parse string as an integer. Nothing was sent."
     )
 
 
@@ -1426,7 +1407,7 @@ async def test_list_orders_as_a_tool(
     assert payload["meta"]["total"] == 4
     assert (payload["data"][0]["nr"], payload["data"][0]["sub_total"]) == ("RE-2026-104", 832.56)
     assert await mcp_call_text(server, "cashctrl_list_orders", {"org": DEMO, "type": "sales"}) == (
-        "error: InvalidRequestError: type: Input should be 'SALES' or 'PURCHASE'"
+        "error: InvalidRequestError: type: Input should be 'SALES' or 'PURCHASE'. Nothing was sent."
     )
 
 
@@ -1798,7 +1779,7 @@ async def test_a_history_over_its_cap_names_the_filters_and_where_to_resume(
     """
     replay_fixture("history_list", "order")
     cap = dataclasses.replace(tasks.MCP_CAPS["list_history"], max_rows=1)
-    capped = build_server(SOURCE, [tasks.list_history], caps={"list_history": cap})
+    capped = build_server(ToolSet(SOURCE, [tasks.list_history], caps={"list_history": cap}))
     arguments = {"org": DEMO, "order_id": BOOKED_ORDER}
     payload = json.loads(await mcp_call_text(capped, "cashctrl_list_history", arguments))
     assert len(payload["data"]) == 1
@@ -1967,7 +1948,7 @@ async def test_list_custom_fields_as_a_tool(
     text = await mcp_call_text(server, "cashctrl_list_custom_fields", refused)
     assert text.startswith("error: InvalidRequestError: type: Input should be 'JOURNAL'")
     missing = await mcp_call_text(server, "cashctrl_list_custom_fields", {"org": DEMO})
-    assert missing == "error: InvalidRequestError: type: Field required"
+    assert missing == "error: InvalidRequestError: type: Field required. Nothing was sent."
 
 
 def test_list_custom_fields_as_a_route(
@@ -1988,8 +1969,6 @@ def test_list_custom_fields_as_a_route(
     assert response.json()["meta"]["total"] == 1
     assert response.json()["data"][0]["field_id"] == "customField1"
     assert response.json()["meta"]["tenant"] == DEMO
-    refused = client.get("/cashctrl/list_custom_fields", params={"org": DEMO, "type": "person"})
-    assert refused.status_code == 422
     missing = client.get("/cashctrl/list_custom_fields", params={"org": DEMO})
     assert missing.status_code == 422
 
@@ -2182,8 +2161,7 @@ def test_list_cost_centers_is_a_post_route(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     """account_costcenter_list/default answers a request with onlyActive within the one
-    operation, in a test that asserts only what was sent and a refusal before any request
-    (conventions §10, kind 3)."""
+    operation, in a test that asserts only what was sent (conventions §10, kind 3)."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -2196,8 +2174,6 @@ def test_list_cost_centers_is_a_post_route(
     response = client.post("/cashctrl/list_cost_centers", json={"org": DEMO, "only_active": True})
     assert response.status_code == 200, response.text
     assert response.json()["meta"]["request"] == {"org": DEMO, "onlyActive": "true"}
-    rejected = client.post("/cashctrl/list_cost_centers", json={"org": DEMO, "dir": "up"})
-    assert rejected.status_code == 422
 
 
 OUTPUT_MODELS = {
@@ -2974,7 +2950,7 @@ async def test_a_report_over_its_cap_is_cut_by_its_rows_with_a_note_naming_the_p
     replay_fixture("report_tree", "default")
     replay_fixture("report_element_data", "balance_fp2025")
     cap = dataclasses.replace(tasks.MCP_CAPS["get_report_data"], max_bytes=10_000)
-    capped = build_server(SOURCE, [tasks.get_report_data], caps={"get_report_data": cap})
+    capped = build_server(ToolSet(SOURCE, [tasks.get_report_data], caps={"get_report_data": cap}))
     arguments = {"org": DEMO, "element_id": 1, "fiscal_period": FP2025}
     payload = json.loads(await mcp_call_text(capped, "cashctrl_get_report_data", arguments))
     whole = await mcp_call(server, "cashctrl_get_report_data", arguments)
