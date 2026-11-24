@@ -14,7 +14,7 @@ import httpx
 import pytest
 import respx
 from pydantic import BeforeValidator
-from xippios.core import InvalidRequestError, NotFoundError, UpstreamModel, sync
+from xippios.core import InvalidRequestError, NotFoundError, Result, UpstreamModel, sync
 from xippios.core.mcp import build_server, tool_name
 from xippios.core.testing import (
     Fixture,
@@ -1363,7 +1363,8 @@ def test_get_order_replays_the_recorded_read(
         Decimal(7750),
     )
     assert (order.tax_type, order.due, order.is_book) == ("AGREED", False, False)
-    assert order.hash == "REDACTED", "scrubbed by the recorder, by its field name"
+    assert isinstance(order, models.OrderDetailProjection)
+    assert "hash" not in result.model_dump(mode="json")["data"], "withheld"
     assert all(isinstance(item, OrderItem) for item in order.items)
     assert [(i.name, i.quantity, i.unit_price, i.gross_total) for i in order.items] == [
         ("Bürostuhl Ergo", Decimal(10), Decimal(420), Decimal(4200)),
@@ -1393,6 +1394,30 @@ async def test_get_order_as_a_tool(
     payload = await mcp_call(server, "cashctrl_get_order", {"org": DEMO, "id": 3})
     assert [item["quantity"] for item in payload["data"]["items"]] == [10, 5, 1]
     assert payload["data"]["total"] == 7750
+    assert "hash" not in payload["data"]
+
+
+def test_the_order_projection_leaves_out_the_hash_and_nothing_else() -> None:
+    """``hash``, which the recorder writes as a token, reaches no caller.
+
+    Undocumented, it may be the token of a public link to the order's document; the
+    interview's third answer withholds it (https://github.com/xippios/sdk-cashctrl/issues/135).
+    """
+    read = set(models.OrderDetail.model_fields)
+    assert read - set(models.OrderDetailProjection.model_fields) == {"hash"}
+    assert set(models.OrderDetailProjection.model_fields) < read
+    returned = typing.get_type_hints(tasks.get_order_async)["return"]
+    assert returned == Result[models.OrderDetailProjection]
+
+
+@pytest.mark.anyio
+async def test_the_order_wrapper_stays_faithful(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("order_read", "by_id")
+    order = await api.order_read(DEMO, 3)
+    assert isinstance(order, models.OrderDetail)
+    assert order.hash == "REDACTED", "scrubbed by the recorder, by its field name"
 
 
 # The document of the seeded invoice RE-2026-103 (order 3), recorded on 2026-10-29: its

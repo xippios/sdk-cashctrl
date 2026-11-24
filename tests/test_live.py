@@ -117,7 +117,7 @@ from xippios.cashctrl.models import (
     JournalEntryDetailProjection,
     OrderBookEntry,
     OrderCategory,
-    OrderDetail,
+    OrderDetailProjection,
     PaymentType,
     PersonDetail,
     PersonDetailProjection,
@@ -597,7 +597,7 @@ def person_values(person: PersonDetailProjection) -> dict[str, Any]:
     return values
 
 
-def order_values(order: OrderDetail) -> dict[str, Any]:
+def order_values(order: OrderDetailProjection) -> dict[str, Any]:
     """The parameters ``update_order`` derives from ``order``, its items included."""
     values, _ = tasks_write._order_values(order)
     return values
@@ -609,7 +609,7 @@ def book_entry_values(entry: OrderBookEntry) -> dict[str, Any]:
     return values
 
 
-def item_values(order: OrderDetail) -> list[dict[str, Any]]:
+def item_values(order: OrderDetailProjection) -> list[dict[str, Any]]:
     """The order's items as stored, every field but the id upstream gives them anew."""
     return [item.model_dump(exclude={"id"}) for item in order.items]
 
@@ -804,7 +804,7 @@ async def test_order_create_update_delete(
         planned = await tasks_write.update_order_async(demo_org, created, description=description)
         assert isinstance(planned.data, WritePreview)
         before = planned.data.before
-        assert isinstance(before, OrderDetail)
+        assert isinstance(before, OrderDetailProjection)
         assert [item.name for item in before.items] == [f"{MARK} item", f"{MARK} second item"]
         updated = await tasks_write.update_order_async(
             demo_org, created, description=description, confirm=True

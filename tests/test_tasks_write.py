@@ -73,6 +73,7 @@ from xippios.cashctrl.models import (
     OrderBookEntry,
     OrderCategory,
     OrderDetail,
+    OrderDetailProjection,
     OrderItemInput,
     PersonAddressInput,
     PersonDetail,
@@ -150,7 +151,7 @@ def test_every_write_task_returns_a_preview_or_a_result(task: Callable[..., Any]
     assert preview.__pydantic_generic_metadata__["args"][0] in (
         JournalEntryDetailProjection,
         PersonDetailProjection,
-        OrderDetail,
+        OrderDetailProjection,
         OrderBookEntry,
     )
     assert result is WriteResult
@@ -1217,7 +1218,7 @@ def test_update_order_previews_the_whole_order_after_one_read(
     assert preview.endpoint == "order/update.json"
     assert list(preview.payload.items()) == recorded_body(fixtures_dir, "order_update", "ok")
     assert preview.changes == {"description": "xippios-live fixture updated", "dueDays": "30"}
-    assert isinstance(preview.before, OrderDetail)
+    assert isinstance(preview.before, OrderDetailProjection), "get_order's, without hash"
     assert (preview.before.id, preview.before.description, preview.before.due_days) == (
         ORDER,
         "xippios-live fixture",
@@ -1493,7 +1494,8 @@ def test_delete_order_previews_the_order_then_deletes(
     replay_fixture("order_read", "by_id")
     preview = tasks_write.delete_order(DEMO, 3).data
     assert isinstance(preview, WritePreview)
-    assert isinstance(preview.before, OrderDetail)
+    assert isinstance(preview.before, OrderDetailProjection)
+    assert "hash" not in preview.model_dump()["before"]
     assert (preview.before.nr, preview.payload) == ("RE-2026-103", {"ids": "3"})
     route = replay_fixture("order_delete", "ok")
     result = tasks_write.delete_order(DEMO, ORDER, confirm=True)
