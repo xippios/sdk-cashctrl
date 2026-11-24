@@ -79,7 +79,7 @@ from xippios.core import (
 )
 
 from xippios.cashctrl import api
-from xippios.cashctrl._client import SOURCE, TENANTS, client_for
+from xippios.cashctrl._client import SOURCE, TENANTS, client_for, refused
 from xippios.cashctrl.models import (
     Account,
     AccountCategory,
@@ -337,18 +337,18 @@ def _problem(where: str, detail: ErrorDetails) -> str:
     return f"{where}.{field}: {detail['msg']}"
 
 
-def _filter_item(where: str, item: object) -> tuple[Filter | None, list[str]]:
-    """One ``filter`` item as a ``Filter``, or the problems that keep it from being one."""
+def _filter_item(where: str, item: object) -> Filter:
+    """One ``filter`` item as a ``Filter``; refused, by its first error, when it is none."""
     if isinstance(item, Mapping):
         try:
             item = Filter.model_validate(dict(item))
         except ValidationError as error:
-            return None, [_problem(where, detail) for detail in error.errors()]
+            raise refused(_problem(where, error.errors()[0])) from None
     if not isinstance(item, Filter):
-        return None, [f"{where} must be a Filter or a mapping, not {type(item).__name__}"]
+        raise refused(f"{where} must be a Filter or a mapping, not {type(item).__name__}")
     if item.comparison not in COMPARISONS:  # a Filter built without validation
-        return None, [_wrong_comparison(where, item.comparison)]
-    return item, []
+        raise refused(_wrong_comparison(where, item.comparison))
+    return item
 
 
 def _whole(value: object) -> TypeGuard[int]:
@@ -356,20 +356,18 @@ def _whole(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _column_problems(columns: object) -> list[str]:
-    """What keeps ``columns`` from being the comma-separated names an export takes."""
+def _check_columns(columns: object) -> None:
+    """Refuse ``columns`` unless it is the list of names, comma-free, that a list file takes."""
     if isinstance(columns, str | bytes) or not isinstance(columns, Sequence):
-        return [
+        raise refused(
             'columns takes a list of column names such as ["nr", "name"], '
             f"not {type(columns).__name__}"
-        ]
+        )
     if not columns:
-        return ["columns names at least one column; leave it out for the default columns"]
-    return [
-        f"columns[{index}] must be a column name without a comma, not {name!r}"
-        for index, name in enumerate(columns)
-        if not isinstance(name, str) or not name.strip() or "," in name
-    ]
+        raise refused("columns names at least one column; leave it out for the default columns")
+    for index, name in enumerate(columns):
+        if not isinstance(name, str) or not name.strip() or "," in name:
+            raise refused(f"columns[{index}] must be a column name without a comma, not {name!r}")
 
 
 def _check_list_arguments(
@@ -388,52 +386,44 @@ def _check_list_arguments(
     ``filter`` item is a ``Filter``, or a mapping that validates as one, whose
     ``comparison`` is ``eq``, ``like``, ``gt`` or ``lt``, the text parameters
     (``query``, ``sort``) are strings, and a documented value set (``choices``, such as
-    the orders' ``type`` or an export's ``format``) holds the value given. Paging is the
-    task's own: ``start`` is a whole number of at least 0, ``limit`` one of at least 1.
-    An export's ``columns`` is a list of at least one name, none holding the comma that
-    separates them. Column names in ``sort``, ``Filter.field`` and ``columns`` are not
-    documented, so they are not checked. The parameter types say
+    the orders' ``type`` or a list file's ``format``) holds the value given. Paging is
+    the task's own: ``start`` is a whole number of at least 0, ``limit`` one of at least
+    1. A list file's ``columns`` is a list of at least one name, none holding the comma
+    that separates them. Column names in ``sort``, ``Filter.field`` and ``columns`` are
+    not documented, so they are not checked. The parameter types say
     the same, so the MCP and HTTP adapters refuse a wrong value before the task runs;
-    this check is for Python callers, whose arguments nothing else validates.
+    this check is for Python callers, whose arguments nothing else validates. The checks
+    run in that order, and the first problem found is refused.
 
     Returns:
         ``filter`` as ``Filter`` objects, or ``None`` when it was not given.
 
     Raises:
-        InvalidRequestError: Naming every problem found.
+        InvalidRequestError: Naming the first problem found; nothing was sent.
     """
-    problems: list[str] = []
     if dir is not None and dir not in DIRECTIONS:
-        problems.append(f"dir must be ASC or DESC, not {dir!r}")
+        raise refused(f"dir must be ASC or DESC, not {dir!r}")
     filters: list[Filter] | None = None
     if filter is not None:
         if isinstance(filter, str | bytes) or not isinstance(filter, Sequence):
-            problems.append(
+            raise refused(
                 "filter takes a list of filters such as "
                 '[{"comparison": "eq", "field": "number", "value": "1020"}], '
                 f"not {type(filter).__name__}"
             )
-        else:
-            filters = []
-            for index, item in enumerate(filter):
-                parsed, found = _filter_item(f"filter[{index}]", item)
-                problems += found
-                if parsed is not None:
-                    filters.append(parsed)
+        filters = [_filter_item(f"filter[{index}]", item) for index, item in enumerate(filter)]
     for name, value in (texts or {}).items():
         if value is not None and not isinstance(value, str):
-            problems.append(f"{name} must be a string, not {type(value).__name__}")
+            raise refused(f"{name} must be a string, not {type(value).__name__}")
     for name, (value, allowed) in (choices or {}).items():
         if value is not None and value not in allowed:
-            problems.append(f"{name} must be {' or '.join(allowed)}, not {value!r}")
+            raise refused(f"{name} must be {' or '.join(allowed)}, not {value!r}")
     if not _whole(start) or start < 0:
-        problems.append(f"start must be a whole number of at least 0, not {start!r}")
+        raise refused(f"start must be a whole number of at least 0, not {start!r}")
     if limit is not None and (not _whole(limit) or limit < 1):
-        problems.append(f"limit must be a whole number of at least 1, not {limit!r}")
+        raise refused(f"limit must be a whole number of at least 1, not {limit!r}")
     if columns is not None:
-        problems += _column_problems(columns)
-    if problems:
-        raise InvalidRequestError("; ".join(problems), source=SOURCE)
+        _check_columns(columns)
     return filters
 
 
@@ -1138,8 +1128,7 @@ async def list_custom_fields_async(org: str, type: CustomFieldType) -> Result[li
             ``SALARY_STATEMENT``, e.g. ``PERSON``.
     """
     if type not in CUSTOM_FIELD_TYPES:
-        allowed = ", ".join(CUSTOM_FIELD_TYPES)
-        raise InvalidRequestError(f"type must be one of {allowed}, not {type!r}", source=SOURCE)
+        raise refused(f"type must be one of {', '.join(CUSTOM_FIELD_TYPES)}, not {type!r}")
     response = await api.customfield_list(org, type)
     sent = api.customfield_list_params(type)
     meta = _meta(org, "customfield/list.json", sent, total=response.total)
@@ -1433,20 +1422,29 @@ def _report(report: ReportData) -> ReportData:
     )
 
 
-def _report_problems(
+def _check_report_ids(ids: Mapping[str, object]) -> None:
+    """Refuse a report's id that is no whole number, before anything is sent.
+
+    ``ids`` names the report, ``{"element_id": 1}`` or ``{"collection_id": 1}``.
+    """
+    for name, value in ids.items():
+        if not _whole(value):
+            raise refused(f"{name} must be a whole number, not {value!r}")
+
+
+def _check_report_period(
     *,
-    ids: Mapping[str, object],
     fiscal_period: object,
     start_date: object,
     end_date: object,
     language: object,
     sort: object,
-) -> list[str]:
-    """What a report's call gets wrong, or upstream would answer for another period.
+) -> None:
+    """Refuse what a report's call gets wrong, or what upstream would answer for another period.
 
-    A bad argument is refused before anything is sent (sdk-core ADR-0007).
+    A bad argument is refused before anything is sent (sdk-core ADR-0007), the first one
+    found.
 
-    ``ids`` names the report, ``{"element_id": 1}`` or ``{"collection_id": 1}``.
     ``docs/upstream/report.md``, "Read JSON data": ``fiscalPeriod`` "overrides the
     ``startDate`` and ``endDate`` parameter, as these are derived from the fiscal
     period", so upstream would silently ignore dates given with it: the two forms are
@@ -1458,39 +1456,29 @@ def _report_problems(
     so neither is checked. The same parameters, and so the same checks, are those of a
     report's PDF and Excel file.
     """
-    problems = [
-        f"{name} must be a whole number, not {value!r}"
-        for name, value in ids.items()
-        if not _whole(value)
-    ]
     if fiscal_period is not None and not _whole(fiscal_period):
-        problems.append(f"fiscal_period must be a whole number, not {fiscal_period!r}")
+        raise refused(f"fiscal_period must be a whole number, not {fiscal_period!r}")
     for name, value in (("start_date", start_date), ("end_date", end_date)):
         if value is not None and (not isinstance(value, date) or isinstance(value, datetime)):
-            problems.append(f"{name} must be a date (YYYY-MM-DD), not {type(value).__name__}")
+            raise refused(f"{name} must be a date (YYYY-MM-DD), not {type(value).__name__}")
     for name, value in (("language", language), ("sort", sort)):
         if value is not None and not isinstance(value, str):
-            problems.append(f"{name} must be a string, not {type(value).__name__}")
+            raise refused(f"{name} must be a string, not {type(value).__name__}")
     if fiscal_period is not None and (start_date is not None or end_date is not None):
-        problems.append(
+        raise refused(
             "give fiscal_period or start_date and end_date, not both: upstream derives "
             "the dates from the fiscal period and would ignore the ones given"
         )
-    return problems
-
-
-def _refuse(problems: Sequence[str]) -> None:
-    """Raise ``InvalidRequestError`` naming every problem, when there is one."""
-    if problems:
-        raise InvalidRequestError("; ".join(problems), source=SOURCE)
 
 
 def _report_refusal(subject: str, task: str) -> InvalidRequestError:
-    """The refusal of a payroll or people report by ``task``: ``subject``, then the rule."""
-    return InvalidRequestError(
-        f"{subject}: {task} refuses {_REFUSED_REPORT_RULE} (personal data, sdk-core ADR-0017)",
-        source=SOURCE,
-    )
+    """The refusal of a payroll or people report by ``task``: ``subject``, then the rule.
+
+    It follows the read of the report tree, the one request a report's refusal may send:
+    for a report file right before, for ``get_report_data`` once per organisation.
+    """
+    rule = f"{task} refuses {_REFUSED_REPORT_RULE} (personal data, sdk-core ADR-0017)"
+    return refused(f"{subject}: {rule}", sent="Only the report tree was read.")
 
 
 async def get_report_data_async(
@@ -1550,15 +1538,13 @@ async def get_report_data_async(
         sort: The column to sort the rows by, a ``dataIndex`` of
             ``properties.columns``, e.g. ``text``.
     """
-    _refuse(
-        _report_problems(
-            ids={"element_id": element_id},
-            fiscal_period=fiscal_period,
-            start_date=start_date,
-            end_date=end_date,
-            language=language,
-            sort=sort,
-        )
+    _check_report_ids({"element_id": element_id})
+    _check_report_period(
+        fiscal_period=fiscal_period,
+        start_date=start_date,
+        end_date=end_date,
+        language=language,
+        sort=sort,
     )
     arguments: dict[str, Any] = {
         "end_date": end_date,
@@ -1626,15 +1612,10 @@ async def _export(
 def _check_ids(ids: object) -> None:
     """``ids`` is a list of at least one order id, each a whole number."""
     if isinstance(ids, str | bytes) or not isinstance(ids, Sequence) or not ids:
-        raise InvalidRequestError(
-            f"ids takes a list of at least one order id such as [3], not {ids!r}",
-            source=SOURCE,
-        )
-    wrong = [item for item in ids if not _whole(item)]
-    if wrong:
-        raise InvalidRequestError(
-            f"ids must be whole numbers, the orders' ids, not {wrong[0]!r}", source=SOURCE
-        )
+        raise refused(f"ids takes a list of at least one order id such as [3], not {ids!r}")
+    for item in ids:
+        if not _whole(item):
+            raise refused(f"ids must be whole numbers, the orders' ids, not {item!r}")
 
 
 async def download_order_document_async(
@@ -2078,17 +2059,16 @@ _SYSTEM_UNMARKED = (
 def _check_report_file(
     format: object, ids: Mapping[str, object], period: Mapping[str, Any]
 ) -> None:
-    """Refuse a report file's ``format``, its ``ids`` and its ``period`` before anything is sent.
+    """Refuse a report file's ``ids``, its ``format`` or its ``period`` before anything is sent.
 
-    ``period`` holds ``fiscal_period``, ``start_date``, ``end_date``, ``language`` and
-    ``sort``, the parameters ``get_report_data`` takes and checks.
+    In the order of the arguments, the first problem found. ``period`` holds
+    ``fiscal_period``, ``start_date``, ``end_date``, ``language`` and ``sort``, the
+    parameters ``get_report_data`` takes and checks.
     """
-    problems = (
-        []
-        if format in REPORT_FORMATS
-        else [f"format must be {' or '.join(REPORT_FORMATS)}, not {format!r}"]
-    )
-    _refuse(problems + _report_problems(ids=ids, **period))
+    _check_report_ids(ids)
+    if format not in REPORT_FORMATS:
+        raise refused(f"format must be {' or '.join(REPORT_FORMATS)}, not {format!r}")
+    _check_report_period(**period)
 
 
 async def download_report_async(
@@ -2211,9 +2191,9 @@ async def download_report_collection_async(
     api.check_dest(dest)
     tree = await _tree_now(org)
     held = [node for node in _collections(tree) if node.collection_id == collection_id]
-    refused = _refused_types(held)
-    if refused:
-        subject = f"report collection {collection_id} holds reports of the types {refused}"
+    kinds = _refused_types(held)
+    if kinds:
+        subject = f"report collection {collection_id} holds reports of the types {kinds}"
         raise _report_refusal(subject, "download_report_collection")
     downloaded = await _COLLECTION_FILES[format](org, collection_id, dest, **period)
     sent = api.report_collection_params(collection_id, **period)
@@ -2252,16 +2232,16 @@ async def download_annual_report_async(
             e.g. ``2``; the API user's current period when left out.
     """
     if fiscal_period_id is not None and not _whole(fiscal_period_id):
-        _refuse([f"fiscal_period_id must be a whole number, not {fiscal_period_id!r}"])
+        raise refused(f"fiscal_period_id must be a whole number, not {fiscal_period_id!r}")
     api.check_dest(dest)
     system = [node for node in _collections(await _tree_now(org)) if node.is_system]
     if not system:
         raise _report_refusal(_SYSTEM_UNMARKED, "download_annual_report")
-    refused = _refused_types(system)
-    if refused:
+    kinds = _refused_types(system)
+    if kinds:
         names = ", ".join(str(node.collection_id) for node in system)
         subject = f"the annual report, report collection {names}, holds reports of the types"
-        raise _report_refusal(f"{subject} {refused}", "download_annual_report")
+        raise _report_refusal(f"{subject} {kinds}", "download_annual_report")
     downloaded = await api.report_collection_download_annualreport(
         org, dest, fiscal_period_id=fiscal_period_id
     )

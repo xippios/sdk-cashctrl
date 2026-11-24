@@ -75,7 +75,7 @@ from xippios.core import InvalidRequestError, Result, sync
 from xippios.core.models import REDACTED
 
 from xippios.cashctrl import api
-from xippios.cashctrl._client import SOURCE
+from xippios.cashctrl._client import nothing_written, refused
 from xippios.cashctrl.api._form import json_text
 from xippios.cashctrl.models import (
     AllocationInput,
@@ -215,16 +215,14 @@ def _whole(value: object) -> TypeGuard[int]:
 def _check_id(id: object) -> int:
     """``id`` when it is a record id, a whole number of at least 1; refused otherwise."""
     if not _whole(id) or id < 1:
-        raise InvalidRequestError(
-            f"id must be a whole number of at least 1, not {id!r}", source=SOURCE
-        )
+        raise refused(f"id must be a whole number of at least 1, not {id!r}")
     return id
 
 
 def _inputs[M: BaseModel](
-    name: str, values: Sequence[Any] | None, model: type[M], problems: list[str]
+    name: str, values: Sequence[Any] | None, model: type[M]
 ) -> list[M] | None:
-    """``values`` as ``model`` objects (a mapping is validated as one); problems collected.
+    """``values`` as ``model`` objects (a mapping is validated as one); refused at the first error.
 
     The adapters validate a tool's arguments before the task runs; this is for Python
     callers, who may pass mappings, as ``list_accounts`` takes its filters.
@@ -232,76 +230,66 @@ def _inputs[M: BaseModel](
     if values is None:
         return None
     if isinstance(values, str | bytes | Mapping) or not isinstance(values, Sequence):
-        problems.append(f"{name} takes a list, not {type(values).__name__}")
-        return None
+        raise refused(f"{name} takes a list, not {type(values).__name__}")
     parsed: list[M] = []
     for index, value in enumerate(values):
         if isinstance(value, model):
             parsed.append(value)
             continue
         if not isinstance(value, Mapping):
-            problems.append(
+            raise refused(
                 f"{name}[{index}] must be a {model.__name__} or a mapping, "
                 f"not {type(value).__name__}"
             )
-            continue
         try:
             parsed.append(model.model_validate(dict(value)))
         except ValidationError as error:
-            for detail in error.errors():
-                where = ".".join(str(part) for part in detail["loc"])
-                problems.append(f"{name}[{index}].{where}: {detail['msg']}")
+            detail = error.errors()[0]
+            where = ".".join(str(part) for part in detail["loc"])
+            raise refused(f"{name}[{index}].{where}: {detail['msg']}") from None
     return parsed
 
 
-def _ids(name: str, values: object, problems: list[str]) -> list[int]:
-    """``values`` as a list of at least one order id; problems collected.
+def _ids(name: str, values: object) -> list[int]:
+    """``values`` as a list of at least one order id; refused at the first wrong one.
 
     Every id is a whole number of at least 1, as ``_check_id`` takes one: a list of
     them, not one id on its own nor a text such as ``"20,21"``, which the task joins.
     """
     if isinstance(values, str | bytes | Mapping) or not isinstance(values, Sequence) or not values:
-        problems.append(f"{name} takes a list of at least one order id, e.g. [20], not {values!r}")
-        return []
-    wrong = [value for value in values if not _whole(value) or value < 1]
-    if wrong:
-        listed = ", ".join(repr(value) for value in wrong)
-        problems.append(f"{name}: an id is a whole number of at least 1, not {listed}")
-        return []
+        raise refused(f"{name} takes a list of at least one order id, e.g. [20], not {values!r}")
+    for value in values:
+        if not _whole(value) or value < 1:
+            raise refused(f"{name}: an id is a whole number of at least 1, not {value!r}")
     return list(values)
 
 
-def _check_status(status_id: object, problems: list[str], *, required: bool) -> None:
+def _check_status(status_id: object, *, required: bool) -> None:
     """``status_id`` is a status's id from ``list_order_categories``, or ``None`` if allowed."""
     if status_id is None and not required:
         return
     if not _whole(status_id) or status_id < 1:
-        problems.append(
+        raise refused(
             "status_id must be a status id from list_order_categories (over MCP, the tool "
             f"cashctrl_list_order_categories), a whole number of at least 1, not {status_id!r}"
         )
 
 
-def _check_associate(associate_id: object, problems: list[str]) -> None:
+def _check_associate(associate_id: object) -> None:
     """``associate_id`` is a person's id: upstream would create a person from a name."""
     if associate_id is not None and not _whole(associate_id):
-        problems.append(
+        raise refused(
             f"associate_id must be a person's id, a whole number, not {associate_id!r}; "
             "create a new person with create_person (over MCP, the tool "
             "cashctrl_create_person) first"
         )
 
 
-def _choices(problems: list[str], **named: tuple[object, tuple[str, ...]]) -> None:
+def _choices(**named: tuple[object, tuple[str, ...]]) -> None:
     """Refuse a value outside a documented value set (``notify_type``, ``language``)."""
     for name, (value, allowed) in named.items():
         if value is not None and value not in allowed:
-            problems.append(f"{name} must be one of {', '.join(allowed)}, not {value!r}")
-
-
-def _refuse(problems: list[str]) -> None:
-    if problems:
-        raise InvalidRequestError("; ".join(problems), source=SOURCE)
+            raise refused(f"{name} must be one of {', '.join(allowed)}, not {value!r}")
 
 
 def _custom(custom: Mapping[str, str] | None) -> str | None:
@@ -319,9 +307,8 @@ def _clear_names(
     documented: Mapping[str, str],
     given: Mapping[str, Any],
     custom: Mapping[str, str] | None,
-    problems: list[str],
 ) -> list[str]:
-    """The parameters ``clear`` names, checked against ``update.json``; problems collected.
+    """The parameters ``clear`` names, checked against ``update.json``; refused at the first.
 
     Every name must be a documented update parameter of the resource, by its task name
     (``tax_id``, ``notes``), not one in ``_UNSENT`` (``sequence_number_id``, sent only
@@ -331,20 +318,19 @@ def _clear_names(
     if clear is None:
         return []
     if isinstance(clear, str | bytes) or not isinstance(clear, Sequence):
-        problems.append(f"clear takes a list of parameter names, not {type(clear).__name__}")
-        return []
+        raise refused(f"clear takes a list of parameter names, not {type(clear).__name__}")
     names: list[str] = []
     for name in clear:
         if not isinstance(name, str) or name not in documented:
-            problems.append(
+            raise refused(
                 f"clear: {name!r} is not an update.json parameter here; one of "
                 + ", ".join(documented)
             )
-        elif name in _UNSENT:
-            problems.append(f"clear: {name!r} {_UNSENT[name]}")
-        elif name in given or (name == "custom" and custom):
-            problems.append(f"clear: {name!r} is both changed and cleared")
-        elif name not in names:
+        if name in _UNSENT:
+            raise refused(f"clear: {name!r} {_UNSENT[name]}")
+        if name in given or (name == "custom" and custom):
+            raise refused(f"clear: {name!r} is both changed and cleared")
+        if name not in names:
             names.append(name)
     return names
 
@@ -429,19 +415,23 @@ the call gives it, so a cleared one would be sent exactly as an omitted one.
 """
 
 
-def _blocked(stored: Mapping[str, str | None], decided: Iterable[str]) -> dict[str, str]:
-    """What an update cannot carry over and the call neither replaced nor cleared, why."""
+def _blocked(stored: Mapping[str, str | None], decided: Iterable[str]) -> tuple[str, str] | None:
+    """The first stored value an update cannot carry over, by name, and why; ``None`` if none.
+
+    A value the call replaced or cleared is carried by the call, so it blocks nothing.
+    """
     settled = set(decided)
-    return {name: why for name, why in stored.items() if why and name not in settled}
+    return next(((name, why) for name, why in stored.items() if why and name not in settled), None)
 
 
-def _cannot_carry(resource: str, blocked: Mapping[str, str]) -> InvalidRequestError:
-    listed = ", ".join(blocked)
-    return InvalidRequestError(
-        f"the {resource} holds {'; '.join(blocked.values())}, which the update cannot send "
-        f"back as stored, and upstream would empty it; pass {listed} to replace it, or "
-        "clear it, or change the record in CashCtrl. Nothing was sent",
-        source=SOURCE,
+def _cannot_carry(resource: str, blocked: tuple[str, str]) -> InvalidRequestError:
+    """The refusal of an update that cannot send back what ``_blocked`` found, after its read."""
+    name, why = blocked
+    return refused(
+        f"the {resource} holds {why}, which the update cannot send back as stored, and "
+        f"upstream would empty it; pass {name} to replace it, or clear it, or change the "
+        "record in CashCtrl",
+        sent=nothing_written(resource),
     )
 
 
@@ -449,11 +439,11 @@ def _never_seen(name: str, stored: object) -> str | None:
     return f"{name}, never observed filled" if stored else None
 
 
-def _missing(resource: str, names: Sequence[str], hint: str) -> InvalidRequestError:
-    return InvalidRequestError(
-        f"the {resource} gives no {', '.join(names)}, which update.json requires; {hint}. "
-        "Nothing was sent",
-        source=SOURCE,
+def _missing(resource: str, name: str, hint: str) -> InvalidRequestError:
+    """The refusal of an update whose record and call give no mandatory ``name``, after its read."""
+    return refused(
+        f"the {resource} gives no {name}, which update.json requires; {hint}",
+        sent=nothing_written(resource),
     )
 
 
@@ -563,11 +553,11 @@ def _booked(entry: JournalEntryDetail, write: str) -> InvalidRequestError | None
     marks = [upstream for name, upstream in _BOOKED_BY.items() if getattr(entry, name) is not None]
     if not marks:
         return None
-    return InvalidRequestError(
+    return refused(
         f"journal entry {entry.id} was booked by an order or a salary run ({', '.join(marks)} "
         f"set); upstream documents that such entries cannot be {write} here, only through "
-        "that module. Nothing was sent",
-        source=SOURCE,
+        "that module",
+        sent=nothing_written("journal entry"),
     )
 
 
@@ -656,15 +646,11 @@ async def create_journal_entry_async(
             ``{"customField1": "Projekt A"}``.
         confirm: ``true`` books the entry; ``false`` (the default) only previews it.
     """
-    problems: list[str] = []
-    _check_associate(associate_id, problems)
-    item_inputs = _inputs("items", items, JournalItemInput, problems)
-    allocation_inputs = _inputs("allocations", allocations, AllocationInput, problems)
-    attachment_inputs = _inputs("attachments", attachments, AttachmentInput, problems)
-    _choices(
-        problems, notify_type=(notify_type, NOTIFY_TYPES), recurrence=(recurrence, RECURRENCES)
-    )
-    _refuse(problems)
+    _check_associate(associate_id)
+    item_inputs = _inputs("items", items, JournalItemInput)
+    allocation_inputs = _inputs("allocations", allocations, AllocationInput)
+    attachment_inputs = _inputs("attachments", attachments, AttachmentInput)
+    _choices(notify_type=(notify_type, NOTIFY_TYPES), recurrence=(recurrence, RECURRENCES))
     fields = api.journal_fields(
         amount=amount,
         credit_id=credit_id,
@@ -790,8 +776,7 @@ async def update_journal_entry_async(
         confirm: ``true`` writes the change; ``false`` (the default) only previews it.
     """
     _check_id(id)
-    problems: list[str] = []
-    _check_associate(associate_id, problems)
+    _check_associate(associate_id)
     given = _given(
         date_added=date_added,
         amount=amount,
@@ -802,9 +787,9 @@ async def update_journal_entry_async(
         associate_id=associate_id,
         reference=reference,
         notes=notes,
-        items=_inputs("items", items, JournalItemInput, problems),
-        allocations=_inputs("allocations", allocations, AllocationInput, problems),
-        attachments=_inputs("attachments", attachments, AttachmentInput, problems),
+        items=_inputs("items", items, JournalItemInput),
+        allocations=_inputs("allocations", allocations, AllocationInput),
+        attachments=_inputs("attachments", attachments, AttachmentInput),
         currency_id=currency_id,
         currency_rate=currency_rate,
         sequence_number_id=sequence_number_id,
@@ -817,39 +802,30 @@ async def update_journal_entry_async(
         notify_person_id=notify_person_id,
         notify_user_id=notify_user_id,
     )
-    _choices(
-        problems, notify_type=(notify_type, NOTIFY_TYPES), recurrence=(recurrence, RECURRENCES)
-    )
-    cleared = _clear_names(clear, JOURNAL_UPDATE, given, custom, problems)
-    _refuse(problems)
-    if custom:
-        api.custom_xml(custom)  # refuse a wrong name before the read
+    _choices(notify_type=(notify_type, NOTIFY_TYPES), recurrence=(recurrence, RECURRENCES))
+    cleared = _clear_names(clear, JOURNAL_UPDATE, given, custom)
+    changes = _changes(api.journal_fields, JOURNAL_UPDATE, given, cleared, custom)
     entry = await api.journal_read(org, id)
     booked = _booked(entry, "updated")
     if booked is not None:
         raise booked
     values, stored = _journal_values(entry)
     blocked = _blocked(stored, [*given, *cleared])
-    if blocked:
+    if blocked is not None:
         raise _cannot_carry("journal entry", blocked)
     merged = {**values, **given, "custom": api.merge_custom(entry.custom, custom or {})}
     merged.update(_cleared(cleared))
     if not merged["items"]:
-        absent = [
-            upstream
-            for name, upstream in (
-                ("amount", "amount"),
-                ("credit_id", "creditId"),
-                ("debit_id", "debitId"),
-            )
-            if merged[name] is None
-        ]
-        if absent:
-            raise _missing(
-                "journal entry", absent, "pass them (amount, credit_id, debit_id) or items"
-            )
+        for name, upstream in (
+            ("amount", "amount"),
+            ("credit_id", "creditId"),
+            ("debit_id", "debitId"),
+        ):
+            if merged[name] is None:
+                raise _missing(
+                    "journal entry", upstream, "pass amount, credit_id and debit_id, or items"
+                )
     fields = api.journal_fields(id=entry.id, **merged)
-    changes = _changes(api.journal_fields, JOURNAL_UPDATE, given, cleared, custom)
     endpoint = "journal/update.json"
     if confirm is not True:
         before = _journal_entry_detail(entry)
@@ -1072,7 +1048,6 @@ PERSON_UPDATE: dict[str, str] = {
 
 
 def _person_inputs(
-    problems: list[str],
     *,
     addresses: Sequence[Any] | None,
     attachments: Sequence[Any] | None,
@@ -1083,17 +1058,15 @@ def _person_inputs(
     service_periods: Sequence[Any] | None,
 ) -> dict[str, Any]:
     return {
-        "addresses": _inputs("addresses", addresses, PersonAddressInput, problems),
-        "attachments": _inputs("attachments", attachments, AttachmentInput, problems),
-        "bank_accounts": _inputs("bank_accounts", bank_accounts, BankAccountInput, problems),
-        "children": _inputs("children", children, ChildInput, problems),
-        "contacts": _inputs("contacts", contacts, PersonContactInput, problems),
+        "addresses": _inputs("addresses", addresses, PersonAddressInput),
+        "attachments": _inputs("attachments", attachments, AttachmentInput),
+        "bank_accounts": _inputs("bank_accounts", bank_accounts, BankAccountInput),
+        "children": _inputs("children", children, ChildInput),
+        "contacts": _inputs("contacts", contacts, PersonContactInput),
         "insurance_contracts": _inputs(
-            "insurance_contracts", insurance_contracts, InsuranceContractInput, problems
+            "insurance_contracts", insurance_contracts, InsuranceContractInput
         ),
-        "service_periods": _inputs(
-            "service_periods", service_periods, ServicePeriodInput, problems
-        ),
+        "service_periods": _inputs("service_periods", service_periods, ServicePeriodInput),
     }
 
 
@@ -1222,9 +1195,7 @@ async def create_person_async(
             ``{"customField2": "Gold"}``.
         confirm: ``true`` creates the person; ``false`` (the default) only previews it.
     """
-    problems: list[str] = []
     lists = _person_inputs(
-        problems,
         addresses=addresses,
         attachments=attachments,
         bank_accounts=bank_accounts,
@@ -1233,8 +1204,7 @@ async def create_person_async(
         insurance_contracts=insurance_contracts,
         service_periods=service_periods,
     )
-    _choices(problems, language=(language, LANGUAGES), color=(color, COLORS))
-    _refuse(problems)
+    _choices(language=(language, LANGUAGES), color=(color, COLORS))
     fields = api.person_fields(
         company=company,
         first_name=first_name,
@@ -1417,9 +1387,7 @@ async def update_person_async(
         confirm: ``true`` writes the change; ``false`` (the default) only previews it.
     """
     _check_id(id)
-    problems: list[str] = []
     lists = _person_inputs(
-        problems,
         addresses=addresses,
         attachments=attachments,
         bank_accounts=bank_accounts,
@@ -1464,36 +1432,32 @@ async def update_person_async(
         vat_uid=vat_uid,
         **lists,
     )
-    _choices(problems, language=(language, LANGUAGES), color=(color, COLORS))
-    cleared = _clear_names(clear, PERSON_UPDATE, given, custom, problems)
-    _refuse(problems)
-    if custom:
-        api.custom_xml(custom)  # refuse a wrong name before the read
+    _choices(language=(language, LANGUAGES), color=(color, COLORS))
+    cleared = _clear_names(clear, PERSON_UPDATE, given, custom)
+    changes = _changes(api.person_fields, PERSON_UPDATE, given, cleared, custom)
     person = await api.person_read(org, id)
     values, stored, unknown = _person_values(person)
     decided = [*given, *cleared]
     blocked = _blocked(stored, decided)
-    if blocked:
+    if blocked is not None:
         raise _cannot_carry("person", blocked)
-    undecided = [name for name in unknown if name not in decided]
-    if undecided:
-        raise InvalidRequestError(
-            f"the person's read shows no {', '.join(undecided)}; person/read.json leaves "
-            "empty fields out, and these were never seen come back, so whether one is "
-            f"stored is unknown and the update could empty it; pass {', '.join(undecided)} "
-            "or name them in clear. Nothing was sent",
-            source=SOURCE,
-        )
+    for name in unknown:
+        if name not in decided:
+            raise refused(
+                f"the person's read shows no {name}; person/read.json leaves empty fields "
+                "out, and this one was never seen come back, so whether it is stored is "
+                f"unknown and the update could empty it; pass {name} or name it in clear",
+                sent=nothing_written("person"),
+            )
     merged = {**values, **given, "custom": api.merge_custom(person.custom, custom or {})}
     merged.update(_cleared(cleared))
     if not any(merged[name] for name in ("company", "first_name", "last_name")):
         raise _missing(
             "person",
-            ["company", "firstName", "lastName"],
+            "company, firstName, lastName",
             "upstream needs one of them; pass company, first_name or last_name",
         )
     fields = api.person_fields(id=person.id, **merged)
-    changes = _changes(api.person_fields, PERSON_UPDATE, given, cleared, custom)
     endpoint = "person/update.json"
     if confirm is not True:
         before = _person_detail(person)
@@ -1630,19 +1594,16 @@ async def create_order_async(
             ``{"customField3": "A-17"}``.
         confirm: ``true`` creates the order; ``false`` (the default) only previews it.
     """
-    problems: list[str] = []
     associates = [associate_id] if _whole(associate_id) else associate_id
     if not isinstance(associates, list) or not associates or not all(map(_whole, associates)):
-        problems.append(f"associate_id takes a person's id or a list of them, not {associate_id!r}")
-    item_inputs = _inputs("items", items, OrderItemInput, problems)
-    attachment_inputs = _inputs("attachments", attachments, AttachmentInput, problems)
+        raise refused(f"associate_id takes a person's id or a list of them, not {associate_id!r}")
+    item_inputs = _inputs("items", items, OrderItemInput)
+    attachment_inputs = _inputs("attachments", attachments, AttachmentInput)
     _choices(
-        problems,
         language=(language, LANGUAGES),
         notify_type=(notify_type, NOTIFY_TYPES),
         recurrence=(recurrence, RECURRENCES),
     )
-    _refuse(problems)
     fields = api.order_fields(
         associate_id=associate_id,
         category_id=category_id,
@@ -1940,14 +1901,13 @@ async def update_order_async(
         confirm: ``true`` writes the change; ``false`` (the default) only previews it.
     """
     _check_id(id)
-    problems: list[str] = []
-    _check_associate(associate_id, problems)
+    _check_associate(associate_id)
     given = _given(
         associate_id=associate_id,
         category_id=category_id,
         date=date,
         account_id=account_id,
-        attachments=_inputs("attachments", attachments, AttachmentInput, problems),
+        attachments=_inputs("attachments", attachments, AttachmentInput),
         currency_id=currency_id,
         currency_rate=currency_rate,
         days_before=days_before,
@@ -1957,7 +1917,7 @@ async def update_order_async(
         end_date=end_date,
         group_id=group_id,
         is_display_item_gross=is_display_item_gross,
-        items=_inputs("items", items, OrderItemInput, problems),
+        items=_inputs("items", items, OrderItemInput),
         language=language,
         notes=notes,
         notify_email=notify_email,
@@ -1974,27 +1934,23 @@ async def update_order_async(
         status_id=status_id,
     )
     _choices(
-        problems,
         language=(language, LANGUAGES),
         notify_type=(notify_type, NOTIFY_TYPES),
         recurrence=(recurrence, RECURRENCES),
     )
-    cleared = _clear_names(clear, ORDER_UPDATE, given, custom, problems)
-    _refuse(problems)
-    if custom:
-        api.custom_xml(custom)  # refuse a wrong name before the read
+    cleared = _clear_names(clear, ORDER_UPDATE, given, custom)
+    changes = _changes(api.order_fields, ORDER_UPDATE, given, cleared, custom)
     order = await api.order_read(org, id)
     values, stored = _order_values(order)
     blocked = _blocked(stored, [*given, *cleared])
-    if blocked:
+    if blocked is not None:
         raise _cannot_carry("order", blocked)
     merged = {**values, **given, "custom": api.merge_custom(order.custom, custom or {})}
     merged.update(_cleared(cleared))
-    absent = [upstream for name, upstream in _ORDER_MANDATORY if merged[name] is None]
-    if absent:
-        raise _missing("order", absent, "pass them (associate_id, category_id, date)")
+    for name, upstream in _ORDER_MANDATORY:
+        if merged[name] is None:
+            raise _missing("order", upstream, "pass associate_id, category_id and date")
     fields = api.order_fields(id=order.id, **merged)
-    changes = _changes(api.order_fields, ORDER_UPDATE, given, cleared, custom)
     endpoint = "order/update.json"
     if confirm is not True:
         return _preview(org, endpoint, fields, before=order, changes=changes)
@@ -2055,10 +2011,8 @@ async def update_order_status_async(
             in ``list_order_categories``, e.g. ``16``.
         confirm: ``true`` sets the status; ``false`` (the default) only previews it.
     """
-    problems: list[str] = []
-    orders = _ids("ids", ids, problems)
-    _check_status(status_id, problems, required=True)
-    _refuse(problems)
+    orders = _ids("ids", ids)
+    _check_status(status_id, required=True)
     fields = api.order_update_status_fields(ids=orders, status_id=status_id)
     endpoint = "order/update_status.json"
     if confirm is not True:
@@ -2111,11 +2065,9 @@ async def create_order_payment_async(
             ``SEPA_PAIN``, ``WIRE_PDF`` or ``CASH_PDF``.
         confirm: ``true`` creates the payment; ``false`` (the default) only previews it.
     """
-    problems: list[str] = []
-    orders = _ids("order_ids", order_ids, problems)
-    _check_status(status_id, problems, required=False)
-    _choices(problems, type=(type, PAYMENT_TYPES))
-    _refuse(problems)
+    orders = _ids("order_ids", order_ids)
+    _check_status(status_id, required=False)
+    _choices(type=(type, PAYMENT_TYPES))
     fields = api.order_payment_create_fields(
         date=date,
         order_ids=orders,
@@ -2184,9 +2136,7 @@ async def create_order_book_entry_async(
             ``book_templates`` in ``list_order_categories``, e.g. ``8`` (Payment).
         confirm: ``true`` books the entry; ``false`` (the default) only previews it.
     """
-    problems: list[str] = []
-    orders = _ids("order_ids", order_ids, problems)
-    _refuse(problems)
+    orders = _ids("order_ids", order_ids)
     fields = api.order_bookentry_fields(
         account_id=account_id,
         order_ids=orders,
@@ -2270,7 +2220,7 @@ def _not_manual(entry: OrderBookEntry, write: str) -> InvalidRequestError | None
             f"has {shown}, not {MANUAL}, the type of an entry booked by hand; how upstream "
             f"answers a write to it was never observed, so it is not {write}d here"
         )
-    return InvalidRequestError(f"book entry {entry.id} {reason}. Nothing was sent", source=SOURCE)
+    return refused(f"book entry {entry.id} {reason}", sent=nothing_written("book entry"))
 
 
 async def update_order_book_entry_async(
@@ -2327,7 +2277,6 @@ async def update_order_book_entry_async(
         confirm: ``true`` writes the change; ``false`` (the default) only previews it.
     """
     _check_id(id)
-    problems: list[str] = []
     given = _given(
         account_id=account_id,
         amount=amount,
@@ -2339,31 +2288,29 @@ async def update_order_book_entry_async(
         tax_id=tax_id,
         template_id=template_id,
     )
-    cleared = _clear_names(clear, BOOK_ENTRY_UPDATE, given, None, problems)
-    _refuse(problems)
+    cleared = _clear_names(clear, BOOK_ENTRY_UPDATE, given, None)
+    changes = _changes(api.order_bookentry_fields, BOOK_ENTRY_UPDATE, given, cleared, None)
     entry = await api.order_bookentry_read(org, id)
-    refused = _not_manual(entry, "update")
-    if refused is not None:
-        raise refused
+    not_manual = _not_manual(entry, "update")
+    if not_manual is not None:
+        raise not_manual
     values, stored = _book_entry_values(entry)
     blocked = _blocked(stored, [])
-    if blocked:
-        raise InvalidRequestError(
-            f"the book entry holds {'; '.join(blocked.values())}, which update.json cannot "
-            "send, and upstream would empty them; change the entry in CashCtrl. Nothing was "
-            "sent",
-            source=SOURCE,
+    if blocked is not None:
+        raise refused(
+            f"the book entry holds {blocked[1]}, which update.json cannot send, and upstream "
+            "would empty it; change the entry in CashCtrl",
+            sent=nothing_written("book entry"),
         )
     merged = {**values, **given}
     merged.update(_cleared(cleared))
     if merged["account_id"] is None:
         raise _missing(
             "book entry",
-            ["accountId"],
+            "accountId",
             "pass account_id, an id from list_accounts (over MCP, the tool cashctrl_list_accounts)",
         )
     fields = api.order_bookentry_fields(id=entry.id, **merged)
-    changes = _changes(api.order_bookentry_fields, BOOK_ENTRY_UPDATE, given, cleared, None)
     endpoint = "order/bookentry/update.json"
     if confirm is not True:
         return _preview(org, endpoint, fields, before=entry, changes=changes)
@@ -2395,9 +2342,9 @@ async def delete_order_book_entry_async(
     fields = api.delete_fields([id])
     endpoint = "order/bookentry/delete.json"
     entry = await api.order_bookentry_read(org, id)
-    refused = _not_manual(entry, "delete")
-    if refused is not None:
-        raise refused
+    not_manual = _not_manual(entry, "delete")
+    if not_manual is not None:
+        raise not_manual
     if confirm is not True:
         return _preview(org, endpoint, fields, before=entry)
     answer = await api.order_bookentry_delete(org, [id])

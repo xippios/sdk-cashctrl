@@ -37,9 +37,8 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from pydantic import BaseModel
-from xippios.core import InvalidRequestError
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import NOTHING_SENT, client_for, nothing_written, refused
 
 __all__ = [
     "CUSTOM_FIELD",
@@ -68,6 +67,9 @@ _XML_TEXT = re.compile(r"[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010
 def _number(value: Decimal) -> int | float:
     """A ``Decimal`` as a JSON number: whole values as integers, others as floats.
 
+    The tasks encode the values a call gives before any request, an update's before its
+    read, so this refusal sends nothing.
+
     Raises:
         InvalidRequestError: The float would not carry every digit of ``value``.
     """
@@ -75,9 +77,7 @@ def _number(value: Decimal) -> int | float:
         return int(value)
     number = float(value)
     if Decimal(repr(number)) != value:
-        raise InvalidRequestError(
-            f"{value} has more digits than a JSON number carries; round it", source=SOURCE
-        )
+        raise refused(f"{value} has more digits than a JSON number carries; round it")
     return number
 
 
@@ -138,23 +138,28 @@ def form_fields(named: Mapping[str, Any]) -> dict[str, str]:
     return fields
 
 
-def _custom_problems(custom: Mapping[Any, Any]) -> list[str]:
-    problems: list[str] = []
+def _check_custom(custom: Mapping[Any, Any], *, sent: str = NOTHING_SENT) -> None:
+    """Refuse the first name that is no ``customField<ID>``, or value that XML cannot carry.
+
+    ``sent`` says what was sent before the check, as ``refused`` takes it.
+    """
     for name, value in custom.items():
         if not isinstance(name, str) or not CUSTOM_FIELD.fullmatch(name):
-            problems.append(
+            raise refused(
                 f"custom: {name!r} is not a custom field name; upstream names them "
-                "customField<ID>, e.g. customField1"
+                "customField<ID>, e.g. customField1",
+                sent=sent,
             )
         if not isinstance(value, str):
-            problems.append(
-                f"custom: the value of {name!r} must be text, not {type(value).__name__}"
+            raise refused(
+                f"custom: the value of {name!r} must be text, not {type(value).__name__}",
+                sent=sent,
             )
-        elif _XML_TEXT.search(value):
-            problems.append(
-                f"custom: the value of {name!r} holds a control character XML cannot carry"
+        if _XML_TEXT.search(value):
+            raise refused(
+                f"custom: the value of {name!r} holds a control character XML cannot carry",
+                sent=sent,
             )
-    return problems
 
 
 def _render(pairs: Iterable[tuple[str, str]]) -> str:
@@ -170,11 +175,9 @@ def custom_xml(custom: Mapping[str, str]) -> str:
 
     Raises:
         InvalidRequestError: A name is not ``customField<ID>``, or a value is not text or
-            holds a character XML cannot carry; every problem is named.
+            holds a character XML cannot carry; the first is named, and nothing was sent.
     """
-    problems = _custom_problems(custom)
-    if problems:
-        raise InvalidRequestError("; ".join(problems), source=SOURCE)
+    _check_custom(custom)
     return _render(custom.items())
 
 
@@ -183,12 +186,12 @@ def _stored_values(stored: str) -> list[tuple[str, str]]:
 
     Raises:
         InvalidRequestError: The text is not ``<values>`` holding plain text elements, so
-            it cannot be carried over value for value.
+            it cannot be carried over value for value; the record was read, nothing written.
     """
-    unreadable = InvalidRequestError(
+    unreadable = refused(
         "custom: the record's stored custom field values are not <values> with one text "
-        "element per field, so they cannot be carried over; the update was not sent",
-        source=SOURCE,
+        "element per field, so they cannot be carried over",
+        sent=nothing_written("record"),
     )
     if "<!" in stored:  # a DTD or a comment: never handed to the parser
         raise unreadable
@@ -211,7 +214,8 @@ def merge_custom(stored: str | None, changes: Mapping[str, str]) -> str | None:
 
     A field named in ``changes`` takes its new value (an empty text empties it); one not
     named keeps the value the record holds; a new name is added at the end. Without
-    changes the stored text is returned as it is, unparsed.
+    changes the stored text is returned as it is, unparsed. ``stored`` comes from the
+    record's read, so a refusal says that the record was read and nothing was written.
 
     Raises:
         InvalidRequestError: A name in ``changes`` is not ``customField<ID>`` or a value
@@ -219,9 +223,7 @@ def merge_custom(stored: str | None, changes: Mapping[str, str]) -> str | None:
     """
     if not changes:
         return stored
-    problems = _custom_problems(changes)
-    if problems:
-        raise InvalidRequestError("; ".join(problems), source=SOURCE)
+    _check_custom(changes, sent=nothing_written("record"))
     pairs = _stored_values(stored) if stored and stored.strip() else []
     merged = dict(pairs)
     merged.update(changes)

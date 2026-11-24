@@ -32,13 +32,12 @@ import httpx
 from xippios.core import (
     BODY_LIMIT,
     Downloaded,
-    InvalidRequestError,
     ValidationError,
     XippiosError,
     request_description,
 )
 
-from xippios.cashctrl._client import NEUTRAL_HOST, SOURCE, classify, client_for
+from xippios.cashctrl._client import NEUTRAL_HOST, SOURCE, classify, client_for, refused
 
 __all__ = ["JSON_MEDIA_TYPE", "check_dest", "download", "export_params", "is_json"]
 
@@ -95,13 +94,13 @@ def check_dest(dest: str | os.PathLike[str]) -> Path:
 
     Raises:
         InvalidRequestError: ``dest`` is a directory, or its directory does not exist,
-            a bad argument (conventions §5).
+            a bad argument (conventions §5); nothing was sent.
     """
     target = Path(dest)
     if target.is_dir():
-        raise InvalidRequestError("dest is a directory; name the file to write", source=SOURCE)
+        raise refused("dest is a directory; name the file to write")
     if not target.parent.is_dir():
-        raise InvalidRequestError("dest's directory does not exist; create it first", source=SOURCE)
+        raise refused("dest's directory does not exist; create it first")
     return target
 
 
