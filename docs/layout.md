@@ -26,8 +26,10 @@ src/xippios/cashctrl/api/
   _params.py       the query parameters of the list operations, encoded once
 scripts/
   record_fixture.py  records one exchange with the demo organisation, sent once by core's
-                     send_once; core's Scrub, then its own TenantScrub (host, encoded and
-                     JSON checks) and scrub_text
+                     send_once: core's Scrub takes the key in its every form, then its own
+                     TenantScrub the host and the subdomain, plain, percent-encoded or in a
+                     JSON body's decoded strings, and scrub_text the e-mail addresses, API
+                     user tags and token-like fields
   seed_demo.py       seeds a fresh, empty demo organisation with synthetic books
                      (docs/demo-org.md); --discovery adds one custom field and one cost centre
 tests/
