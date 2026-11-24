@@ -19,7 +19,8 @@ records matching the request (sdk-core ADR-0034); it is never computed from ``le
 The persons a task returns are projections without the personal identifiers ``ssn`` and
 ``iban`` (sdk-core ADR-0017, ``_person`` and its neighbours), the locations and an order's
 document projections without their bank account numbers (``_location``,
-``_order_document``), and the rows of a
+``_order_document``), an order's detail without its ``hash`` (``_order_detail``), and
+the rows of a
 report, kept as upstream sends them, lose every key named ``ssn`` or ending in ``iban``
 in any letter case and at any depth (``_report``); the endpoint wrappers' read
 models keep them. ``get_report_data`` refuses payroll and people reports by their type,
@@ -104,6 +105,7 @@ from xippios.cashctrl.models import (
     OrderBookEntry,
     OrderCategory,
     OrderDetail,
+    OrderDetailProjection,
     OrderDocument,
     OrderDocumentProjection,
     OrderType,
@@ -929,7 +931,12 @@ async def list_orders_async(
     return Result(data=orders, meta=meta)
 
 
-async def get_order_async(org: str, id: int) -> Result[OrderDetail]:
+def _order_detail(order: OrderDetail) -> OrderDetailProjection:
+    """An order's read without ``hash``, which the recorder treats as a token."""
+    return OrderDetailProjection.project(order)
+
+
+async def get_order_async(org: str, id: int) -> Result[OrderDetailProjection]:
     """Read one order by its id, with its items.
 
     The order comes back as upstream's read returns it: ``type``, ``nr``, ``date``,
@@ -937,15 +944,17 @@ async def get_order_async(org: str, id: int) -> Result[OrderDetail]:
     amounts ``sub_total``, ``tax``, ``total``, ``total_to_pay`` and ``paid``, and its
     ``items``, each with ``name``, ``description``, ``quantity``, ``unit_price``,
     ``account_id``, ``tax_code``, and the computed ``net_total``, ``tax_total`` and
-    ``gross_total``. An id no order has raises ``NotFoundError``; that answer is assumed
-    for orders, observed for accounts, currencies and the journal.
+    ``gross_total``. The read's undocumented ``hash``, which may be the token of a public
+    link to the order's document, is left out. An id no order has raises
+    ``NotFoundError``; that answer is assumed for orders, observed for accounts,
+    currencies and the journal.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The order's ``id`` as ``list_orders`` gives it, e.g. ``3``; not its number
             ``nr``.
     """
-    order = await api.order_read(org, id)
+    order = _order_detail(await api.order_read(org, id))
     return Result(data=order, meta=_meta(org, "order/read.json", {"id": id}))
 
 

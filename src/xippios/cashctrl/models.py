@@ -16,9 +16,11 @@ upstream concept stays an upstream concept, and nothing is renamed or computed.
 These read models stay faithful, documented personal identifiers included: ``ssn`` and
 ``iban`` (``Person``, ``PersonDetail``, and ``JournalEntryDetail.associates``), a
 location's ``iban`` and ``qrIban`` (``Location``), and an order document's
-``orgIban``, ``orgQrIban`` and ``recipientIban`` (``OrderDocument``). The projections
+``orgIban``, ``orgQrIban`` and ``recipientIban`` (``OrderDocument``), and so does an
+order's ``hash`` (``OrderDetail``), a token as the recorder treats it. The projections
 tasks return leave those out (``PersonProjection``, ``PersonDetailProjection``,
-``JournalEntryDetailProjection``, ``LocationProjection``, ``OrderDocumentProjection``),
+``JournalEntryDetailProjection``, ``LocationProjection``, ``OrderDocumentProjection``,
+``OrderDetailProjection``),
 as ``get_report_data`` drops them from its raw rows (``ReportData`` itself keeps what
 upstream sends), a write task does not echo one in ``meta.request`` and its preview
 shows one as ``REDACTED``, and fixtures never carry their values (sdk-core ADR-0017).
@@ -114,6 +116,7 @@ __all__ = [
     "OrderCategory",
     "OrderCategoryStatus",
     "OrderDetail",
+    "OrderDetailProjection",
     "OrderDocument",
     "OrderDocumentProjection",
     "OrderItem",
@@ -1187,7 +1190,29 @@ class Order(_OrderFields):
     is_recurring: bool = Field(validation_alias="isRecurring")
 
 
-class OrderDetail(_OrderFields):
+class _OrderDetailFields(_OrderFields):
+    """The fields of an order's read that ``OrderDetailProjection`` keeps: all but ``hash``."""
+
+    items: list[OrderItem] = Field(default_factory=list)
+    attachments: list[JsonValue] = Field(default_factory=list)
+    category_name: str | None = Field(default=None, validation_alias="categoryName")
+    tax_type: str | None = Field(default=None, validation_alias="taxType")
+    total_to_pay: Decimal | None = Field(default=None, validation_alias="totalToPay")
+    paid: Decimal | None = None
+    default_currency_total: Decimal | None = Field(
+        default=None, validation_alias="defaultCurrencyTotal"
+    )
+    rounding_difference: Decimal | None = Field(default=None, validation_alias="roundingDifference")
+    due: bool
+    foreign_currency: bool = Field(validation_alias="foreignCurrency")
+    has_recurrence: bool = Field(validation_alias="hasRecurrence")
+    file_replacement: bool = Field(validation_alias="fileReplacement")
+    is_file_replacement: bool = Field(validation_alias="isFileReplacement")
+    file_id: JsonValue = Field(default=None, validation_alias="fileId")
+    recurrence_id: JsonValue = Field(default=None, validation_alias="recurrenceId")
+
+
+class OrderDetail(_OrderDetailFields):
     """One order as ``order/read.json`` returns it (``docs/upstream/order.md``).
 
     As ``docs/upstream/OBSERVED.md`` notes, the read sends a different set of fields than the list.
@@ -1205,26 +1230,21 @@ class OrderDetail(_OrderFields):
     its ``is_*`` twin, and ``hash``, an undocumented 32-character text that may be the
     token of a public link to the order document (not verified); the fixture recorder
     writes it as ``REDACTED``.
+
+    This read model stays faithful; ``get_order`` and an order's write preview return
+    ``OrderDetailProjection``, which leaves ``hash`` out.
     """
 
-    items: list[OrderItem] = Field(default_factory=list)
-    attachments: list[JsonValue] = Field(default_factory=list)
-    category_name: str | None = Field(default=None, validation_alias="categoryName")
-    tax_type: str | None = Field(default=None, validation_alias="taxType")
-    total_to_pay: Decimal | None = Field(default=None, validation_alias="totalToPay")
-    paid: Decimal | None = None
-    default_currency_total: Decimal | None = Field(
-        default=None, validation_alias="defaultCurrencyTotal"
-    )
-    rounding_difference: Decimal | None = Field(default=None, validation_alias="roundingDifference")
-    due: bool
-    foreign_currency: bool = Field(validation_alias="foreignCurrency")
-    has_recurrence: bool = Field(validation_alias="hasRecurrence")
-    file_replacement: bool = Field(validation_alias="fileReplacement")
-    is_file_replacement: bool = Field(validation_alias="isFileReplacement")
     hash: str | None = None
-    file_id: JsonValue = Field(default=None, validation_alias="fileId")
-    recurrence_id: JsonValue = Field(default=None, validation_alias="recurrenceId")
+
+
+class OrderDetailProjection(_OrderDetailFields):
+    """An order's detail without ``hash``: what ``get_order`` and a write preview return.
+
+    Every field of ``OrderDetail`` but ``hash``, under the same names. The recorder treats
+    ``hash`` as a token, so no caller gets it (https://github.com/xippios/sdk-cashctrl/issues/135,
+    part 3).
+    """
 
 
 class _OrderDocumentFields(UpstreamModel):

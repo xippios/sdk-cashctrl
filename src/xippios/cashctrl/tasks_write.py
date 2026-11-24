@@ -61,7 +61,8 @@ Personal identifiers (sdk-core ADR-0017): ``create_person`` and ``update_person`
 and, in ``bank_accounts``, each account's ``iban``, and send them as given, but no
 result echoes them: a preview's ``payload`` and ``changes`` and a performed write's
 ``meta.request`` show ``REDACTED`` instead (``_shown``), and the record a preview shows
-as ``before`` is the read tasks' projection, without ``ssn`` and ``iban``.
+as ``before`` is the read tasks' projection, without ``ssn`` and ``iban``, and an
+order's without its ``hash``, which the recorder treats as a token.
 """
 
 import json
@@ -91,6 +92,7 @@ from xippios.cashctrl.models import (
     NotifyType,
     OrderBookEntry,
     OrderDetail,
+    OrderDetailProjection,
     OrderItemInput,
     PaymentType,
     PersonAddressInput,
@@ -103,7 +105,7 @@ from xippios.cashctrl.models import (
     WritePreview,
     WriteResult,
 )
-from xippios.cashctrl.tasks import _journal_entry_detail, _meta, _person_detail
+from xippios.cashctrl.tasks import _journal_entry_detail, _meta, _order_detail, _person_detail
 
 __all__ = [
     "create_journal_entry",
@@ -126,7 +128,7 @@ JournalOutcome = WritePreview[JournalEntryDetailProjection] | WriteResult
 """A journal write's result: a preview (``performed`` false) or what was written (true)."""
 PersonOutcome = WritePreview[PersonDetailProjection] | WriteResult
 """A person write's result: a preview (``performed`` false) or what was written (true)."""
-OrderOutcome = WritePreview[OrderDetail] | WriteResult
+OrderOutcome = WritePreview[OrderDetailProjection] | WriteResult
 """An order write's result: a preview (``performed`` false) or what was written (true)."""
 BookEntryOutcome = WritePreview[OrderBookEntry] | WriteResult
 """A book entry write's result: a preview (``performed`` false) or what was written (true)."""
@@ -1652,7 +1654,9 @@ async def create_order_async(
     return _performed(org, endpoint, fields, answer)
 
 
-def _order_items(order: OrderDetail) -> tuple[list[OrderItemInput] | None, str | None]:
+def _order_items(
+    order: OrderDetail | OrderDetailProjection,
+) -> tuple[list[OrderItemInput] | None, str | None]:
     """The record's items as inputs, in their position, or why they cannot be carried.
 
     Each item is taken under the keys the ``items`` table of ``order/update.json``
@@ -1701,7 +1705,9 @@ def _order_items(order: OrderDetail) -> tuple[list[OrderItemInput] | None, str |
     return inputs, None
 
 
-def _order_values(order: OrderDetail) -> tuple[dict[str, Any], dict[str, str | None]]:
+def _order_values(
+    order: OrderDetail | OrderDetailProjection,
+) -> tuple[dict[str, Any], dict[str, str | None]]:
     """Every ``update.json`` parameter of ``order`` by task name, and what it cannot carry.
 
     ``sequenceNumberId`` is not stored (the read sends none): an update leaves it out,
@@ -1962,7 +1968,7 @@ async def update_order_async(
     fields = api.order_fields(id=order.id, **merged)
     endpoint = "order/update.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=order, changes=changes)
+        return _preview(org, endpoint, fields, before=_order_detail(order), changes=changes)
     answer = await api.order_update(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -1985,7 +1991,7 @@ async def delete_order_async(org: str, id: int, *, confirm: bool = False) -> Res
     fields = api.delete_fields([id])
     endpoint = "order/delete.json"
     if confirm is not True:
-        order = await api.order_read(org, id)
+        order = _order_detail(await api.order_read(org, id))
         return _preview(org, endpoint, fields, before=order)
     answer = await api.order_delete(org, [id])
     return _performed(org, endpoint, fields, answer)

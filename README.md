@@ -77,7 +77,9 @@ below. Persons come back without the personal identifiers `ssn` and `iban`
 (`list_persons`, `get_person`, the persons `get_journal_entry` names; sdk-core ADR-0017),
 locations and an order's document without their bank account numbers (`iban` and
 `qr_iban`, `list_locations`; `orgIban`, `orgQrIban` and `recipientIban`,
-`get_order_document`), and report rows without any key named `ssn` or ending in `iban`
+`get_order_document`), an order without its `hash`, an undocumented text that the fixture
+recorder treats as a token (`get_order` and an order's write preview), and report rows
+without any key named `ssn` or ending in `iban`
 (`get_report_data`, which refuses payroll and people reports outright). An API user that
 wrote or changed a record shows as `API:REDACTED` in `created_by` and `last_updated_by`,
 as in the fixtures; CashCtrl writes `API:` and the first four characters of its key
@@ -358,7 +360,7 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET person/list.json` (List people) | `list_persons` | `cashctrl_list_persons` | available; paged; HTTP route is `POST` |
 | `GET person/read.json` (Read person) | `get_person` | `cashctrl_get_person` | available |
 | `GET order/list.json` (List orders) | `list_orders` | `cashctrl_list_orders` | available; paged; HTTP route is `POST` |
-| `GET order/read.json` (Read order) | `get_order` | `cashctrl_get_order` | available |
+| `GET order/read.json` (Read order) | `get_order` | `cashctrl_get_order` | available; without `hash` |
 | `GET order/document/read.json` (Read document) | `get_order_document` | `cashctrl_get_order_document` | available; layout, sender, recipient, payment references; without `orgIban`, `orgQrIban` and `recipientIban`; the PDF from `download_order_document` |
 | `GET order/bookentry/list.json` (List book entries) | `list_order_book_entries` | `cashctrl_list_order_book_entries` | available; one order's (`id`, the order's) |
 | `GET order/category/list.json` (List categories) | `list_order_categories` | `cashctrl_list_order_categories` | available |
