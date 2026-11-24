@@ -458,16 +458,19 @@ def test_the_account_export_takes_no_limit_as_upstream_documents_none() -> None:
 
 # THE ONE PLACE IN THE TESTS where the person file's default is decided
 # (https://github.com/xippios/sdk-cashctrl/issues/135, part 2). One request,
-# ``person/list.csv`` with ``limit=1`` and no ``columns``, reads upstream's default header:
-# if it names neither ``ssn`` nor a field ending in ``iban``, the default is upstream's
-# own (``None``, no ``columns`` sent); if it names one, the package's list stays
-# (``tasks.PERSON_COLUMNS``). Until the header is read, the package's list stands.
-PERSON_DEFAULT: tuple[str, ...] | None = tasks.PERSON_COLUMNS
+# ``person/list.csv`` with ``limit=1`` and no ``columns``, read upstream's default header:
+# it names neither ``ssn`` nor a field ending in ``iban`` (``docs/upstream/OBSERVED.md``),
+# so the default is upstream's own: ``None``, no ``columns`` sent. Had it named one, the
+# package's list, ``tasks.PERSON_COLUMNS``, would have stayed.
+PERSON_DEFAULT: tuple[str, ...] | None = None
 """What ``download_persons`` sends as ``columns`` when its caller names none."""
 
 
 def test_the_person_files_default_is_the_one_decided() -> None:
     assert tasks.PERSON_DEFAULT_COLUMNS == PERSON_DEFAULT
+    doc = " ".join((inspect.getdoc(tasks.download_persons) or "").split())
+    assert "Without ``columns`` it sends none" in doc
+    assert "upstream's default columns" in doc
 
 
 @pytest.mark.parametrize("default", [None, tasks.PERSON_COLUMNS], ids=["upstreams", "packages"])
