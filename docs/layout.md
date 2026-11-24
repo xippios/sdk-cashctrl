@@ -13,9 +13,12 @@ instead, named after the service, and this file says so (conventions §2).
 
 ```
 src/xippios/cashctrl/api/
-  <operation>.py   one module per operation, named after its path with each / as _, .json
-                   dropped and another extension kept as a suffix: journal_list.py for
-                   journal/list.json, journal_list_csv.py for journal/list.csv
+  <operation>.py   one module per operation, named after its path with each / as _ and its
+                   file suffix dropped, but for a suffix that tells operations on one path
+                   apart, kept as the last word, .json never (conventions §2):
+                   journal_list.py for journal/list.json, journal_list_csv.py for
+                   journal/list.csv, report_collection_download_annualreport.py for
+                   report/collection/download_annualreport.pdf, the one format of its path
   _download.py     the file operations' one download: core's download into a file beside
                    dest, and the refusal sent as JSON under HTTP 200, which core cannot see
   _filter.py       the filter parameter of the list operations, encoded once

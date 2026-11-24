@@ -352,29 +352,31 @@ subdomain): set the `httpx` logger to WARNING.
 
 CashCtrl documents 376 operations in ten groups, of which `docs/upstream/` keeps a page
 each: account, common, file, inventory, journal, meta, order, person, report and salary.
-The package wraps the 57 of the table below, from seven of the groups: the journal, the
-accounts with their categories and cost centers, the fiscal periods, currencies, tax codes,
-locations, custom fields and history, the persons with their categories and titles, the
-orders with their categories, documents, book entries, statuses and payments, and the
-reports, as data and as files. It leaves out salary, 90 operations, since a payroll record
-holds personal data beyond `ssn` and `iban` and no policy yet says what a task may return
-of it, which is why `get_report_data` refuses payroll reports; inventory, 42 operations,
-which no order needs, since an order item's `inventory_id` is optional; the file module and
-the journal and person imports, 39 operations, since a file is binary, which the fixture
-recorder does not record, and an import reads an uploaded file; the fiscal period writes
-and tasks, 15 operations, since fiscal periods stay read-only: a switch or a completed
-period would change what every later call reads; an organisation's configuration, 46
-operations of its settings, sequence numbers, roundings, text templates, order layouts,
-bank accounts, cost center categories, custom field groups and logo, which every record
-shares; and 87 further operations of the controllers it wraps: reads by id, whose list
-returns the whole record already, the writes of accounts, lookups, categories, titles and
-reports, a balance, a period's result or an exchange rate at a date, an order's
-continuation, dossiers, mail and recurrence, attachments, and further exports and formats.
-Each part left out is an open issue of this repository, except
-`account/category/tree.json`, which nests the categories of `list_account_categories` with
-display fields only. `lang` (`de`, `fr`, `it`, `en`), which upstream documents on every
-request and which sets the language of its error messages and of its PDF, Excel and CSV
-files, is not exposed yet: no task takes it
+The package wraps 57 of them, from seven of the groups: the journal, the accounts with
+their categories and cost centers, the fiscal periods, currencies, tax codes, locations,
+custom fields and history, the persons with their categories and titles, the orders with
+their categories, documents, book entries, statuses and payments, and the reports, as data
+and as files. The table below lists 56, and the 57th, `order/bookentry/read.json`, has no
+task of its own: `update_order_book_entry` and `delete_order_book_entry` read the entry
+through it (https://github.com/xippios/sdk-cashctrl/issues/150). It leaves out salary, 90
+operations, since a payroll record holds personal data beyond `ssn` and `iban` and no
+policy yet says what a task may return of it, which is why `get_report_data` refuses
+payroll reports; inventory, 42 operations, which no order needs, since an order item's
+`inventory_id` is optional; the file module and the journal and person imports, 39
+operations, since a file is binary, which the fixture recorder does not record, and an
+import reads an uploaded file; the fiscal period writes and tasks, 15 operations, since
+fiscal periods stay read-only: a switch or a completed period would change what every later
+call reads; an organisation's configuration, 46 operations of its settings, sequence
+numbers, roundings, text templates, order layouts, bank accounts, cost center categories,
+custom field groups and logo, which every record shares; and 87 further operations of the
+controllers it wraps: reads by id, whose list returns the whole record already, the writes
+of accounts, lookups, categories, titles and reports, a balance, a period's result or an
+exchange rate at a date, an order's continuation, dossiers, mail and recurrence,
+attachments, and further exports and formats. Each part left out is an open issue of this
+repository, except `account/category/tree.json`, which nests the categories of
+`list_account_categories` with display fields only. `lang` (`de`, `fr`, `it`, `en`), which
+upstream documents on every request and which sets the language of its error messages and
+of its PDF, Excel and CSV files, is not exposed yet: no task takes it
 (https://github.com/xippios/sdk-cashctrl/issues/74).
 
 | Upstream operation | Task function | MCP tool | Status |
