@@ -80,7 +80,7 @@ from xippios.core import (
 )
 
 from xippios.cashctrl import api
-from xippios.cashctrl._client import SOURCE, TENANTS, client_for, refused
+from xippios.cashctrl._client import NOTHING_SENT, SOURCE, TENANTS, client_for, refused
 from xippios.cashctrl.models import (
     Account,
     AccountCategory,
@@ -1366,20 +1366,21 @@ def _keep_report_types(
     return types
 
 
-async def _report_type(org: str, element_id: int) -> str | None:
-    """The type of report element ``element_id``, from the organisation's report tree.
+async def _report_type(org: str, element_id: int) -> tuple[str | None, bool]:
+    """The type of report element ``element_id``, and whether this call read the tree for it.
 
     The tree is read once per organisation and kept (``_REPORT_TYPES``). An element the
     kept tree does not list reads the tree again, once, since a report may have been
-    added since; ``None`` when it still does not list it, or lists it without a type.
+    added since; the type is ``None`` when it still does not list it, or lists it without
+    a type. Whether the tree was read tells a refusal what this call sent.
     """
     client = client_for(org)
     with _REPORT_TYPES_LOCK:
         kept = _REPORT_TYPES.get(client)
     if kept is not None and element_id in kept:
-        return kept[element_id]
+        return kept[element_id], False
     tree = await api.report_tree(org)
-    return _keep_report_types(client, tree.data).get(element_id)
+    return _keep_report_types(client, tree.data).get(element_id), True
 
 
 async def _tree_now(org: str) -> list[ReportTreeNode]:
@@ -1489,14 +1490,16 @@ def _check_report_period(
         )
 
 
-def _report_refusal(subject: str, task: str) -> InvalidRequestError:
+def _report_refusal(subject: str, task: str, *, tree_read: bool = True) -> InvalidRequestError:
     """The refusal of a payroll or people report by ``task``: ``subject``, then the rule.
 
-    It follows the read of the report tree, the one request a report's refusal may send:
-    for a report file right before, for ``get_report_data`` once per organisation.
+    The report tree is the one request such a refusal may follow: a report file reads it
+    right before, ``get_report_data`` once per organisation, so a refusal by the tree kept
+    from an earlier call (``tree_read`` false) sent nothing.
     """
     rule = f"{task} refuses {_REFUSED_REPORT_RULE} (personal data, sdk-core ADR-0017)"
-    return refused(f"{subject}: {rule}", sent="Only the report tree was read.")
+    sent = "Only the report tree was read." if tree_read else NOTHING_SENT
+    return refused(f"{subject}: {rule}", sent=sent)
 
 
 async def get_report_data_async(
@@ -1571,10 +1574,10 @@ async def get_report_data_async(
         "sort": sort,
         "start_date": start_date,
     }
-    report_type = await _report_type(org, element_id)
+    report_type, tree_read = await _report_type(org, element_id)
     if report_type is not None and _is_refused_report_type(report_type):
         subject = f"report element {element_id} is of type {report_type}"
-        raise _report_refusal(subject, "get_report_data")
+        raise _report_refusal(subject, "get_report_data", tree_read=tree_read)
     sent = api.report_element_data_params(element_id, **arguments)
     report = _report(await api.report_element_data(org, element_id, **arguments))
     meta = _meta(org, "report/element/data.json", sent, total=report.total)
