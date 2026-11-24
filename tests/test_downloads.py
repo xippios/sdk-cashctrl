@@ -58,10 +58,14 @@ JSON_UTF8 = "application/json;charset=utf-8"
 """The content type of every ``.json`` answer recorded (``docs/upstream/OBSERVED.md``)."""
 
 EXPORTS: dict[str, tuple[Callable[..., typing.Any], Callable[..., typing.Any], str]] = {
-    "export_journal_entries": (tasks.export_journal_entries, tasks.list_journal_entries, "journal"),
-    "export_accounts": (tasks.export_accounts, tasks.list_accounts, "account"),
-    "export_persons": (tasks.export_persons, tasks.list_persons, "person"),
-    "export_orders": (tasks.export_orders, tasks.list_orders, "order"),
+    "download_journal_entries": (
+        tasks.download_journal_entries,
+        tasks.list_journal_entries,
+        "journal",
+    ),
+    "download_accounts": (tasks.download_accounts, tasks.list_accounts, "account"),
+    "download_persons": (tasks.download_persons, tasks.list_persons, "person"),
+    "download_orders": (tasks.download_orders, tasks.list_orders, "order"),
 }
 """Each export, the list task it mirrors and their module."""
 REPORT_TASKS = ("download_report", "download_report_collection", "download_annual_report")
@@ -91,6 +95,50 @@ def files(directory: Path) -> list[str]:
 def test_the_file_tasks_are_the_bulk_tasks() -> None:
     assert tasks.BULK_TASKS == FILE_TASKS
     assert set(tasks.__all__) >= tasks.BULK_TASKS
+
+
+def test_a_list_file_takes_the_verb_download_and_no_alias_stays() -> None:
+    """The four list files read, so their verb is ``download_``, beside their ``list_`` task.
+
+    https://github.com/xippios/sdk-cashctrl/issues/135, part 1: the verb alone changes.
+    """
+    import xippios.cashctrl
+
+    for name, (_, listing, _) in EXPORTS.items():
+        assert name == listing.__name__.replace("list_", "download_", 1)
+        assert name in xippios.cashctrl.__all__
+    for module in (tasks, xippios.cashctrl):
+        assert not [name for name in dir(module) if name.startswith("export_")]
+
+
+FIRST_ARGUMENTS: dict[str, tuple[typing.Any, ...]] = {
+    "download_order_document": ([3],),
+    "download_journal_entries": ("csv",),
+    "download_accounts": ("csv",),
+    "download_persons": ("csv",),
+    "download_orders": ("csv",),
+    "download_report": (1, "pdf"),
+    "download_report_collection": (1, "pdf"),
+    "download_annual_report": (),
+}
+"""What each file task takes by position after ``org``: the record and the format."""
+
+
+@pytest.mark.parametrize("name", sorted(FILE_TASKS))
+def test_dest_is_keyword_only(respx_mock: respx.MockRouter, tmp_path: Path, name: str) -> None:
+    """``dest`` is the package's own argument, so it is keyword-only.
+
+    The arguments that identify a record are positional and every argument of the
+    package's own is keyword-only (https://github.com/xippios/sdk-usda-esr/issues/60,
+    part 1).
+    """
+    task = getattr(tasks, name)
+    parameter = inspect.signature(task).parameters["dest"]
+    assert (parameter.kind, parameter.default) == (parameter.KEYWORD_ONLY, parameter.empty)
+    with pytest.raises(TypeError):
+        task(DEMO, *FIRST_ARGUMENTS[name], tmp_path / "file")
+    assert not respx_mock.calls
+    assert files(tmp_path) == []
 
 
 @pytest.mark.anyio
@@ -186,7 +234,7 @@ def test_download_order_document_writes_the_pdf_where_the_caller_says(
         },
     )
     dest = tmp_path / "invoice.pdf"
-    result = tasks.download_order_document(DEMO, [3], dest)
+    result = tasks.download_order_document(DEMO, [3], dest=dest)
     assert sent_query(route) == {"ids": "3"}
     assert httpx.URL(sent_urls(route)[-1]).path == "/api/v1/order/document/read.pdf"
     assert dest.read_bytes() == body
@@ -210,7 +258,7 @@ def test_several_ids_are_one_pdf_sent_comma_separated(
     respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
     route = mount(respx_mock, "order/document/read.pdf", *BODIES["pdf"])
-    result = tasks.download_order_document(DEMO, [3, 5, 4], str(tmp_path / "three.pdf"))
+    result = tasks.download_order_document(DEMO, [3, 5, 4], dest=str(tmp_path / "three.pdf"))
     assert sent_query(route) == {"ids": "3,5,4"}, "upstream's CSV, in the order given"
     assert result.meta.request == {"org": DEMO, "ids": "3,5,4"}
     assert result.data.path == tmp_path / "three.pdf"
@@ -252,10 +300,10 @@ def test_an_export_streams_upstreams_file_to_dest(
     body, content_type = BODIES[format]
     route = mount(respx_mock, f"{module}/list.{format}", body, content_type)
     dest = tmp_path / f"{module}.{format}"
-    result = export(DEMO, format, dest)
+    result = export(DEMO, format, dest=dest)
     assert httpx.URL(sent_urls(route)[-1]).path == f"/api/v1/{module}/list.{format}"
     person_columns = {"columns": ",".join(tasks.PERSON_COLUMNS)}
-    assert sent_query(route) == (person_columns if name == "export_persons" else {})
+    assert sent_query(route) == (person_columns if name == "download_persons" else {})
     assert dest.read_bytes() == body
     assert isinstance(result.data, Downloaded)
     assert (result.data.path, result.data.bytes) == (dest, len(body))
@@ -268,7 +316,7 @@ def test_an_export_streams_upstreams_file_to_dest(
 
 
 EVERY_FILTER: dict[str, dict[str, typing.Any]] = {
-    "export_journal_entries": {
+    "download_journal_entries": {
         "fiscal_period_id": 2,
         "account_id": 3,
         "associate_id": 8,
@@ -293,7 +341,7 @@ EVERY_FILTER: dict[str, dict[str, typing.Any]] = {
         "start": 20,
         "limit": 500,
     },
-    "export_accounts": {
+    "download_accounts": {
         "query": "Finanz",
         "filter": [NUMBER_1020],
         "category_id": 1,
@@ -304,7 +352,7 @@ EVERY_FILTER: dict[str, dict[str, typing.Any]] = {
         "sort": "name",
         "dir": "DESC",
     },
-    "export_persons": {
+    "download_persons": {
         "query": "Muster",
         "filter": [Filter(comparison="eq", field="city", value="Basel")],
         "category_id": 1,
@@ -328,7 +376,7 @@ EVERY_FILTER: dict[str, dict[str, typing.Any]] = {
         "start": 20,
         "limit": 500,
     },
-    "export_orders": {
+    "download_orders": {
         "type": "SALES",
         "fiscal_period_id": 1,
         "query": "Büromöbel",
@@ -378,23 +426,25 @@ def test_an_export_sends_every_filter_as_its_list_does(
     )
     listing(DEMO, **arguments)
     exported = mount(respx_mock, f"{module}/list.xlsx", *BODIES["xlsx"])
-    result = export(DEMO, "xlsx", tmp_path / "all.xlsx", columns=["nr", "name"], **arguments)
+    result = export(DEMO, "xlsx", dest=tmp_path / "all.xlsx", columns=["nr", "name"], **arguments)
     assert sent_query(exported) == {**sent_query(listed), "columns": "nr,name"}
     assert len(sent_query(exported)) == len(arguments) + 1, "every filter sent"
     assert result.meta.request["columns"] == "nr,name"
 
 
-@pytest.mark.parametrize("name", ["export_journal_entries", "export_persons", "export_orders"])
+@pytest.mark.parametrize(
+    "name", ["download_journal_entries", "download_persons", "download_orders"]
+)
 def test_limit_is_passed_through_and_upstreams_default_otherwise(
     respx_mock: respx.MockRouter, tmp_path: Path, name: str
 ) -> None:
     """No export is cut at 100 by the task: ``limit`` goes as given, or not at all."""
     export, _, module = EXPORTS[name]
     route = mount(respx_mock, f"{module}/list.csv", *BODIES["csv"])
-    export(DEMO, "csv", tmp_path / "default.csv")
+    export(DEMO, "csv", dest=tmp_path / "default.csv")
     assert "limit" not in sent_query(route)
     assert "start" not in sent_query(route)
-    result = export(DEMO, "csv", tmp_path / "all.csv", limit=1000)
+    result = export(DEMO, "csv", dest=tmp_path / "all.csv", limit=1000)
     assert sent_query(route)["limit"] == "1000"
     assert result.meta.request["limit"] == 1000
     doc = inspect.getdoc(export) or ""
@@ -403,7 +453,7 @@ def test_limit_is_passed_through_and_upstreams_default_otherwise(
 
 
 def test_the_account_export_takes_no_limit_as_upstream_documents_none() -> None:
-    assert {"start", "limit"}.isdisjoint(inspect.signature(tasks.export_accounts).parameters)
+    assert {"start", "limit"}.isdisjoint(inspect.signature(tasks.download_accounts).parameters)
 
 
 def test_the_person_export_names_the_projections_columns_without_identifiers(
@@ -411,7 +461,7 @@ def test_the_person_export_names_the_projections_columns_without_identifiers(
 ) -> None:
     """``PersonProjection``'s fields under upstream's names, sent, as ``PERSON_COLUMNS``."""
     route = mount(respx_mock, "person/list.pdf", *BODIES["pdf"])
-    tasks.export_persons(DEMO, "pdf", tmp_path / "persons.pdf")
+    tasks.download_persons(DEMO, "pdf", dest=tmp_path / "persons.pdf")
     columns = sent_query(route)["columns"].split(",")
     assert columns == list(tasks.PERSON_COLUMNS)
     assert len(columns) == len(PersonProjection.model_fields) == len(set(columns))
@@ -425,9 +475,9 @@ def test_a_caller_who_names_the_identifiers_gets_them(
 ) -> None:
     """sdk-core ADR-0017: a task that fetches them deliberately may, and its docstring says so."""
     route = mount(respx_mock, "person/list.csv", *BODIES["csv"])
-    tasks.export_persons(DEMO, "csv", tmp_path / "bank.csv", columns=["nr", "ssn", "iban"])
+    tasks.download_persons(DEMO, "csv", dest=tmp_path / "bank.csv", columns=["nr", "ssn", "iban"])
     assert sent_query(route)["columns"] == "nr,ssn,iban"
-    doc = " ".join((inspect.getdoc(tasks.export_persons) or "").split())
+    doc = " ".join((inspect.getdoc(tasks.download_persons) or "").split())
     assert "fetches them deliberately and gets them in the file (sdk-core ADR-0017)" in doc
 
 
@@ -453,7 +503,7 @@ def test_an_export_refuses_what_upstream_would_ignore(
 ) -> None:
     call: dict[str, typing.Any] = {"format": "csv", **arguments}
     with pytest.raises(InvalidRequestError, match=re.escape(message)):
-        tasks.export_orders(DEMO, dest=tmp_path / "x.csv", **call)
+        tasks.download_orders(DEMO, dest=tmp_path / "x.csv", **call)
     assert not respx_mock.calls
     assert files(tmp_path) == []
 
@@ -488,7 +538,7 @@ def test_an_unknown_order_is_not_found_and_nothing_is_written(
     dest = tmp_path / "invoice.pdf"
     dest.write_bytes(b"the caller's earlier file")
     with pytest.raises(NotFoundError) as info:
-        tasks.download_order_document(DEMO, [999999], dest)
+        tasks.download_order_document(DEMO, [999999], dest=dest)
     assert str(info.value) == (
         "CashCtrl: This order does not exist. (GET /api/v1/order/document/read.pdf)"
     )
@@ -504,7 +554,7 @@ def test_an_unknown_orders_404_is_not_found_and_dest_stays(
     dest = tmp_path / "invoice.pdf"
     dest.write_bytes(b"the caller's earlier file")
     with pytest.raises(NotFoundError) as info:
-        tasks.download_order_document(DEMO, [999999999], dest)
+        tasks.download_order_document(DEMO, [999999999], dest=dest)
     assert route.call_count == 1
     assert str(info.value).endswith("(GET /api/v1/order/document/read.pdf)")
     assert dest.read_bytes() == b"the caller's earlier file"
@@ -523,7 +573,7 @@ def test_an_exports_refusal_is_raised_and_removed(
     refusal = {"success": False, "errors": [{"field": "columns", "message": "Invalid."}]}
     mount(respx_mock, "journal/list.csv", json.dumps(refusal).encode(), content_type)
     with pytest.raises(RequestRejected) as info:
-        tasks.export_journal_entries(DEMO, "csv", tmp_path / "journal.csv", columns=["x"])
+        tasks.download_journal_entries(DEMO, "csv", dest=tmp_path / "journal.csv", columns=["x"])
     assert info.value.errors == [FieldError(field="columns", message="Invalid.")]
     assert files(tmp_path) == []
 
@@ -539,7 +589,7 @@ def test_a_refusal_with_a_message_on_an_export_is_no_absence(
     body = b'{"success":false,"errorMessage":"Not allowed.","data":null}'
     mount(respx_mock, "person/list.xlsx", body, JSON_UTF8)
     with pytest.raises(RequestRejected) as info:
-        tasks.export_persons(DEMO, "xlsx", tmp_path / "persons.xlsx")
+        tasks.download_persons(DEMO, "xlsx", dest=tmp_path / "persons.xlsx")
     assert info.value.upstream_message == "Not allowed."
     assert (
         str(info.value)
@@ -573,7 +623,7 @@ def test_json_that_is_no_refusal_is_raised_too(
     """
     mount(respx_mock, "account/list.pdf", body, JSON_UTF8)
     with pytest.raises(ValidationError, match="neither a file nor a refusal") as info:
-        tasks.export_accounts(DEMO, "pdf", tmp_path / "accounts.pdf")
+        tasks.download_accounts(DEMO, "pdf", dest=tmp_path / "accounts.pdf")
     assert str(info.value) == (
         "CashCtrl: the answer is JSON that is neither a file nor a refusal; nothing was written "
         "(GET /api/v1/account/list.pdf)"
@@ -594,7 +644,7 @@ def test_any_other_content_type_is_kept_as_the_file(
     """
     body = MISSING_ID.response.body.encode()
     mount(respx_mock, "order/list.csv", body, content_type)
-    result = tasks.export_orders(DEMO, "csv", tmp_path / "orders.csv")
+    result = tasks.download_orders(DEMO, "csv", dest=tmp_path / "orders.csv")
     assert (tmp_path / "orders.csv").read_bytes() == body
     assert result.data.content_type == content_type
 
@@ -619,7 +669,7 @@ def test_a_status_error_writes_nothing(
         status, text=text, headers={"content-type": "text/plain;charset=utf-8"}
     )
     with pytest.raises(error):
-        tasks.export_journal_entries(DEMO, "pdf", tmp_path / "journal.pdf")
+        tasks.download_journal_entries(DEMO, "pdf", dest=tmp_path / "journal.pdf")
     assert route.call_count == 1
     assert files(tmp_path) == []
 
@@ -628,9 +678,9 @@ def test_dest_names_a_file_in_a_directory_that_exists(
     respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
     with pytest.raises(InvalidRequestError, match="dest is a directory"):
-        tasks.export_accounts(DEMO, "csv", tmp_path)
+        tasks.download_accounts(DEMO, "csv", dest=tmp_path)
     with pytest.raises(InvalidRequestError, match="dest's directory does not exist"):
-        tasks.download_order_document(DEMO, [3], tmp_path / "missing" / "x.pdf")
+        tasks.download_order_document(DEMO, [3], dest=tmp_path / "missing" / "x.pdf")
     assert not respx_mock.calls
     assert files(tmp_path) == []
 
@@ -638,7 +688,9 @@ def test_dest_names_a_file_in_a_directory_that_exists(
 @pytest.mark.anyio
 async def test_the_async_twins_are_the_tasks(respx_mock: respx.MockRouter, tmp_path: Path) -> None:
     route = mount(respx_mock, "order/list.pdf", *BODIES["pdf"])
-    result = await tasks.export_orders_async(DEMO, "pdf", tmp_path / "o.pdf", type="PURCHASE")
+    result = await tasks.download_orders_async(
+        DEMO, "pdf", dest=tmp_path / "o.pdf", type="PURCHASE"
+    )
     assert sent_query(route) == {"type": "PURCHASE"}
     assert result.data.bytes == len(BODIES["pdf"][0])
 
@@ -725,7 +777,7 @@ def test_download_report_writes_the_file_where_the_caller_says(
     endpoint = f"report/element/download.{format}"
     route = mount_report(respx_mock, endpoint, format, f"Balance 2025.{format}")
     dest = tmp_path / f"balance.{format}"
-    result = tasks.download_report(DEMO, 1, format, dest, fiscal_period=FP2025)
+    result = tasks.download_report(DEMO, 1, format, dest=dest, fiscal_period=FP2025)
     assert (tree.call_count, route.call_count) == (1, 1), "the tree first, then the file"
     assert sent_query(route) == {"elementId": "1", "fiscalPeriod": str(FP2025)}
     assert dest.read_bytes() == BODIES[format][0]
@@ -761,7 +813,7 @@ def test_a_report_file_takes_and_sends_the_parameters_of_get_report_data(
     data = replay_fixture("report_element_data", "balance_fp2025")
     tasks.get_report_data(DEMO, 1, **arguments)
     route = mount_report(respx_mock, "report/element/download.xlsx", "xlsx")
-    result = tasks.download_report(DEMO, 1, "xlsx", tmp_path / "half.xlsx", **arguments)
+    result = tasks.download_report(DEMO, 1, "xlsx", dest=tmp_path / "half.xlsx", **arguments)
     assert sent_query(route) == sent_query(data)
     assert result.meta.request["startDate"] == "2025-01-01"
     downloaded = set(inspect.signature(tasks.download_report).parameters) - {"format", "dest"}
@@ -779,7 +831,7 @@ def test_download_report_collection_writes_the_file_where_the_caller_says(
     endpoint = f"report/collection/download.{format}"
     route = mount_report(respx_mock, endpoint, format, f"Annual report 2025.{format}")
     dest = tmp_path / f"annual.{format}"
-    result = tasks.download_report_collection(DEMO, 1, format, dest, fiscal_period=FP2025)
+    result = tasks.download_report_collection(DEMO, 1, format, dest=dest, fiscal_period=FP2025)
     assert (tree.call_count, route.call_count) == (1, 1)
     assert sent_query(route) == {"collectionId": "1", "fiscalPeriod": str(FP2025)}
     assert dest.read_bytes() == BODIES[format][0]
@@ -798,7 +850,7 @@ def test_download_annual_report_writes_the_pdf_where_the_caller_says(
     endpoint = "report/collection/download_annualreport.pdf"
     route = mount_report(respx_mock, endpoint, "pdf", "Annual report 2025.pdf")
     dest = tmp_path / "annual.pdf"
-    result = tasks.download_annual_report(DEMO, dest, fiscal_period_id=fiscal_period_id)
+    result = tasks.download_annual_report(DEMO, dest=dest, fiscal_period_id=fiscal_period_id)
     assert (tree.call_count, route.call_count) == (1, 1)
     sent = {} if fiscal_period_id is None else {"fiscalPeriodId": fiscal_period_id}
     assert sent_query(route) == {name: str(value) for name, value in sent.items()}
@@ -830,7 +882,7 @@ def test_a_payroll_or_people_report_is_refused_before_its_download(
     tree = mount_tree(respx_mock, fixtures_dir)
     route = mount_report(respx_mock, f"report/element/download.{format}", format)
     with pytest.raises(InvalidRequestError) as refused:
-        tasks.download_report(DEMO, element_id, format, tmp_path / "x", fiscal_period=FP2025)
+        tasks.download_report(DEMO, element_id, format, dest=tmp_path / "x", fiscal_period=FP2025)
     assert refused.value.message == (
         f"report element {element_id} is of type {report_type}: download_report refuses {RULE}"
     )
@@ -848,7 +900,7 @@ def test_the_debtor_report_passes_as_get_report_data_reads_it(
     """
     mount_tree(respx_mock, fixtures_dir)
     route = mount_report(respx_mock, "report/element/download.pdf", "pdf")
-    tasks.download_report(DEMO, 12, "pdf", tmp_path / "debtors.pdf", fiscal_period=FP2025)
+    tasks.download_report(DEMO, 12, "pdf", dest=tmp_path / "debtors.pdf", fiscal_period=FP2025)
     assert route.call_count == 1
 
 
@@ -874,7 +926,7 @@ def test_a_collection_that_holds_a_refused_report_is_refused_before_its_download
     tree = mount_tree(respx_mock, fixtures_dir)
     route = mount_report(respx_mock, "report/collection/download.pdf", "pdf")
     with pytest.raises(InvalidRequestError) as refused:
-        tasks.download_report_collection(DEMO, collection_id, "pdf", tmp_path / "x.pdf")
+        tasks.download_report_collection(DEMO, collection_id, "pdf", dest=tmp_path / "x.pdf")
     assert refused.value.message == (
         f"report collection {collection_id} holds reports of the types {types}: "
         f"download_report_collection refuses {RULE}"
@@ -901,12 +953,14 @@ def test_every_download_reads_the_tree_as_upstream_lists_it_then(
         ]
     )
     route = mount_report(respx_mock, "report/collection/download.pdf", "pdf")
-    tasks.download_report_collection(DEMO, 1, "pdf", tmp_path / "first.pdf", fiscal_period=FP2025)
+    tasks.download_report_collection(
+        DEMO, 1, "pdf", dest=tmp_path / "first.pdf", fiscal_period=FP2025
+    )
     with pytest.raises(
         InvalidRequestError, match="report collection 1 holds reports of the types SALARY_LIST: "
     ):
         tasks.download_report_collection(
-            DEMO, 1, "pdf", tmp_path / "second.pdf", fiscal_period=FP2025
+            DEMO, 1, "pdf", dest=tmp_path / "second.pdf", fiscal_period=FP2025
         )
     assert (tree.call_count, route.call_count) == (2, 1)
     with pytest.raises(
@@ -924,7 +978,7 @@ def test_the_annual_report_is_refused_when_its_collection_holds_a_refused_report
     tree = mount_tree(respx_mock, fixtures_dir, {"element-2": {"type": "SALARY_LIST"}})
     route = mount_report(respx_mock, "report/collection/download_annualreport.pdf", "pdf")
     with pytest.raises(InvalidRequestError) as refused:
-        tasks.download_annual_report(DEMO, tmp_path / "annual.pdf", fiscal_period_id=FP2025)
+        tasks.download_annual_report(DEMO, dest=tmp_path / "annual.pdf", fiscal_period_id=FP2025)
     assert refused.value.message == (
         "the annual report, report collection 1, holds reports of the types SALARY_LIST: "
         f"download_annual_report refuses {RULE}"
@@ -941,7 +995,7 @@ def test_the_annual_report_is_refused_when_no_collection_is_marked_system(
     tree = mount_tree(respx_mock, fixtures_dir, unmarked)
     route = mount_report(respx_mock, "report/collection/download_annualreport.pdf", "pdf")
     with pytest.raises(InvalidRequestError) as refused:
-        tasks.download_annual_report(DEMO, tmp_path / "annual.pdf")
+        tasks.download_annual_report(DEMO, dest=tmp_path / "annual.pdf")
     assert refused.value.message == (
         "the report tree marks no collection as the system collection the annual report "
         f"prints, so its reports cannot be checked: download_annual_report refuses {RULE}"
@@ -977,7 +1031,7 @@ def test_a_report_the_tree_does_not_list_is_not_found_and_dest_stays(
     dest = tmp_path / f"missing.{fmt}"
     dest.write_bytes(b"the caller's earlier file")
     with pytest.raises(NotFoundError) as info:
-        getattr(tasks, task)(DEMO, 999999999, fmt, dest, fiscal_period=FP2025)
+        getattr(tasks, task)(DEMO, 999999999, fmt, dest=dest, fiscal_period=FP2025)
     assert (
         str(info.value) == f"CashCtrl: no record has an id asked, HTTP 404 (GET /api/v1/{endpoint})"
     )
@@ -995,7 +1049,7 @@ def test_a_report_files_refusal_sent_as_http_200_is_raised_and_removed(
     body = b'{"success":false,"errorMessage":"Not allowed.","data":null}'
     mount(respx_mock, "report/collection/download.xlsx", body, JSON_UTF8)
     with pytest.raises(RequestRejected) as info:
-        tasks.download_report_collection(DEMO, 1, "xlsx", tmp_path / "annual.xlsx")
+        tasks.download_report_collection(DEMO, 1, "xlsx", dest=tmp_path / "annual.xlsx")
     assert info.value.upstream_message == "Not allowed."
     assert files(tmp_path) == []
 
@@ -1089,8 +1143,8 @@ async def test_the_report_files_async_twins_are_the_tasks(
     element = mount_report(respx_mock, "report/element/download.pdf", "pdf")
     collection = mount_report(respx_mock, "report/collection/download.xlsx", "xlsx")
     annual = mount_report(respx_mock, "report/collection/download_annualreport.pdf", "pdf")
-    await tasks.download_report_async(DEMO, 1, "pdf", tmp_path / "e.pdf")
-    await tasks.download_report_collection_async(DEMO, 1, "xlsx", tmp_path / "c.xlsx")
-    await tasks.download_annual_report_async(DEMO, tmp_path / "a.pdf", fiscal_period_id=FP2025)
+    await tasks.download_report_async(DEMO, 1, "pdf", dest=tmp_path / "e.pdf")
+    await tasks.download_report_collection_async(DEMO, 1, "xlsx", dest=tmp_path / "c.xlsx")
+    await tasks.download_annual_report_async(DEMO, dest=tmp_path / "a.pdf", fiscal_period_id=FP2025)
     assert (element.call_count, collection.call_count, annual.call_count) == (1, 1, 1)
     assert sent_query(annual) == {"fiscalPeriodId": str(FP2025)}

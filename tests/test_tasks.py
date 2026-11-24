@@ -1446,7 +1446,10 @@ def test_list_order_book_entries_replays_a_booked_purchase_order(
     replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
 ) -> None:
     route = replay_fixture("order_bookentry_list", "booked")
-    result = tasks.list_order_book_entries(DEMO, BOOKED_ORDER)
+    result = tasks.list_order_book_entries(DEMO, id=BOOKED_ORDER)
+    assert list(inspect.signature(tasks.list_order_book_entries).parameters) == ["org", "id"], (
+        "upstream's own name, with no alias (https://github.com/xippios/sdk-cashctrl/issues/135)"
+    )
     assert sent_query(route) == {"id": "5"}, "the order's id, under upstream's name"
     assert sent_query(route) == recorded_query(
         recorded(fixtures_dir, "order_bookentry_list", "booked")
@@ -1478,7 +1481,7 @@ async def test_list_order_book_entries_as_a_tool(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     replay_fixture("order_bookentry_list", "booked")
-    arguments = {"org": DEMO, "order_id": BOOKED_ORDER}
+    arguments = {"org": DEMO, "id": BOOKED_ORDER}
     payload = await mcp_call(server, "cashctrl_list_order_book_entries", arguments)
     assert payload["meta"]["total"] == 1
     assert payload["meta"]["request"] == {"org": DEMO, "id": BOOKED_ORDER}
@@ -1497,7 +1500,7 @@ def test_list_order_book_entries_as_a_route(
     app.include_router(router)
     replay_fixture("order_bookentry_list", "booked")
     response = TestClient(app).get(
-        "/cashctrl/list_order_book_entries", params={"org": DEMO, "order_id": BOOKED_ORDER}
+        "/cashctrl/list_order_book_entries", params={"org": DEMO, "id": BOOKED_ORDER}
     )
     assert response.status_code == 200, response.text
     assert response.json()["meta"]["total"] == 1
@@ -2898,7 +2901,7 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
         "report_element_data/balance_fp2025",
         {"element_id": 1, "fiscal_period": FP2025},
     ),
-    "cashctrl_list_order_book_entries": ("order_bookentry_list/booked", {"order_id": 5}),
+    "cashctrl_list_order_book_entries": ("order_bookentry_list/booked", {"id": 5}),
     "cashctrl_list_history": ("history_list/order", {"order_id": 5}),
 }
 UNOBSERVED: frozenset[str] = frozenset()
