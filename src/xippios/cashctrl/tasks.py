@@ -50,7 +50,7 @@ argument, and returns core's ``Downloaded``; ``meta.endpoint`` is the file's ope
 (``journal/list.csv``) and ``meta.retrieved_at`` the time the file was complete. A
 refusal sent as HTTP 200 is raised, never written (``api/_download.py``). A file may
 hold what a projection leaves out, at its caller's request or as upstream renders it:
-the person export names ``PERSON_COLUMNS`` unless its caller names columns, ``ssn`` or
+the person file sends ``PERSON_DEFAULT_COLUMNS`` unless its caller names columns, ``ssn`` or
 ``iban`` among them deliberately, and an invoice's QR-bill may carry the organisation's
 IBAN or QR-IBAN (sdk-core ADR-0017). A report file is refused by ``get_report_data``'s type rule
 on the tree read right before its download (``_tree_now``), but no key is dropped from a
@@ -231,12 +231,20 @@ PERSON_COLUMNS: tuple[str, ...] = tuple(
     field.validation_alias if isinstance(field.validation_alias, str) else name
     for name, field in PersonProjection.model_fields.items()
 )
-"""The ``columns`` ``download_persons`` sends when its caller names none.
+"""The package's list of the person file's columns, ``PersonProjection``'s fields.
 
-``PersonProjection``'s fields, what ``list_persons`` returns, under upstream's names
-(``firstName``), in its order: the personal identifiers ``ssn`` and ``iban`` stay out of
-the file unless the caller names them (sdk-core ADR-0017).
+What ``list_persons`` returns, under upstream's names (``firstName``), in its order: the
+personal identifiers ``ssn`` and ``iban`` stay out of the file unless the caller names them
+(sdk-core ADR-0017).
 """
+# THE ONE PLACE IN THE CODE where the person file's default is decided
+# (https://github.com/xippios/sdk-cashctrl/issues/135, part 2): one request,
+# ``person/list.csv`` with ``limit=1`` and no ``columns``, reads upstream's default header.
+# If it names neither ``ssn`` nor a field ending in ``iban``, the default is upstream's own:
+# ``None``, no ``columns`` sent. If it names one, the package's list stays: ``PERSON_COLUMNS``.
+# Until the header is read, the package's list stands.
+PERSON_DEFAULT_COLUMNS: tuple[str, ...] | None = PERSON_COLUMNS
+"""The ``columns`` ``download_persons`` sends when its caller names none; ``None`` sends none."""
 PAGE_SIZE = 100
 """Records per request when a list task collects every page.
 
@@ -1870,9 +1878,10 @@ async def download_persons_async(
     """Download an organisation's persons, its customers, vendors and contacts, as a file.
 
     The file is upstream's export of the people list (``person/list.csv``, ``list.xlsx``
-    or ``list.pdf``) with the filters of ``list_persons``. Without ``columns`` it holds
-    the fields ``list_persons`` returns, named one by one (``PERSON_COLUMNS``), so the
-    personal identifiers ``ssn`` and ``iban`` stay out of it. A column ``columns`` names
+    or ``list.pdf``) with the filters of ``list_persons``. Without ``columns`` it sends
+    ``PERSON_DEFAULT_COLUMNS``: the fields ``list_persons`` returns, named one by one
+    (``PERSON_COLUMNS``), so the personal identifiers ``ssn`` and ``iban`` stay out of it,
+    since upstream's own default columns were never observed. A column ``columns`` names
     is exported as named: a caller that names ``ssn``, ``iban`` or ``qrIban`` fetches
     them deliberately and gets them in the file (sdk-core ADR-0017). The file is streamed to
     ``dest``, the path the caller gives, and is never read into a result, kept in memory
@@ -1942,7 +1951,7 @@ async def download_persons_async(
         start=start,
         limit=limit,
     )
-    query_sent = api.export_params(params, PERSON_COLUMNS if columns is None else columns)
+    query_sent = api.export_params(params, PERSON_DEFAULT_COLUMNS if columns is None else columns)
     return await _export(
         org, format, dest, query_sent, path="person/list", wrappers=_PERSON_EXPORTS
     )
