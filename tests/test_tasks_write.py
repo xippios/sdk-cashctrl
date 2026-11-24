@@ -31,7 +31,7 @@ import json
 import re
 import typing
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -73,6 +73,7 @@ from xippios.cashctrl.models import (
     OrderBookEntry,
     OrderCategory,
     OrderDetail,
+    OrderDetailProjection,
     OrderItemInput,
     PersonAddressInput,
     PersonDetail,
@@ -150,7 +151,7 @@ def test_every_write_task_returns_a_preview_or_a_result(task: Callable[..., Any]
     assert preview.__pydantic_generic_metadata__["args"][0] in (
         JournalEntryDetailProjection,
         PersonDetailProjection,
-        OrderDetail,
+        OrderDetailProjection,
         OrderBookEntry,
     )
     assert result is WriteResult
@@ -493,6 +494,83 @@ def test_an_update_refuses_a_wrong_custom_name_before_the_read(
     assert not respx_mock.calls
 
 
+# One refusal names the first problem and says what was sent
+# (https://github.com/xippios/sdk-cashctrl/issues/138): "Nothing was sent." before any
+# request, and after the read of the record an update or a delete would change, that the
+# record was read and nothing was written.
+
+
+def test_a_write_refusal_names_the_first_problem_alone(respx_mock: respx.MockRouter) -> None:
+    arguments: dict[str, Any] = {"associate_id": "Muster AG", "notify_type": "SMS"}
+    with pytest.raises(InvalidRequestError) as raised:
+        tasks_write.create_journal_entry(DEMO, **arguments)
+    assert str(raised.value) == (
+        "associate_id must be a person's id, a whole number, not 'Muster AG'; create a new "
+        "person with create_person (over MCP, the tool cashctrl_create_person) first. "
+        "Nothing was sent."
+    )
+    with pytest.raises(InvalidRequestError) as raised:
+        tasks_write.update_order_status(DEMO, [], status_id=0)
+    assert str(raised.value) == (
+        "ids takes a list of at least one order id, e.g. [20], not []. Nothing was sent."
+    )
+    custom: dict[str, Any] = {"colour": "blue", "customField1": 3}
+    with pytest.raises(InvalidRequestError) as raised:
+        tasks_write.create_person(DEMO, last_name="Muster", custom=custom)
+    assert str(raised.value) == (
+        "custom: 'colour' is not a custom field name; upstream names them customField<ID>, "
+        "e.g. customField1. Nothing was sent."
+    )
+    assert not respx_mock.calls
+
+
+def test_an_updates_own_values_are_refused_before_its_read(respx_mock: respx.MockRouter) -> None:
+    """The values a call gives are encoded before the record is read, so nothing is sent."""
+    item = {"account_id": 42, "name": "Stuhl", "unit_price": Decimal("0.1000000000000000000001")}
+    with pytest.raises(InvalidRequestError) as raised:
+        tasks_write.update_order(DEMO, ORDER, items=[item])  # type: ignore[list-item]
+    assert str(raised.value) == (
+        "0.1000000000000000000001 has more digits than a JSON number carries; round it. "
+        "Nothing was sent."
+    )
+    assert not respx_mock.calls
+
+
+def test_a_refusal_after_the_read_names_the_first_problem_and_the_read(
+    respx_mock: respx.MockRouter, fixtures_dir: Path
+) -> None:
+    """The recorded order changed in memory to hold two lists the update cannot carry."""
+    body = recorded_read(fixtures_dir, "order_read", "for_update")
+    body["data"]["attachments"] = [{"fileId": 3}]
+    body["data"]["items"][0]["allocations"] = [{"share": 1, "toCostCenterId": 2}]
+    read = serve_read(respx_mock, "order/read.json", body)
+    write = respx_mock.post(f"{BASE}/order/update.json")
+    with pytest.raises(InvalidRequestError) as raised:
+        tasks_write.update_order(DEMO, ORDER, description="x", confirm=True)
+    assert str(raised.value) == (
+        "the order holds attachments, never observed filled, which the update cannot send "
+        "back as stored, and upstream would empty it; pass attachments to replace it, or "
+        "clear it, or change the record in CashCtrl. The order was read and nothing was "
+        "written."
+    )
+    assert (read.call_count, write.called) == (1, False)
+
+
+def test_stored_custom_values_are_refused_as_read() -> None:
+    """The stored XML comes from the record's read: its refusal says so.
+
+    The stored value is an input of the test, not an answer from CashCtrl: a form that
+    ``journal.md`` does not document for ``custom``, which no read was recorded holding.
+    """
+    with pytest.raises(InvalidRequestError) as raised:
+        merge_custom("plain text", {"customField1": "y"})
+    assert str(raised.value) == (
+        "custom: the record's stored custom field values are not <values> with one text "
+        "element per field, so they cannot be carried over. The record was read and nothing "
+        "was written."
+    )
+
+
 def test_delete_journal_entry_previews_the_entry_it_would_delete(
     replay_fixture: ReplayFixture,
 ) -> None:
@@ -761,7 +839,7 @@ def test_update_person_refuses_fields_whose_absence_is_unknown(
     body["data"][role] = True
     serve_read(respx_mock, "person/read.json", body)
     write = respx_mock.post(f"{BASE}/person/update.json")
-    with pytest.raises(InvalidRequestError, match=f"read shows no {', '.join(unknown)}"):
+    with pytest.raises(InvalidRequestError, match=f"read shows no {unknown[0]};"):
         tasks_write.update_person(DEMO, PERSON, department="x", confirm=True)
     assert not write.called
     cleared = preview_of(tasks_write.update_person(DEMO, PERSON, department="x", clear=unknown))
@@ -840,9 +918,9 @@ def test_clearing_a_parameter_that_is_never_sent_is_refused(
     """``sequence_number_id`` is sent only when given; a clear of it would be a no-op."""
     with pytest.raises(InvalidRequestError) as raised:
         task(DEMO, 1, clear=["sequence_number_id"])
-    assert str(raised.value).endswith("clearing it would change nothing: drop it from clear"), (
-        "the refusal says what to do"
-    )
+    assert str(raised.value).endswith(
+        "would change nothing: drop it from clear. Nothing was sent."
+    ), "the refusal says what to do"
     assert not respx_mock.calls
 
 
@@ -1140,7 +1218,7 @@ def test_update_order_previews_the_whole_order_after_one_read(
     assert preview.endpoint == "order/update.json"
     assert list(preview.payload.items()) == recorded_body(fixtures_dir, "order_update", "ok")
     assert preview.changes == {"description": "xippios-live fixture updated", "dueDays": "30"}
-    assert isinstance(preview.before, OrderDetail)
+    assert isinstance(preview.before, OrderDetailProjection), "get_order's, without hash"
     assert (preview.before.id, preview.before.description, preview.before.due_days) == (
         ORDER,
         "xippios-live fixture",
@@ -1335,7 +1413,7 @@ def test_update_order_refuses_what_it_cannot_carry(
     write = respx_mock.post(f"{BASE}/order/update.json")
     with pytest.raises(InvalidRequestError, match=re.escape(message)) as raised:
         tasks_write.update_order(DEMO, ORDER, description="x", confirm=True)
-    assert str(raised.value).endswith("Nothing was sent")
+    assert str(raised.value).endswith(". The order was read and nothing was written.")
     assert not write.called
     parameter = "attachments" if "holds attachments" in message else "items"
     assert f"pass {parameter} to replace it" in str(raised.value)
@@ -1351,7 +1429,7 @@ def test_update_order_refuses_what_it_cannot_carry(
     [
         (lambda data: data.pop("associateId"), {"description": "x"}, "associateId"),
         (lambda data: None, {"clear": ["associate_id"]}, "associateId"),
-        (lambda data: None, {"clear": ["category_id", "date"]}, "categoryId, date"),
+        (lambda data: None, {"clear": ["category_id", "date"]}, "categoryId"),
     ],
     ids=["read-without-partner", "partner-cleared", "category-and-date-cleared"],
 )
@@ -1416,7 +1494,8 @@ def test_delete_order_previews_the_order_then_deletes(
     replay_fixture("order_read", "by_id")
     preview = tasks_write.delete_order(DEMO, 3).data
     assert isinstance(preview, WritePreview)
-    assert isinstance(preview.before, OrderDetail)
+    assert isinstance(preview.before, OrderDetailProjection)
+    assert "hash" not in preview.model_dump()["before"]
     assert (preview.before.nr, preview.payload) == ("RE-2026-103", {"ids": "3"})
     route = replay_fixture("order_delete", "ok")
     result = tasks_write.delete_order(DEMO, ORDER, confirm=True)
@@ -1601,7 +1680,7 @@ def test_a_refused_payment_names_the_date_and_the_bank_accounts(
         ),
         (
             lambda: tasks_write.update_order_status(DEMO, [ORDER, 0, True], OPEN),
-            "ids: an id is a whole number of at least 1, not 0, True",
+            "ids: an id is a whole number of at least 1, not 0. Nothing was sent.",
         ),
         (
             lambda: tasks_write.update_order_status(DEMO, [ORDER], 0),
@@ -1766,7 +1845,7 @@ def test_an_entry_booked_from_the_items_is_refused_after_one_read(
         f"book entry {GENERATED_ENTRY} was booked from its order's items (type GENERATED); "
         f"upstream documents that such entries cannot be {write}d directly, only by changing "
         "the order's items with update_order (over MCP, the tool cashctrl_update_order). "
-        "Nothing was sent"
+        "The book entry was read and nothing was written."
     )
     assert read.call_count == 1, "one read, confirmed or not"
     assert not sent.called
@@ -1798,7 +1877,8 @@ def test_update_order_book_entry_refuses_an_entry_without_its_account(
     write = respx_mock.post(f"{BASE}/order/bookentry/update.json")
     refusal = re.escape(
         "the book entry gives no accountId, which update.json requires; pass account_id, an "
-        "id from list_accounts (over MCP, the tool cashctrl_list_accounts). Nothing was sent"
+        "id from list_accounts (over MCP, the tool cashctrl_list_accounts). The book entry "
+        "was read and nothing was written."
     )
     with pytest.raises(InvalidRequestError, match=refusal):
         tasks_write.update_order_book_entry(DEMO, GENERATED_ENTRY, description="x")
@@ -1885,7 +1965,7 @@ async def test_the_book_entry_read_stays_faithful(replay_fixture: ReplayFixture)
     entry = await api.order_bookentry_read(DEMO, GENERATED_ENTRY)
     assert isinstance(entry, OrderBookEntry)
     assert (entry.id, entry.order_id, entry.type, entry.account_id) == (5, 5, "GENERATED", 45)
-    assert (entry.date, entry.amount, entry.tax_id) == (date(2026, 2, 2), Decimal("4650"), 13)
+    assert (entry.date, entry.amount, entry.tax_id) == (datetime(2026, 2, 2), Decimal("4650"), 13)
     assert len(entry.rows) == 3
     assert route.call_count == 1
 
@@ -2075,7 +2155,7 @@ def test_only_an_entry_booked_by_hand_is_changed_or_deleted(
     assert str(refused.value) == (
         f"book entry {BOOK_ENTRY} has {shown}, not MANUAL, the type of an entry booked by "
         f"hand; how upstream answers a write to it was never observed, so it is not {write}d "
-        "here. Nothing was sent"
+        "here. The book entry was read and nothing was written."
     )
     assert read.call_count == 1, "one read, confirmed or not"
     assert not sent.called

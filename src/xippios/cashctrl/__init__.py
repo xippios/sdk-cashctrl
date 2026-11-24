@@ -6,23 +6,25 @@ except ``list_organisations``, which takes no argument and lists the declared
 organisations' names. The write tasks (``create_*``, ``update_*``, ``delete_*``, the book
 entries' among them, ``update_order_status`` and ``create_order_payment``, from
 ``tasks_write``) preview unless called with ``confirm=True``. The file tasks
-(``download_order_document``, ``export_*``, ``download_report``,
-``download_report_collection``, ``download_annual_report``) write a file to the path
-their caller gives and are Python only.
+(``download_order_document``, the list files ``download_journal_entries``,
+``download_accounts``, ``download_persons`` and ``download_orders``,
+``download_report``, ``download_report_collection``, ``download_annual_report``)
+write a file to ``dest``, the path their caller gives by keyword, and are Python
+only.
 Endpoint wrappers under ``api/`` and the organisation registry in ``_client`` are
 internal.
 """
 
 from xippios.cashctrl._version import __version__
 from xippios.cashctrl.tasks import (
+    download_accounts,
     download_annual_report,
+    download_journal_entries,
     download_order_document,
+    download_orders,
+    download_persons,
     download_report,
     download_report_collection,
-    export_accounts,
-    export_journal_entries,
-    export_orders,
-    export_persons,
     get_account,
     get_fiscal_period,
     get_journal_entry,
@@ -77,14 +79,14 @@ __all__ = [
     "delete_order",
     "delete_order_book_entry",
     "delete_person",
+    "download_accounts",
     "download_annual_report",
+    "download_journal_entries",
     "download_order_document",
+    "download_orders",
+    "download_persons",
     "download_report",
     "download_report_collection",
-    "export_accounts",
-    "export_journal_entries",
-    "export_orders",
-    "export_persons",
     "get_account",
     "get_fiscal_period",
     "get_journal_entry",

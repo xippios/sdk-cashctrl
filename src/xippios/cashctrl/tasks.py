@@ -19,7 +19,8 @@ records matching the request (sdk-core ADR-0034); it is never computed from ``le
 The persons a task returns are projections without the personal identifiers ``ssn`` and
 ``iban`` (sdk-core ADR-0017, ``_person`` and its neighbours), the locations and an order's
 document projections without their bank account numbers (``_location``,
-``_order_document``), and the rows of a
+``_order_document``), an order's detail without its ``hash`` (``_order_detail``), and
+the rows of a
 report, kept as upstream sends them, lose every key named ``ssn`` or ending in ``iban``
 in any letter case and at any depth (``_report``); the endpoint wrappers' read
 models keep them. ``get_report_data`` refuses payroll and people reports by their type,
@@ -38,19 +39,22 @@ the parameters as the first request sent them; when
 every page is collected it leaves out ``limit``, the page size, so the same arguments
 collect the same records again.
 
-The file tasks, ``download_order_document``, the list exports ``export_*`` and the
-report files ``download_report``, ``download_report_collection`` and
-``download_annual_report``, are named in ``BULK_TASKS``: Python only, no tool and no
-route (sdk-core ADR-0040, decision 4). Each streams one file to the path its caller gives and
-returns core's ``Downloaded``; ``meta.endpoint`` is the file's operation
+The file tasks, ``download_order_document``, the list files
+``download_journal_entries``, ``download_accounts``, ``download_persons`` and
+``download_orders`` (upstream's exports of the lists, each beside the ``list_`` task
+whose filters it takes) and the report files ``download_report``,
+``download_report_collection`` and ``download_annual_report``, are named in
+``BULK_TASKS``: Python only, no tool and no route (sdk-core ADR-0040, decision 4). Each
+streams one file to ``dest``, the path its caller gives by keyword, the package's own
+argument, and returns core's ``Downloaded``; ``meta.endpoint`` is the file's operation
 (``journal/list.csv``) and ``meta.retrieved_at`` the time the file was complete. A
 refusal sent as HTTP 200 is raised, never written (``api/_download.py``). A file may
 hold what a projection leaves out, at its caller's request or as upstream renders it:
-the person export names ``PERSON_COLUMNS`` unless its caller names columns, ``ssn`` or
-``iban`` among them deliberately, and an invoice's QR-bill may carry the organisation's
-IBAN or QR-IBAN (sdk-core ADR-0017). A report file is refused by ``get_report_data``'s type rule
-on the tree read right before its download (``_tree_now``), but no key is dropped from a
-file.
+the person file holds the columns its caller names, ``ssn`` or ``iban`` among them
+deliberately, or else upstream's default columns, which name neither, and an invoice's
+QR-bill may carry the organisation's IBAN or QR-IBAN (sdk-core ADR-0017). A report file is
+refused by ``get_report_data``'s type rule on the tree read right before its download
+(``_tree_now``), but no key is dropped from a file.
 """
 
 import os
@@ -76,7 +80,7 @@ from xippios.core import (
 )
 
 from xippios.cashctrl import api
-from xippios.cashctrl._client import SOURCE, TENANTS, client_for
+from xippios.cashctrl._client import NOTHING_SENT, SOURCE, TENANTS, client_for, refused
 from xippios.cashctrl.models import (
     Account,
     AccountCategory,
@@ -101,6 +105,7 @@ from xippios.cashctrl.models import (
     OrderBookEntry,
     OrderCategory,
     OrderDetail,
+    OrderDetailProjection,
     OrderDocument,
     OrderDocumentProjection,
     OrderType,
@@ -118,14 +123,14 @@ from xippios.cashctrl.models import (
 )
 
 __all__ = [
+    "download_accounts",
     "download_annual_report",
+    "download_journal_entries",
     "download_order_document",
+    "download_orders",
+    "download_persons",
     "download_report",
     "download_report_collection",
-    "export_accounts",
-    "export_journal_entries",
-    "export_orders",
-    "export_persons",
     "get_account",
     "get_fiscal_period",
     "get_journal_entry",
@@ -157,18 +162,18 @@ __all__ = [
 # decision 4).
 BULK_TASKS: frozenset[str] = frozenset(
     {
+        "download_accounts",
         "download_annual_report",
+        "download_journal_entries",
         "download_order_document",
+        "download_orders",
+        "download_persons",
         "download_report",
         "download_report_collection",
-        "export_accounts",
-        "export_journal_entries",
-        "export_orders",
-        "export_persons",
     }
 )
-"""The file tasks: each streams a file to the path its caller gives and returns
-``Result[Downloaded]``, so no tool or route serves it (sdk-core ADR-0040, decision 4)."""
+"""The file tasks: each streams a file to ``dest``, the path its caller gives by keyword, and
+returns ``Result[Downloaded]``, so no tool or route serves it (sdk-core ADR-0040, decision 4)."""
 
 MCP_CAPS: Mapping[str, ResultCap] = {
     "get_report_data": ResultCap(
@@ -226,12 +231,20 @@ PERSON_COLUMNS: tuple[str, ...] = tuple(
     field.validation_alias if isinstance(field.validation_alias, str) else name
     for name, field in PersonProjection.model_fields.items()
 )
-"""The ``columns`` ``export_persons`` sends when its caller names none.
+"""``PersonProjection``'s fields, for a caller who wants them as the person file's columns.
 
-``PersonProjection``'s fields, what ``list_persons`` returns, under upstream's names
-(``firstName``), in its order: the personal identifiers ``ssn`` and ``iban`` stay out of
-the file unless the caller names them (sdk-core ADR-0017).
+What ``list_persons`` returns, under upstream's names (``firstName``), in its order,
+without the personal identifiers ``ssn`` and ``iban`` (sdk-core ADR-0017):
+``download_persons(org, "csv", dest=path, columns=list(PERSON_COLUMNS))``.
 """
+# THE ONE PLACE IN THE CODE where the person file's default is decided
+# (https://github.com/xippios/sdk-cashctrl/issues/135, part 2): one request,
+# ``person/list.csv`` with ``limit=1`` and no ``columns``, read upstream's default header:
+# it names neither ``ssn`` nor a field ending in ``iban`` (``docs/upstream/OBSERVED.md``),
+# so the default is upstream's own: ``None``, no ``columns`` sent. Had it named one, the
+# package's list, ``PERSON_COLUMNS``, would have stayed.
+PERSON_DEFAULT_COLUMNS: tuple[str, ...] | None = None
+"""The ``columns`` ``download_persons`` sends when its caller names none; ``None`` sends none."""
 PAGE_SIZE = 100
 """Records per request when a list task collects every page.
 
@@ -334,18 +347,18 @@ def _problem(where: str, detail: ErrorDetails) -> str:
     return f"{where}.{field}: {detail['msg']}"
 
 
-def _filter_item(where: str, item: object) -> tuple[Filter | None, list[str]]:
-    """One ``filter`` item as a ``Filter``, or the problems that keep it from being one."""
+def _filter_item(where: str, item: object) -> Filter:
+    """One ``filter`` item as a ``Filter``; refused, by its first error, when it is none."""
     if isinstance(item, Mapping):
         try:
             item = Filter.model_validate(dict(item))
         except ValidationError as error:
-            return None, [_problem(where, detail) for detail in error.errors()]
+            raise refused(_problem(where, error.errors()[0])) from None
     if not isinstance(item, Filter):
-        return None, [f"{where} must be a Filter or a mapping, not {type(item).__name__}"]
+        raise refused(f"{where} must be a Filter or a mapping, not {type(item).__name__}")
     if item.comparison not in COMPARISONS:  # a Filter built without validation
-        return None, [_wrong_comparison(where, item.comparison)]
-    return item, []
+        raise refused(_wrong_comparison(where, item.comparison))
+    return item
 
 
 def _whole(value: object) -> TypeGuard[int]:
@@ -353,20 +366,18 @@ def _whole(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _column_problems(columns: object) -> list[str]:
-    """What keeps ``columns`` from being the comma-separated names an export takes."""
+def _check_columns(columns: object) -> None:
+    """Refuse ``columns`` unless it is the list of names, comma-free, that a list file takes."""
     if isinstance(columns, str | bytes) or not isinstance(columns, Sequence):
-        return [
+        raise refused(
             'columns takes a list of column names such as ["nr", "name"], '
             f"not {type(columns).__name__}"
-        ]
+        )
     if not columns:
-        return ["columns names at least one column; leave it out for the default columns"]
-    return [
-        f"columns[{index}] must be a column name without a comma, not {name!r}"
-        for index, name in enumerate(columns)
-        if not isinstance(name, str) or not name.strip() or "," in name
-    ]
+        raise refused("columns names at least one column; leave it out for the default columns")
+    for index, name in enumerate(columns):
+        if not isinstance(name, str) or not name.strip() or "," in name:
+            raise refused(f"columns[{index}] must be a column name without a comma, not {name!r}")
 
 
 def _check_list_arguments(
@@ -385,52 +396,44 @@ def _check_list_arguments(
     ``filter`` item is a ``Filter``, or a mapping that validates as one, whose
     ``comparison`` is ``eq``, ``like``, ``gt`` or ``lt``, the text parameters
     (``query``, ``sort``) are strings, and a documented value set (``choices``, such as
-    the orders' ``type`` or an export's ``format``) holds the value given. Paging is the
-    task's own: ``start`` is a whole number of at least 0, ``limit`` one of at least 1.
-    An export's ``columns`` is a list of at least one name, none holding the comma that
-    separates them. Column names in ``sort``, ``Filter.field`` and ``columns`` are not
-    documented, so they are not checked. The parameter types say
+    the orders' ``type`` or a list file's ``format``) holds the value given. Paging is
+    the task's own: ``start`` is a whole number of at least 0, ``limit`` one of at least
+    1. A list file's ``columns`` is a list of at least one name, none holding the comma
+    that separates them. Column names in ``sort``, ``Filter.field`` and ``columns`` are
+    not documented, so they are not checked. The parameter types say
     the same, so the MCP and HTTP adapters refuse a wrong value before the task runs;
-    this check is for Python callers, whose arguments nothing else validates.
+    this check is for Python callers, whose arguments nothing else validates. The checks
+    run in that order, and the first problem found is refused.
 
     Returns:
         ``filter`` as ``Filter`` objects, or ``None`` when it was not given.
 
     Raises:
-        InvalidRequestError: Naming every problem found.
+        InvalidRequestError: Naming the first problem found; nothing was sent.
     """
-    problems: list[str] = []
     if dir is not None and dir not in DIRECTIONS:
-        problems.append(f"dir must be ASC or DESC, not {dir!r}")
+        raise refused(f"dir must be ASC or DESC, not {dir!r}")
     filters: list[Filter] | None = None
     if filter is not None:
         if isinstance(filter, str | bytes) or not isinstance(filter, Sequence):
-            problems.append(
+            raise refused(
                 "filter takes a list of filters such as "
                 '[{"comparison": "eq", "field": "number", "value": "1020"}], '
                 f"not {type(filter).__name__}"
             )
-        else:
-            filters = []
-            for index, item in enumerate(filter):
-                parsed, found = _filter_item(f"filter[{index}]", item)
-                problems += found
-                if parsed is not None:
-                    filters.append(parsed)
+        filters = [_filter_item(f"filter[{index}]", item) for index, item in enumerate(filter)]
     for name, value in (texts or {}).items():
         if value is not None and not isinstance(value, str):
-            problems.append(f"{name} must be a string, not {type(value).__name__}")
+            raise refused(f"{name} must be a string, not {type(value).__name__}")
     for name, (value, allowed) in (choices or {}).items():
         if value is not None and value not in allowed:
-            problems.append(f"{name} must be {' or '.join(allowed)}, not {value!r}")
+            raise refused(f"{name} must be {' or '.join(allowed)}, not {value!r}")
     if not _whole(start) or start < 0:
-        problems.append(f"start must be a whole number of at least 0, not {start!r}")
+        raise refused(f"start must be a whole number of at least 0, not {start!r}")
     if limit is not None and (not _whole(limit) or limit < 1):
-        problems.append(f"limit must be a whole number of at least 1, not {limit!r}")
+        raise refused(f"limit must be a whole number of at least 1, not {limit!r}")
     if columns is not None:
-        problems += _column_problems(columns)
-    if problems:
-        raise InvalidRequestError("; ".join(problems), source=SOURCE)
+        _check_columns(columns)
     return filters
 
 
@@ -454,7 +457,8 @@ async def list_fiscal_periods_async(org: str) -> Result[list[FiscalPeriod]]:
 async def get_fiscal_period_async(org: str, id: int | None = None) -> Result[FiscalPeriod]:
     """Read one fiscal period of an organisation by its id, or the current one.
 
-    The period comes back with its ``name``, ``start`` and ``end`` as dates, whether it is
+    The period comes back with its ``name``, ``start`` and ``end`` with the time upstream
+    sends (``2026-12-31T23:59:59``, no zone), whether it is
     closed and the months still open or closed (``open_month_ids``, ``closed_month_ids``,
     as ``YYYY-MM``). Without ``id`` upstream reads the API user's current fiscal period,
     the one the lists and balances answer for when given no ``fiscal_period_id``: its
@@ -935,7 +939,12 @@ async def list_orders_async(
     return Result(data=orders, meta=meta)
 
 
-async def get_order_async(org: str, id: int) -> Result[OrderDetail]:
+def _order_detail(order: OrderDetail) -> OrderDetailProjection:
+    """An order's read without ``hash``, which the recorder treats as a token."""
+    return OrderDetailProjection.project(order)
+
+
+async def get_order_async(org: str, id: int) -> Result[OrderDetailProjection]:
     """Read one order by its id, with its items.
 
     The order comes back as upstream's read returns it: ``type``, ``nr``, ``date``,
@@ -943,15 +952,17 @@ async def get_order_async(org: str, id: int) -> Result[OrderDetail]:
     amounts ``sub_total``, ``tax``, ``total``, ``total_to_pay`` and ``paid``, and its
     ``items``, each with ``name``, ``description``, ``quantity``, ``unit_price``,
     ``account_id``, ``tax_code``, and the computed ``net_total``, ``tax_total`` and
-    ``gross_total``. An id no order has raises ``NotFoundError``; that answer is assumed
-    for orders, observed for accounts, currencies and the journal.
+    ``gross_total``. The read's undocumented ``hash``, which may be the token of a public
+    link to the order's document, is left out. An id no order has raises
+    ``NotFoundError``; that answer is assumed for orders, observed for accounts,
+    currencies and the journal.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The order's ``id`` as ``list_orders`` gives it, e.g. ``3``; not its number
             ``nr``.
     """
-    order = await api.order_read(org, id)
+    order = _order_detail(await api.order_read(org, id))
     return Result(data=order, meta=_meta(org, "order/read.json", {"id": id}))
 
 
@@ -986,7 +997,7 @@ async def get_order_document_async(org: str, id: int) -> Result[OrderDocumentPro
     return Result(data=document, meta=_meta(org, "order/document/read.json", {"id": id}))
 
 
-async def list_order_book_entries_async(org: str, order_id: int) -> Result[list[OrderBookEntry]]:
+async def list_order_book_entries_async(org: str, id: int) -> Result[list[OrderBookEntry]]:
     """List the book entries of one order: the journal entries it booked, and its payments.
 
     These are "all the journal book entries that are created for an order (e.g. an
@@ -1002,11 +1013,11 @@ async def list_order_book_entries_async(org: str, order_id: int) -> Result[list[
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
-        order_id: The order's ``id`` as ``list_orders`` gives it, e.g. ``5``; not its
-            number ``nr``. Sent as upstream's ``id``.
+        id: The order's ``id`` as ``list_orders`` gives it, e.g. ``5``; not its number
+            ``nr``.
     """
-    response = await api.order_bookentry_list(org, order_id)
-    meta = _meta(org, "order/bookentry/list.json", {"id": order_id}, total=response.total)
+    response = await api.order_bookentry_list(org, id)
+    meta = _meta(org, "order/bookentry/list.json", {"id": id}, total=response.total)
     return Result(data=response.data, meta=meta)
 
 
@@ -1135,8 +1146,7 @@ async def list_custom_fields_async(org: str, type: CustomFieldType) -> Result[li
             ``SALARY_STATEMENT``, e.g. ``PERSON``.
     """
     if type not in CUSTOM_FIELD_TYPES:
-        allowed = ", ".join(CUSTOM_FIELD_TYPES)
-        raise InvalidRequestError(f"type must be one of {allowed}, not {type!r}", source=SOURCE)
+        raise refused(f"type must be one of {', '.join(CUSTOM_FIELD_TYPES)}, not {type!r}")
     response = await api.customfield_list(org, type)
     sent = api.customfield_list_params(type)
     meta = _meta(org, "customfield/list.json", sent, total=response.total)
@@ -1356,20 +1366,21 @@ def _keep_report_types(
     return types
 
 
-async def _report_type(org: str, element_id: int) -> str | None:
-    """The type of report element ``element_id``, from the organisation's report tree.
+async def _report_type(org: str, element_id: int) -> tuple[str | None, bool]:
+    """The type of report element ``element_id``, and whether this call read the tree for it.
 
     The tree is read once per organisation and kept (``_REPORT_TYPES``). An element the
     kept tree does not list reads the tree again, once, since a report may have been
-    added since; ``None`` when it still does not list it, or lists it without a type.
+    added since; the type is ``None`` when it still does not list it, or lists it without
+    a type. Whether the tree was read tells a refusal what this call sent.
     """
     client = client_for(org)
     with _REPORT_TYPES_LOCK:
         kept = _REPORT_TYPES.get(client)
     if kept is not None and element_id in kept:
-        return kept[element_id]
+        return kept[element_id], False
     tree = await api.report_tree(org)
-    return _keep_report_types(client, tree.data).get(element_id)
+    return _keep_report_types(client, tree.data).get(element_id), True
 
 
 async def _tree_now(org: str) -> list[ReportTreeNode]:
@@ -1430,20 +1441,29 @@ def _report(report: ReportData) -> ReportData:
     )
 
 
-def _report_problems(
+def _check_report_ids(ids: Mapping[str, object]) -> None:
+    """Refuse a report's id that is no whole number, before anything is sent.
+
+    ``ids`` names the report, ``{"element_id": 1}`` or ``{"collection_id": 1}``.
+    """
+    for name, value in ids.items():
+        if not _whole(value):
+            raise refused(f"{name} must be a whole number, not {value!r}")
+
+
+def _check_report_period(
     *,
-    ids: Mapping[str, object],
     fiscal_period: object,
     start_date: object,
     end_date: object,
     language: object,
     sort: object,
-) -> list[str]:
-    """What a report's call gets wrong, or upstream would answer for another period.
+) -> None:
+    """Refuse what a report's call gets wrong, or what upstream would answer for another period.
 
-    A bad argument is refused before anything is sent (sdk-core ADR-0007).
+    A bad argument is refused before anything is sent (sdk-core ADR-0007), the first one
+    found.
 
-    ``ids`` names the report, ``{"element_id": 1}`` or ``{"collection_id": 1}``.
     ``docs/upstream/report.md``, "Read JSON data": ``fiscalPeriod`` "overrides the
     ``startDate`` and ``endDate`` parameter, as these are derived from the fiscal
     period", so upstream would silently ignore dates given with it: the two forms are
@@ -1455,39 +1475,31 @@ def _report_problems(
     so neither is checked. The same parameters, and so the same checks, are those of a
     report's PDF and Excel file.
     """
-    problems = [
-        f"{name} must be a whole number, not {value!r}"
-        for name, value in ids.items()
-        if not _whole(value)
-    ]
     if fiscal_period is not None and not _whole(fiscal_period):
-        problems.append(f"fiscal_period must be a whole number, not {fiscal_period!r}")
+        raise refused(f"fiscal_period must be a whole number, not {fiscal_period!r}")
     for name, value in (("start_date", start_date), ("end_date", end_date)):
         if value is not None and (not isinstance(value, date) or isinstance(value, datetime)):
-            problems.append(f"{name} must be a date (YYYY-MM-DD), not {type(value).__name__}")
+            raise refused(f"{name} must be a date (YYYY-MM-DD), not {type(value).__name__}")
     for name, value in (("language", language), ("sort", sort)):
         if value is not None and not isinstance(value, str):
-            problems.append(f"{name} must be a string, not {type(value).__name__}")
+            raise refused(f"{name} must be a string, not {type(value).__name__}")
     if fiscal_period is not None and (start_date is not None or end_date is not None):
-        problems.append(
+        raise refused(
             "give fiscal_period or start_date and end_date, not both: upstream derives "
             "the dates from the fiscal period and would ignore the ones given"
         )
-    return problems
 
 
-def _refuse(problems: Sequence[str]) -> None:
-    """Raise ``InvalidRequestError`` naming every problem, when there is one."""
-    if problems:
-        raise InvalidRequestError("; ".join(problems), source=SOURCE)
+def _report_refusal(subject: str, task: str, *, tree_read: bool = True) -> InvalidRequestError:
+    """The refusal of a payroll or people report by ``task``: ``subject``, then the rule.
 
-
-def _report_refusal(subject: str, task: str) -> InvalidRequestError:
-    """The refusal of a payroll or people report by ``task``: ``subject``, then the rule."""
-    return InvalidRequestError(
-        f"{subject}: {task} refuses {_REFUSED_REPORT_RULE} (personal data, sdk-core ADR-0017)",
-        source=SOURCE,
-    )
+    The report tree is the one request such a refusal may follow: a report file reads it
+    right before, ``get_report_data`` once per organisation, so a refusal by the tree kept
+    from an earlier call (``tree_read`` false) sent nothing.
+    """
+    rule = f"{task} refuses {_REFUSED_REPORT_RULE} (personal data, sdk-core ADR-0017)"
+    sent = "Only the report tree was read." if tree_read else NOTHING_SENT
+    return refused(f"{subject}: {rule}", sent=sent)
 
 
 async def get_report_data_async(
@@ -1547,15 +1559,13 @@ async def get_report_data_async(
         sort: The column to sort the rows by, a ``dataIndex`` of
             ``properties.columns``, e.g. ``text``.
     """
-    _refuse(
-        _report_problems(
-            ids={"element_id": element_id},
-            fiscal_period=fiscal_period,
-            start_date=start_date,
-            end_date=end_date,
-            language=language,
-            sort=sort,
-        )
+    _check_report_ids({"element_id": element_id})
+    _check_report_period(
+        fiscal_period=fiscal_period,
+        start_date=start_date,
+        end_date=end_date,
+        language=language,
+        sort=sort,
     )
     arguments: dict[str, Any] = {
         "end_date": end_date,
@@ -1564,10 +1574,10 @@ async def get_report_data_async(
         "sort": sort,
         "start_date": start_date,
     }
-    report_type = await _report_type(org, element_id)
+    report_type, tree_read = await _report_type(org, element_id)
     if report_type is not None and _is_refused_report_type(report_type):
         subject = f"report element {element_id} is of type {report_type}"
-        raise _report_refusal(subject, "get_report_data")
+        raise _report_refusal(subject, "get_report_data", tree_read=tree_read)
     sent = api.report_element_data_params(element_id, **arguments)
     report = _report(await api.report_element_data(org, element_id, **arguments))
     meta = _meta(org, "report/element/data.json", sent, total=report.total)
@@ -1623,19 +1633,14 @@ async def _export(
 def _check_ids(ids: object) -> None:
     """``ids`` is a list of at least one order id, each a whole number."""
     if isinstance(ids, str | bytes) or not isinstance(ids, Sequence) or not ids:
-        raise InvalidRequestError(
-            f"ids takes a list of at least one order id such as [3], not {ids!r}",
-            source=SOURCE,
-        )
-    wrong = [item for item in ids if not _whole(item)]
-    if wrong:
-        raise InvalidRequestError(
-            f"ids must be whole numbers, the orders' ids, not {wrong[0]!r}", source=SOURCE
-        )
+        raise refused(f"ids takes a list of at least one order id such as [3], not {ids!r}")
+    for item in ids:
+        if not _whole(item):
+            raise refused(f"ids must be whole numbers, the orders' ids, not {item!r}")
 
 
 async def download_order_document_async(
-    org: str, ids: list[int], dest: str | os.PathLike[str]
+    org: str, ids: list[int], *, dest: str | os.PathLike[str]
 ) -> Result[Downloaded]:
     """Download the documents of one or more orders as one PDF file at ``dest``.
 
@@ -1666,11 +1671,11 @@ async def download_order_document_async(
     return Result(data=downloaded, meta=meta)
 
 
-async def export_journal_entries_async(
+async def download_journal_entries_async(
     org: str,
     format: ExportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     fiscal_period_id: int | None = None,
     account_id: int | None = None,
     associate_id: int | None = None,
@@ -1691,7 +1696,7 @@ async def export_journal_entries_async(
     start: int | None = None,
     limit: int | None = None,
 ) -> Result[Downloaded]:
-    """Export an organisation's journal entries to a CSV, Excel or PDF file at ``dest``.
+    """Download an organisation's journal entries as a CSV, Excel or PDF file at ``dest``.
 
     The file is upstream's export of the journal list (``journal/list.csv``,
     ``list.xlsx`` or ``list.pdf``) with the filters of ``list_journal_entries``, in the
@@ -1775,11 +1780,11 @@ async def export_journal_entries_async(
     )
 
 
-async def export_accounts_async(
+async def download_accounts_async(
     org: str,
     format: ExportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     query: str | None = None,
     filter: list[Filter] | None = None,
     columns: list[str] | None = None,
@@ -1791,7 +1796,7 @@ async def export_accounts_async(
     sort: str | None = None,
     dir: Direction | None = None,
 ) -> Result[Downloaded]:
-    """Export an organisation's accounts, its chart of accounts, to a CSV, Excel or PDF file.
+    """Download an organisation's accounts, its chart of accounts, as a CSV, Excel or PDF.
 
     The file is upstream's export of the account list (``account/list.csv``,
     ``list.xlsx`` or ``list.pdf``) with the filters of ``list_accounts``, balances
@@ -1849,11 +1854,11 @@ async def export_accounts_async(
     )
 
 
-async def export_persons_async(
+async def download_persons_async(
     org: str,
     format: ExportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     query: str | None = None,
     filter: list[Filter] | None = None,
     columns: list[str] | None = None,
@@ -1873,12 +1878,16 @@ async def export_persons_async(
     start: int | None = None,
     limit: int | None = None,
 ) -> Result[Downloaded]:
-    """Export an organisation's persons, its customers, vendors and contacts, to a file.
+    """Download an organisation's persons, its customers, vendors and contacts, as a file.
 
     The file is upstream's export of the people list (``person/list.csv``, ``list.xlsx``
-    or ``list.pdf``) with the filters of ``list_persons``. Without ``columns`` it holds
-    the fields ``list_persons`` returns, named one by one (``PERSON_COLUMNS``), so the
-    personal identifiers ``ssn`` and ``iban`` stay out of it. A column ``columns`` names
+    or ``list.pdf``) with the filters of ``list_persons``. Without ``columns`` it sends
+    none, and the file holds upstream's default columns: ten, named by labels in the
+    organisation's language (``No.``, ``Name``, ``E-Mail Work``, ``Phone Work``,
+    ``Address``, ``Zip``, ``Location``, ``Country``, ``Attachments``, ``Notes``), none
+    of them ``ssn`` or an ``iban``, as ``docs/upstream/OBSERVED.md`` records. For the
+    fields ``list_persons`` returns, pass ``columns=list(PERSON_COLUMNS)``. A column
+    ``columns`` names
     is exported as named: a caller that names ``ssn``, ``iban`` or ``qrIban`` fetches
     them deliberately and gets them in the file (sdk-core ADR-0017). The file is streamed to
     ``dest``, the path the caller gives, and is never read into a result, kept in memory
@@ -1902,7 +1911,7 @@ async def export_persons_async(
         filter: Filters that must all match, as ``list_persons`` takes them, e.g.
             ``[{"comparison": "eq", "field": "city", "value": "Basel"}]``.
         columns: The columns of the file, field names of ``person/list.json`` as upstream
-            spells them, e.g. ``["nr", "name", "city"]``; the fields of ``list_persons``
+            spells them, e.g. ``["nr", "name", "city"]``; upstream's default columns
             when left out, without ``ssn`` and ``iban``.
         category_id: Only the persons of one person category, e.g. ``1``.
         only_active: ``True`` to leave out inactive persons.
@@ -1948,17 +1957,17 @@ async def export_persons_async(
         start=start,
         limit=limit,
     )
-    query_sent = api.export_params(params, PERSON_COLUMNS if columns is None else columns)
+    query_sent = api.export_params(params, PERSON_DEFAULT_COLUMNS if columns is None else columns)
     return await _export(
         org, format, dest, query_sent, path="person/list", wrappers=_PERSON_EXPORTS
     )
 
 
-async def export_orders_async(
+async def download_orders_async(
     org: str,
     format: ExportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     type: OrderType | None = None,
     fiscal_period_id: int | None = None,
     query: str | None = None,
@@ -1977,7 +1986,7 @@ async def export_orders_async(
     start: int | None = None,
     limit: int | None = None,
 ) -> Result[Downloaded]:
-    """Export an organisation's orders (offers, invoices and the like) to a file.
+    """Download an organisation's orders (offers, invoices and the like) as a file.
 
     The file is upstream's export of the order list (``order/list.csv``, ``list.xlsx``
     or ``list.pdf``) with the filters of ``list_orders``, in the columns upstream
@@ -2075,25 +2084,24 @@ _SYSTEM_UNMARKED = (
 def _check_report_file(
     format: object, ids: Mapping[str, object], period: Mapping[str, Any]
 ) -> None:
-    """Refuse a report file's ``format``, its ``ids`` and its ``period`` before anything is sent.
+    """Refuse a report file's ``ids``, its ``format`` or its ``period`` before anything is sent.
 
-    ``period`` holds ``fiscal_period``, ``start_date``, ``end_date``, ``language`` and
-    ``sort``, the parameters ``get_report_data`` takes and checks.
+    In the order of the arguments, the first problem found. ``period`` holds
+    ``fiscal_period``, ``start_date``, ``end_date``, ``language`` and ``sort``, the
+    parameters ``get_report_data`` takes and checks.
     """
-    problems = (
-        []
-        if format in REPORT_FORMATS
-        else [f"format must be {' or '.join(REPORT_FORMATS)}, not {format!r}"]
-    )
-    _refuse(problems + _report_problems(ids=ids, **period))
+    _check_report_ids(ids)
+    if format not in REPORT_FORMATS:
+        raise refused(f"format must be {' or '.join(REPORT_FORMATS)}, not {format!r}")
+    _check_report_period(**period)
 
 
 async def download_report_async(
     org: str,
     element_id: int,
     format: ReportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     fiscal_period: int | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -2156,8 +2164,8 @@ async def download_report_collection_async(
     org: str,
     collection_id: int,
     format: ReportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     fiscal_period: int | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -2208,9 +2216,9 @@ async def download_report_collection_async(
     api.check_dest(dest)
     tree = await _tree_now(org)
     held = [node for node in _collections(tree) if node.collection_id == collection_id]
-    refused = _refused_types(held)
-    if refused:
-        subject = f"report collection {collection_id} holds reports of the types {refused}"
+    kinds = _refused_types(held)
+    if kinds:
+        subject = f"report collection {collection_id} holds reports of the types {kinds}"
         raise _report_refusal(subject, "download_report_collection")
     downloaded = await _COLLECTION_FILES[format](org, collection_id, dest, **period)
     sent = api.report_collection_params(collection_id, **period)
@@ -2220,7 +2228,7 @@ async def download_report_collection_async(
 
 
 async def download_annual_report_async(
-    org: str, dest: str | os.PathLike[str], *, fiscal_period_id: int | None = None
+    org: str, *, dest: str | os.PathLike[str], fiscal_period_id: int | None = None
 ) -> Result[Downloaded]:
     """Download the annual report of a fiscal period as a PDF file at ``dest``.
 
@@ -2249,16 +2257,16 @@ async def download_annual_report_async(
             e.g. ``2``; the API user's current period when left out.
     """
     if fiscal_period_id is not None and not _whole(fiscal_period_id):
-        _refuse([f"fiscal_period_id must be a whole number, not {fiscal_period_id!r}"])
+        raise refused(f"fiscal_period_id must be a whole number, not {fiscal_period_id!r}")
     api.check_dest(dest)
     system = [node for node in _collections(await _tree_now(org)) if node.is_system]
     if not system:
         raise _report_refusal(_SYSTEM_UNMARKED, "download_annual_report")
-    refused = _refused_types(system)
-    if refused:
+    kinds = _refused_types(system)
+    if kinds:
         names = ", ".join(str(node.collection_id) for node in system)
         subject = f"the annual report, report collection {names}, holds reports of the types"
-        raise _report_refusal(f"{subject} {refused}", "download_annual_report")
+        raise _report_refusal(f"{subject} {kinds}", "download_annual_report")
     downloaded = await api.report_collection_download_annualreport(
         org, dest, fiscal_period_id=fiscal_period_id
     )
@@ -2306,10 +2314,10 @@ list_locations = sync(list_locations_async)
 get_report_tree = sync(get_report_tree_async)
 get_report_data = sync(get_report_data_async)
 download_order_document = sync(download_order_document_async)
-export_journal_entries = sync(export_journal_entries_async)
-export_accounts = sync(export_accounts_async)
-export_persons = sync(export_persons_async)
-export_orders = sync(export_orders_async)
+download_journal_entries = sync(download_journal_entries_async)
+download_accounts = sync(download_accounts_async)
+download_persons = sync(download_persons_async)
+download_orders = sync(download_orders_async)
 download_report = sync(download_report_async)
 download_report_collection = sync(download_report_collection_async)
 download_annual_report = sync(download_annual_report_async)

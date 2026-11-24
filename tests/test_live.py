@@ -62,10 +62,10 @@ order alone.
 The file tasks tested live write into pytest's temporary directory and assert the file's
 size and content type only: one seeded sales order's document, its id from the list, the
 journal of 2025 as CSV, at most five entries (``limit=5``), and the persons as CSV with
-the columns ``export_persons`` names by default, which upstream must accept. The two
+the columns ``download_persons`` names by default, which upstream must accept. The two
 exports stand for the four, which share one download path, as
-https://github.com/xippios/sdk-cashctrl/pull/20 decided: ``export_accounts`` and
-``export_orders`` have no live test of their own.
+https://github.com/xippios/sdk-cashctrl/pull/20 decided: ``download_accounts`` and
+``download_orders`` have no live test of their own.
 One more asks for the document of an order that does not exist and expects
 ``NotFoundError`` and no file: CashCtrl answers it with HTTP 404, which ``classify``
 maps to ``NotFoundError`` on a ``read.pdf`` by ``ids``
@@ -117,7 +117,7 @@ from xippios.cashctrl.models import (
     JournalEntryDetailProjection,
     OrderBookEntry,
     OrderCategory,
-    OrderDetail,
+    OrderDetailProjection,
     PaymentType,
     PersonDetail,
     PersonDetailProjection,
@@ -319,33 +319,34 @@ async def test_download_order_document(
     orders = await tasks.list_orders_async(demo_org, type="SALES", fiscal_period_id=period, limit=1)
     (listed,) = orders.data
     dest = tmp_path / "order.pdf"
-    result = await tasks.download_order_document_async(demo_org, [listed.id], dest)
+    result = await tasks.download_order_document_async(demo_org, [listed.id], dest=dest)
     assert result.data.path == dest
     assert result.data.bytes == dest.stat().st_size > 0
     assert media_type(result.data.content_type) == "application/pdf"
     assert result.meta.request == {"org": demo_org, "ids": str(listed.id)}
 
 
-async def test_export_journal_entries(
+async def test_download_journal_entries(
     demo_org: str, fiscal_periods: dict[str, int], tmp_path: Path
 ) -> None:
     period = fiscal_periods["2025"]
     dest = tmp_path / "journal.csv"
-    result = await tasks.export_journal_entries_async(
-        demo_org, "csv", dest, fiscal_period_id=period, limit=5
+    result = await tasks.download_journal_entries_async(
+        demo_org, "csv", dest=dest, fiscal_period_id=period, limit=5
     )
     assert result.data.bytes == dest.stat().st_size > 0
     assert media_type(result.data.content_type) == "text/csv"
     assert result.meta.endpoint == "journal/list.csv"
 
 
-async def test_export_persons_with_the_default_columns(demo_org: str, tmp_path: Path) -> None:
-    # No columns: the task names PersonProjection's 74 fields, which upstream must accept.
+async def test_download_persons_with_the_default_columns(demo_org: str, tmp_path: Path) -> None:
+    # No columns: the task sends PERSON_DEFAULT_COLUMNS, which upstream must accept.
     dest = tmp_path / "persons.csv"
-    result = await tasks.export_persons_async(demo_org, "csv", dest)
+    result = await tasks.download_persons_async(demo_org, "csv", dest=dest)
     assert result.data.bytes == dest.stat().st_size > 0
     assert media_type(result.data.content_type) == "text/csv"
-    assert result.meta.request["columns"] == ",".join(tasks.PERSON_COLUMNS)
+    default = tasks.PERSON_DEFAULT_COLUMNS
+    assert result.meta.request.get("columns") == (None if default is None else ",".join(default))
 
 
 async def test_the_document_of_an_unknown_order_is_not_found(demo_org: str, tmp_path: Path) -> None:
@@ -353,7 +354,7 @@ async def test_the_document_of_an_unknown_order_is_not_found(demo_org: str, tmp_
     # anything else fails here: a file written, another error, or no error.
     dest = tmp_path / "missing.pdf"
     with pytest.raises(NotFoundError) as info:
-        await tasks.download_order_document_async(demo_org, [999999], dest)
+        await tasks.download_order_document_async(demo_org, [999999], dest=dest)
     assert str(info.value).endswith("(GET /api/v1/order/document/read.pdf)")
     assert list(tmp_path.iterdir()) == [], "no file, no temporary file"
 
@@ -384,7 +385,7 @@ async def test_download_report(
     for format, media in REPORT_MEDIA.items():
         dest = tmp_path / f"balance.{format}"
         result = await tasks.download_report_async(
-            demo_org, balance.element_id, format, dest, fiscal_period=fiscal_periods["2025"]
+            demo_org, balance.element_id, format, dest=dest, fiscal_period=fiscal_periods["2025"]
         )
         assert result.data.bytes == dest.stat().st_size > 0
         assert media_type(result.data.content_type) == media
@@ -399,7 +400,7 @@ async def test_download_report_collection(
     for format, media in REPORT_MEDIA.items():
         dest = tmp_path / f"collection.{format}"
         result = await tasks.download_report_collection_async(
-            demo_org, system.collection_id, format, dest, fiscal_period=fiscal_periods["2025"]
+            demo_org, system.collection_id, format, dest=dest, fiscal_period=fiscal_periods["2025"]
         )
         assert result.data.bytes == dest.stat().st_size > 0
         assert media_type(result.data.content_type) == media
@@ -411,7 +412,7 @@ async def test_download_annual_report(
 ) -> None:
     dest = tmp_path / "annual.pdf"
     period = fiscal_periods["2025"]
-    result = await tasks.download_annual_report_async(demo_org, dest, fiscal_period_id=period)
+    result = await tasks.download_annual_report_async(demo_org, dest=dest, fiscal_period_id=period)
     assert result.data.bytes == dest.stat().st_size > 0
     assert media_type(result.data.content_type) == "application/pdf"
     assert result.meta.request == {"org": demo_org, "fiscalPeriodId": period}
@@ -427,7 +428,7 @@ async def test_the_payroll_collection_is_refused_before_its_download(
     ]
     with pytest.raises(InvalidRequestError, match=r"holds reports of the types .*SALARY_LIST"):
         await tasks.download_report_collection_async(
-            demo_org, payroll.collection_id or 0, "pdf", tmp_path / "payroll.pdf"
+            demo_org, payroll.collection_id or 0, "pdf", dest=tmp_path / "payroll.pdf"
         )
     assert list(tmp_path.iterdir()) == []
 
@@ -435,7 +436,7 @@ async def test_the_payroll_collection_is_refused_before_its_download(
 async def test_an_unknown_report_is_not_found(demo_org: str, tmp_path: Path) -> None:
     # Not in the tree, so asked of upstream as given: HTTP 404 (docs/upstream/OBSERVED.md).
     with pytest.raises(NotFoundError) as info:
-        await tasks.download_report_async(demo_org, 999999, "pdf", tmp_path / "missing.pdf")
+        await tasks.download_report_async(demo_org, 999999, "pdf", dest=tmp_path / "missing.pdf")
     assert str(info.value).endswith("(GET /api/v1/report/element/download.pdf)")
     assert list(tmp_path.iterdir()) == []
 
@@ -597,7 +598,7 @@ def person_values(person: PersonDetailProjection) -> dict[str, Any]:
     return values
 
 
-def order_values(order: OrderDetail) -> dict[str, Any]:
+def order_values(order: OrderDetailProjection) -> dict[str, Any]:
     """The parameters ``update_order`` derives from ``order``, its items included."""
     values, _ = tasks_write._order_values(order)
     return values
@@ -609,7 +610,7 @@ def book_entry_values(entry: OrderBookEntry) -> dict[str, Any]:
     return values
 
 
-def item_values(order: OrderDetail) -> list[dict[str, Any]]:
+def item_values(order: OrderDetailProjection) -> list[dict[str, Any]]:
     """The order's items as stored, every field but the id upstream gives them anew."""
     return [item.model_dump(exclude={"id"}) for item in order.items]
 
@@ -804,7 +805,7 @@ async def test_order_create_update_delete(
         planned = await tasks_write.update_order_async(demo_org, created, description=description)
         assert isinstance(planned.data, WritePreview)
         before = planned.data.before
-        assert isinstance(before, OrderDetail)
+        assert isinstance(before, OrderDetailProjection)
         assert [item.name for item in before.items] == [f"{MARK} item", f"{MARK} second item"]
         updated = await tasks_write.update_order_async(
             demo_org, created, description=description, confirm=True

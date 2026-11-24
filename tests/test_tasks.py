@@ -14,7 +14,7 @@ import httpx
 import pytest
 import respx
 from pydantic import BeforeValidator
-from xippios.core import InvalidRequestError, NotFoundError, UpstreamModel, sync
+from xippios.core import InvalidRequestError, NotFoundError, Result, UpstreamModel, sync
 from xippios.core.mcp import build_server, tool_name
 from xippios.core.testing import (
     Fixture,
@@ -164,8 +164,15 @@ def test_list_fiscal_periods_replays_the_recorded_list(
     assert result.meta.total == 2, "upstream's total (sdk-core ADR-0034)"
     assert [(period.id, period.name) for period in result.data] == [(2, "2025"), (1, "2026")]
     first = result.data[0]  # created by the seeder, as the API user
-    assert (first.start, first.end) == (date(2025, 1, 1), date(2025, 12, 31)), "date part kept"
-    assert first.salary_end == date(2025, 12, 31)
+    assert (first.start, first.end) == (
+        datetime(2025, 1, 1),
+        datetime(2025, 12, 31, 23, 59, 59),
+    ), "upstream sends a time of day, kept: naive, as upstream names no zone"
+    assert first.end.tzinfo is None
+    assert (first.salary_start, first.salary_end) == (
+        datetime(2025, 1, 1),
+        datetime(2025, 12, 31, 23, 59, 59),
+    )
     assert first.last_entry_date == datetime(2025, 12, 15), "undocumented: kept a datetime"
     assert first.created == datetime(2026, 10, 23, 10, 29, 24)
     assert first.created_by == "API:REDACTED", "the recorder scrubs the API user tag"
@@ -187,12 +194,36 @@ async def test_list_fiscal_periods_as_a_tool(
     assert "isCurrent" not in last, "never upstream's spelling: the adapters dump by alias"
     assert (last["id"], last["start"], last["end"], last["is_current"]) == (
         1,
-        "2026-01-01",
-        "2026-12-31",
+        "2026-01-01T00:00:00",
+        "2026-12-31T23:59:59",
         False,
-    )
+    ), "the time upstream sends, with no zone and no text beside it"
     assert payload["meta"]["endpoint"] == "fiscalperiod/list.json"
     assert payload["meta"]["request"] == {"org": DEMO}
+
+
+TIMED_FIELDS: dict[type[UpstreamModel], tuple[str, ...]] = {
+    models.FiscalPeriod: ("start", "end", "salary_start", "salary_end"),
+    models.TaxRate: ("date_valid",),
+    models.JournalEntry: ("date_added", "start_date", "end_date"),
+    models.PersonDetail: ("date_birth",),
+    models.Order: ("date", "start_date", "end_date"),
+    models.OrderBookEntry: ("date",),
+}
+"""The thirteen fields upstream sends as ``2025-12-31 23:59:59.0``, a date with a time of day."""
+
+
+@pytest.mark.parametrize("model", TIMED_FIELDS, ids=lambda model: model.__name__)
+def test_a_date_upstream_sends_with_its_time_is_read_whole(model: type[UpstreamModel]) -> None:
+    """A naive ``datetime``, the type that keeps everything upstream sends, with no text beside.
+
+    https://github.com/xippios/sdk-usda-esr/issues/60, part 3: upstream names no zone.
+    """
+    for name in TIMED_FIELDS[model]:
+        annotation = model.model_fields[name].annotation
+        assert annotation in (datetime, datetime | None), (name, annotation)
+        assert model.model_fields[name].metadata == [], f"{name}: no validator cuts it"
+    assert "UpstreamDate" not in dir(models)
 
 
 # fiscalperiod/read.json, recorded on 2026-11-17: by id (2026), without an id (the current
@@ -211,7 +242,7 @@ def test_get_fiscal_period_replays_the_recorded_read(
     assert (result.meta.tenant, result.meta.total) == (DEMO, None)
     period = result.data
     assert (period.id, period.name, period.created_by) == (FP2026, "2026", "SYSTEM")
-    assert (period.start, period.end) == (date(2026, 1, 1), date(2026, 12, 31))
+    assert (period.start, period.end) == (datetime(2026, 1, 1), datetime(2026, 12, 31, 23, 59, 59))
     assert (period.is_closed, period.closed_month_ids, len(period.open_month_ids)) == (
         False,
         [],
@@ -250,7 +281,7 @@ def test_get_fiscal_period_raises_not_found_for_an_unknown_id(
 async def test_get_fiscal_period_as_a_tool(replay_fixture: ReplayFixture) -> None:
     replay_fixture("fiscalperiod_read", "by_id", match_params=["id"])
     payload = await mcp_call(server, "cashctrl_get_fiscal_period", {"org": DEMO, "id": FP2026})
-    assert (payload["data"]["id"], payload["data"]["start"]) == (FP2026, "2026-01-01")
+    assert (payload["data"]["id"], payload["data"]["start"]) == (FP2026, "2026-01-01T00:00:00")
     assert payload["meta"]["request"] == {"org": DEMO, "id": FP2026}
 
 
@@ -484,23 +515,50 @@ def test_the_filter_encoding_keeps_lists_and_text() -> None:
 def test_list_accounts_refuses_what_upstream_would_ignore(
     respx_mock: respx.MockRouter, arguments: dict[str, typing.Any], message: str
 ) -> None:
-    with pytest.raises(InvalidRequestError, match=re.escape(message)):
+    with pytest.raises(InvalidRequestError, match=re.escape(message)) as info:
         tasks.list_accounts(DEMO, **arguments)
+    assert str(info.value).endswith(". Nothing was sent.")
     assert not respx_mock.calls
 
 
-def test_every_problem_is_named_at_once(respx_mock: respx.MockRouter) -> None:
+def test_a_refusal_names_the_first_problem_and_that_nothing_was_sent(
+    respx_mock: respx.MockRouter,
+) -> None:
+    """One refusal names the first problem it finds and stops (sdk-core ADR-0061, decision 7).
+
+    Three problems: ``dir``, and two in the second filter. The refusal names ``dir``
+    alone; given a good ``dir``, it names the filter's first, its ``comparison``.
+    """
     bad = {"comparison": "EQ", "field": "number", "value": 1000}
     arguments: dict[str, typing.Any] = {"dir": "down", "filter": [NUMBER_1020, bad]}
     with pytest.raises(InvalidRequestError) as info:
         tasks.list_accounts(DEMO, **arguments)
+    assert str(info.value) == "dir must be ASC or DESC, not 'down'. Nothing was sent."
+    arguments["dir"] = "DESC"
+    with pytest.raises(InvalidRequestError) as info:
+        tasks.list_accounts(DEMO, **arguments)
     assert str(info.value) == (
-        "dir must be ASC or DESC, not 'down'; "
-        "filter[1].comparison must be one of eq, like, gt, lt, not 'EQ'; "
-        "filter[1].value.str: Input should be a valid string; "
-        "filter[1].value.list[str]: Input should be a valid list"
+        "filter[1].comparison must be one of eq, like, gt, lt, not 'EQ'. Nothing was sent."
     )
     assert not respx_mock.calls
+
+
+SOURCE_FILES = sorted((Path(__file__).resolve().parent.parent / "src").rglob("*.py"))
+"""Every module of the package, for the checks that read its code."""
+
+
+def test_no_module_gathers_problems_and_every_refusal_is_built_once() -> None:
+    """No list of every problem stands in the code, and one function words a refusal.
+
+    ``_client.refused`` builds each of the package's own refusals of the call as given,
+    so each ends with what was sent (https://github.com/xippios/sdk-cashctrl/issues/138).
+    """
+    built = {}
+    for path in SOURCE_FILES:
+        code = path.read_text(encoding="utf-8")
+        assert not re.search(r"\bproblems\s*(?::|=|\.append|\+=)", code), path.name
+        built[path.name] = len(re.findall(r"\bInvalidRequestError\(", code))
+    assert {name: count for name, count in built.items() if count} == {"_client.py": 1}
 
 
 @pytest.mark.anyio
@@ -715,11 +773,11 @@ def test_list_journal_entries_with_limit_is_one_page_and_upstreams_total(
     assert (len(result.data), result.meta.total) == (5, 38), "upstream's count, not len(data)"
     # Newest first (upstream's default: dateAdded, DESC).
     assert [entry.date_added for entry in result.data] == [
-        date(2026, 9, 30),
-        date(2026, 9, 22),
-        date(2026, 9, 15),
-        date(2026, 9, 4),
-        date(2026, 8, 31),
+        datetime(2026, 9, 30),
+        datetime(2026, 9, 22),
+        datetime(2026, 9, 15),
+        datetime(2026, 9, 4),
+        datetime(2026, 8, 31),
     ]
     fees, collective, invoice = result.data[:3]
     assert (fees.id, fees.type, fees.amount) == (48, "MANUAL", Decimal(45))
@@ -861,7 +919,7 @@ async def test_list_journal_entries_as_a_tool(
         "limit": 5,
     }
     first = payload["data"][0]
-    assert (first["id"], first["date_added"], first["amount"]) == (48, "2026-09-30", 45)
+    assert (first["id"], first["date_added"], first["amount"]) == (48, "2026-09-30T00:00:00", 45)
     refused = {"org": DEMO, "limit": "many"}
     assert await mcp_call_text(server, "cashctrl_list_journal_entries", refused) == (
         "error: InvalidRequestError: limit: "
@@ -886,7 +944,7 @@ def test_get_journal_entry_replays_a_taxed_entry(
     assert result.meta.request == {"org": DEMO, "id": 11}
     assert result.meta.total is None, "a read reports no count"
     entry = result.data
-    assert (entry.id, entry.type, entry.date_added) == (11, "MANUAL", date(2025, 10, 20))
+    assert (entry.id, entry.type, entry.date_added) == (11, "MANUAL", datetime(2025, 10, 20))
     assert (entry.title, entry.reference, entry.nr) == (
         "Rechnung RE-2025-003 Beispiel Logistik AG",
         "RE-2025-003",
@@ -1241,7 +1299,7 @@ def test_list_orders_replays_the_sales_orders(
         "RE-2026-101",
     ], "upstream's default order: by date, DESC"
     order = result.data[0]
-    assert (order.type, order.book_type, order.date) == ("SALES", "DEBIT", date(2026, 9, 7))
+    assert (order.type, order.book_type, order.date) == ("SALES", "DEBIT", datetime(2026, 9, 7))
     assert (order.associate_id, order.associate_name) == (12, "Probe Gastro GmbH")
     # 20 x 45.00 (docs/demo-org.md), the unit price read as gross, VAT 8.1 % included.
     assert (order.sub_total, order.tax, order.total) == (
@@ -1295,7 +1353,7 @@ def test_get_order_replays_the_recorded_read(
     assert (order.nr, order.type, order.date, order.associate_name) == (
         "RE-2026-103",
         "SALES",
-        date(2026, 6, 8),
+        datetime(2026, 6, 8),
         "Demo Bau AG",
     )
     assert (order.sub_total, order.tax, order.total, order.total_to_pay) == (
@@ -1305,7 +1363,8 @@ def test_get_order_replays_the_recorded_read(
         Decimal(7750),
     )
     assert (order.tax_type, order.due, order.is_book) == ("AGREED", False, False)
-    assert order.hash == "REDACTED", "scrubbed by the recorder, by its field name"
+    assert isinstance(order, models.OrderDetailProjection)
+    assert "hash" not in result.model_dump(mode="json")["data"], "withheld"
     assert all(isinstance(item, OrderItem) for item in order.items)
     assert [(i.name, i.quantity, i.unit_price, i.gross_total) for i in order.items] == [
         ("Bürostuhl Ergo", Decimal(10), Decimal(420), Decimal(4200)),
@@ -1335,6 +1394,30 @@ async def test_get_order_as_a_tool(
     payload = await mcp_call(server, "cashctrl_get_order", {"org": DEMO, "id": 3})
     assert [item["quantity"] for item in payload["data"]["items"]] == [10, 5, 1]
     assert payload["data"]["total"] == 7750
+    assert "hash" not in payload["data"]
+
+
+def test_the_order_projection_leaves_out_the_hash_and_nothing_else() -> None:
+    """``hash``, which the recorder writes as a token, reaches no caller.
+
+    Undocumented, it may be the token of a public link to the order's document; the
+    interview's third answer withholds it (https://github.com/xippios/sdk-cashctrl/issues/135).
+    """
+    read = set(models.OrderDetail.model_fields)
+    assert read - set(models.OrderDetailProjection.model_fields) == {"hash"}
+    assert set(models.OrderDetailProjection.model_fields) < read
+    returned = typing.get_type_hints(tasks.get_order_async)["return"]
+    assert returned == Result[models.OrderDetailProjection]
+
+
+@pytest.mark.anyio
+async def test_the_order_wrapper_stays_faithful(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    replay_fixture("order_read", "by_id")
+    order = await api.order_read(DEMO, 3)
+    assert isinstance(order, models.OrderDetail)
+    assert order.hash == "REDACTED", "scrubbed by the recorder, by its field name"
 
 
 # The document of the seeded invoice RE-2026-103 (order 3), recorded on 2026-10-29: its
@@ -1446,7 +1529,10 @@ def test_list_order_book_entries_replays_a_booked_purchase_order(
     replay_fixture: Callable[[str, str], respx.Route], fixtures_dir: Path
 ) -> None:
     route = replay_fixture("order_bookentry_list", "booked")
-    result = tasks.list_order_book_entries(DEMO, BOOKED_ORDER)
+    result = tasks.list_order_book_entries(DEMO, id=BOOKED_ORDER)
+    assert list(inspect.signature(tasks.list_order_book_entries).parameters) == ["org", "id"], (
+        "upstream's own name, with no alias (https://github.com/xippios/sdk-cashctrl/issues/135)"
+    )
     assert sent_query(route) == {"id": "5"}, "the order's id, under upstream's name"
     assert sent_query(route) == recorded_query(
         recorded(fixtures_dir, "order_bookentry_list", "booked")
@@ -1455,7 +1541,11 @@ def test_list_order_book_entries_replays_a_booked_purchase_order(
     assert result.meta.request == {"org": DEMO, "id": BOOKED_ORDER}
     assert (result.meta.tenant, result.meta.total, len(result.data)) == (DEMO, 1, 1)
     (entry,) = result.data
-    assert (entry.order_id, entry.type, entry.date) == (BOOKED_ORDER, "GENERATED", date(2026, 2, 2))
+    assert (entry.order_id, entry.type, entry.date) == (
+        BOOKED_ORDER,
+        "GENERATED",
+        datetime(2026, 2, 2),
+    )
     assert (entry.amount, entry.net_amount, entry.tax_amount) == (
         Decimal(4650),
         Decimal("4301.57"),
@@ -1478,7 +1568,7 @@ async def test_list_order_book_entries_as_a_tool(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     replay_fixture("order_bookentry_list", "booked")
-    arguments = {"org": DEMO, "order_id": BOOKED_ORDER}
+    arguments = {"org": DEMO, "id": BOOKED_ORDER}
     payload = await mcp_call(server, "cashctrl_list_order_book_entries", arguments)
     assert payload["meta"]["total"] == 1
     assert payload["meta"]["request"] == {"org": DEMO, "id": BOOKED_ORDER}
@@ -1497,7 +1587,7 @@ def test_list_order_book_entries_as_a_route(
     app.include_router(router)
     replay_fixture("order_bookentry_list", "booked")
     response = TestClient(app).get(
-        "/cashctrl/list_order_book_entries", params={"org": DEMO, "order_id": BOOKED_ORDER}
+        "/cashctrl/list_order_book_entries", params={"org": DEMO, "id": BOOKED_ORDER}
     )
     assert response.status_code == 200, response.text
     assert response.json()["meta"]["total"] == 1
@@ -2338,7 +2428,7 @@ REFUSED_TYPES = (
 RULE = (
     "payroll and people reports, every type that starts with SALARY_ or contains PERSON, "
     "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART "
-    "(personal data, sdk-core ADR-0017)"
+    "(personal data, sdk-core ADR-0017). Only the report tree was read."
 )
 REFUSED_DOCUMENTED_TYPES = {
     "SALARY_BOOK_ENTRIES",
@@ -2414,6 +2504,130 @@ def test_the_rule_over_every_documented_report_type() -> None:
     assert "WITHHOLDING_TAX_RATES" not in refused, "rates, no persons"
 
 
+# The value sets written by hand in models.py, held against the snapshot in docs/upstream/
+# (https://github.com/xippios/sdk-cashctrl/issues/139): a value added to a Literal, or one
+# taken from upstream's table, fails here.
+
+UPSTREAM_DOCS = Path(__file__).resolve().parents[1] / "docs" / "upstream"
+PARAMETER_NAME = re.compile(
+    r"<tr><th><code>(?P<html>[^<]+)</code></th>|^\| `(?P<markdown>[^`]+)` \|"
+)
+POSSIBLE_VALUES = re.compile(r"Possible values: (?P<values>[^<|]*?)\.?\s*(?:</td>|\|)")
+DOCUMENTED_PATH = re.compile(r"^(?:GET|POST) /api/v1/(\S+)$")
+
+
+def documented_value_sets() -> dict[str, list[tuple[str, tuple[str, ...]]]]:
+    """Every operation's parameters with "Possible values", by its path: name and values.
+
+    An operation is a ``### `` section of a page, its parameter tables before its
+    ``#### Endpoint``, ``GET /api/v1/<path>``. A parameter of a nested table, the items of
+    a JSON array such as an address, is named under its parent: ``addresses.type``.
+    """
+    operations: dict[str, list[tuple[str, tuple[str, ...]]]] = {}
+    for page in sorted(UPSTREAM_DOCS.glob("*.md")):
+        rows: list[tuple[str, tuple[str, ...]]] = []
+        depth, parent, last = 0, "", ""
+        for line in page.read_text(encoding="utf-8").splitlines():
+            if line.startswith("### "):
+                rows, depth = [], 0
+            depth += line.count("<table>")
+            if line.count("<table>") and depth == 2:
+                parent = last
+            if (row := PARAMETER_NAME.search(line)) is not None:
+                name = row["html"] or row["markdown"]
+                if depth <= 1:
+                    last = name
+                qualified = f"{parent}.{name}" if depth >= 2 else name
+                if (listed := POSSIBLE_VALUES.search(line)) is not None:
+                    values = tuple(value.strip() for value in listed["values"].split(","))
+                    rows.append((qualified, values))
+            depth -= line.count("</table>")
+            if (path := DOCUMENTED_PATH.match(line)) is not None:
+                operations[path[1]] = rows
+    return operations
+
+
+PERSON_WRITES = ("person/create.json", "person/update.json")
+ORDER_WRITES = ("order/create.json", "order/update.json")
+RECURRING = ("journal/create.json", "journal/update.json", *ORDER_WRITES)
+VALUE_SETS: dict[str, tuple[object, str, tuple[str, ...]]] = {
+    "Comparison": (
+        models.Comparison,
+        "filter.comparison",
+        ("account/list.json", "journal/list.json"),
+    ),
+    "Direction": (models.Direction, "dir", ("account/list.json", "history/list.json")),
+    "OrderType": (models.OrderType, "type", ("order/list.json", "order/category/list.json")),
+    "CustomFieldType": (models.CustomFieldType, "type", ("customfield/list.json",)),
+    "NotifyType": (models.NotifyType, "notifyType", RECURRING),
+    "Recurrence": (models.Recurrence, "recurrence", RECURRING),
+    "Language": (models.Language, "language", (*PERSON_WRITES, *ORDER_WRITES)),
+    "Color": (models.Color, "color", PERSON_WRITES),
+    "AddressType": (models.AddressType, "addresses.type", PERSON_WRITES),
+    "Canton": (models.Canton, "addresses.canton", PERSON_WRITES),
+    "ContactType": (models.ContactType, "contacts.type", PERSON_WRITES),
+    "BankAccountType": (models.BankAccountType, "bankAccounts.type", PERSON_WRITES),
+    "OrderItemType": (models.OrderItemType, "items.type", ORDER_WRITES),
+    "PaymentType": (models.PaymentType, "type", ("order/payment/create.json",)),
+}
+"""Each ``Literal`` of a documented parameter: the parameter and the operations that take it."""
+
+
+@pytest.mark.parametrize(("literal", "parameter", "paths"), VALUE_SETS.values(), ids=VALUE_SETS)
+def test_a_value_set_written_by_hand_is_upstreams(
+    literal: object, parameter: str, paths: tuple[str, ...]
+) -> None:
+    """Each operation lists the parameter's "Possible values" as the set holds them."""
+    operations = documented_value_sets()
+    for path in paths:
+        listed = [values for name, values in operations[path] if name == parameter]
+        assert listed, f"{path} documents no {parameter} with its possible values"
+        assert listed == [typing.get_args(literal)] * len(listed), (path, parameter, listed)
+
+
+LEFT_OUT_FORMATS = {"list": frozenset({"vcf"}), "report": frozenset({"csv", "xml"})}
+"""Formats upstream documents that no file task takes yet, the persons' vCard and a report's
+CSV and XML: the release after builds them (https://github.com/xippios/sdk-cashctrl/issues/75)."""
+
+
+def test_the_file_formats_are_the_extensions_upstream_documents() -> None:
+    """``ExportFormat`` and ``ReportFormat`` are the extensions of the paths, not a table.
+
+    A list file is a format that the four lists document, a report file one that the
+    element's and the collection's downloads document, less the formats left out above.
+    """
+    operations = documented_value_sets()
+
+    def extensions(stem: str) -> set[str]:
+        return {path.rsplit(".", 1)[1] for path in operations if path.rsplit(".", 1)[0] == stem}
+
+    lists = [extensions(f"{module}/list") - {"json"} for module in EXPORT_MODULES]
+    export_formats = set(typing.get_args(models.ExportFormat))
+    assert set.union(*lists) - LEFT_OUT_FORMATS["list"] == export_formats
+    assert set.intersection(*lists) == export_formats, "each of the four lists documents each"
+    reports = [extensions(f"report/{kind}/download") for kind in ("element", "collection")]
+    assert set.union(*reports) - LEFT_OUT_FORMATS["report"] == set(
+        typing.get_args(models.ReportFormat)
+    )
+    assert set.union(*reports) >= LEFT_OUT_FORMATS["report"], "each left out is documented"
+
+
+EXPORT_MODULES = ("journal", "account", "person", "order")
+"""The lists whose file ``download_<list>`` writes, the four modules upstream exports."""
+
+
+def test_every_value_set_written_by_hand_is_held() -> None:
+    """The sixteen ``Literal`` sets of ``models.py``: fourteen tables and two file formats."""
+    held = {*VALUE_SETS, "ExportFormat", "ReportFormat"}
+    written = {
+        name
+        for name in models.__all__
+        if typing.get_origin(getattr(models, name)) is typing.Literal
+    }
+    assert written == held
+    assert len(held) == 16
+
+
 @pytest.mark.parametrize(
     ("element_id", "report_type"), REFUSED_ELEMENTS.items(), ids=map(str, REFUSED_ELEMENTS)
 )
@@ -2429,6 +2643,30 @@ def test_a_payroll_or_people_report_is_refused_before_any_data_request(
         tasks.get_report_data(DEMO, element_id, fiscal_period=FP2025)
     assert refused.value.message == (
         f"report element {element_id} is of type {report_type}: get_report_data refuses {RULE}"
+    )
+    assert (tree.call_count, data.call_count) == (1, 0)
+
+
+def test_a_refusal_by_the_kept_tree_says_that_nothing_was_sent(
+    replay_fixture: Callable[[str, str], respx.Route],
+) -> None:
+    """The tree is read once per organisation and kept: a second call reads no tree.
+
+    The first refusal follows this call's read of the tree, the second the kept tree's, so
+    it says that nothing was sent (conventions §5).
+    """
+    tree = replay_fixture("report_tree", "default")
+    data = replay_fixture("report_element_data", "balance_fp2025")
+    element_id, report_type = next(iter(REFUSED_ELEMENTS.items()))
+    subject = f"report element {element_id} is of type {report_type}: get_report_data refuses"
+    with pytest.raises(InvalidRequestError) as first:
+        tasks.get_report_data(DEMO, element_id, fiscal_period=FP2025)
+    assert first.value.message == f"{subject} {RULE}"
+    assert first.value.message.endswith(". Only the report tree was read.")
+    with pytest.raises(InvalidRequestError) as second:
+        tasks.get_report_data(DEMO, element_id, fiscal_period=FP2025)
+    assert second.value.message == f"{subject} {RULE}".replace(
+        "Only the report tree was read.", "Nothing was sent."
     )
     assert (tree.call_count, data.call_count) == (1, 0)
 
@@ -2898,7 +3136,7 @@ TOOL_CASES: dict[str, tuple[str, dict[str, typing.Any]]] = {
         "report_element_data/balance_fp2025",
         {"element_id": 1, "fiscal_period": FP2025},
     ),
-    "cashctrl_list_order_book_entries": ("order_bookentry_list/booked", {"order_id": 5}),
+    "cashctrl_list_order_book_entries": ("order_bookentry_list/booked", {"id": 5}),
     "cashctrl_list_history": ("history_list/order", {"order_id": 5}),
 }
 UNOBSERVED: frozenset[str] = frozenset()

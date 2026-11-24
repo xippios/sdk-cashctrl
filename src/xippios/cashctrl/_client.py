@@ -36,6 +36,7 @@ from xippios.core import (
     BasicKeyAuth,
     ClientConfig,
     EnvVar,
+    InvalidRequestError,
     NotFoundError,
     RateLimit,
     Tenants,
@@ -60,6 +61,8 @@ __all__ = [
     "check_subdomain",
     "classify",
     "client_for",
+    "nothing_written",
+    "refused",
 ]
 
 SOURCE = "cashctrl"
@@ -93,6 +96,36 @@ an hour of refusals.
 """
 DEMO = "demo"
 """The reserved organisation, declared by its own two variables and never listed."""
+
+
+NOTHING_SENT = "Nothing was sent."
+"""What a refusal before any request says was sent (conventions §5)."""
+
+
+def refused(problem: str, *, sent: str = NOTHING_SENT) -> InvalidRequestError:
+    """The package's refusal of a call as given: its first problem, then what was sent.
+
+    A refusal names the first problem it finds and stops, and says what was sent
+    (conventions §5; sdk-core ADR-0061, decision 7): ``Nothing was sent.`` before any
+    request; once a write has read the record it would change, ``nothing_written``; once
+    a report's task has read the report tree, that only the tree was read. Every refusal
+    the package makes itself is built here.
+
+    Args:
+        problem: The first problem, naming the argument or the record, without a final
+            stop, e.g. ``"dir must be ASC or DESC, not 'up'"``.
+        sent: The sentence that says what was sent, e.g. ``nothing_written("order")``.
+    """
+    return InvalidRequestError(f"{problem}. {sent}", source=SOURCE)
+
+
+def nothing_written(record: str) -> str:
+    """What a write's refusal after its read says was sent: ``record`` read, nothing written.
+
+    Example: ``nothing_written("order")`` is ``"The order was read and nothing was written."``.
+    """
+    return f"The {record} was read and nothing was written."
+
 
 _SUBDOMAIN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 
@@ -379,7 +412,9 @@ def _build(org: str) -> AsyncClient:
 
     Called by ``TENANTS.client_for`` on first use and whenever one of the organisation's
     variables changed. The subdomain is read and checked here (``ConfigError`` when it is
-    missing or malformed); the key is read on the first request.
+    missing or malformed); the key is read on the first request. It takes no response
+    cache (``cache=None``), since every answer is one organisation's private books, which
+    no answer kept for a later call should hold.
     """
     subdomain = TENANTS.field(org, "SUBDOMAIN")
     config = ClientConfig(
