@@ -13,6 +13,7 @@ core's at sdk-core ``cb8ecdf`` (``tests/testing/test_scrub.py``, ``test_fixtures
 
 import base64
 import importlib.util
+import inspect
 import json
 import re
 from collections.abc import Callable
@@ -255,35 +256,59 @@ def test_a_response_without_the_key_needs_no_key_review(
     assert "CASHCTRL_DEMO_API_KEY" not in capsys.readouterr().out
 
 
-def test_a_key_percent_encoded_with_its_percent_behind_a_json_escape_is_never_written(
+NESTED_KEY = "".join(f"\\u0025{ord(char):02X}" for char in KEY)
+"""The invented key percent-encoded, each ``%`` behind a JSON escape, as a JSON body writes it."""
+
+
+def test_core_scrub_alone_takes_a_percent_encoding_behind_a_json_escape(
+    recorder: ModuleType,
+) -> None:
+    """Core's ``Scrub`` replaces the form itself (sdk-core ADR-0066, decision 11), no step given.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
+    request = httpx.Request("GET", f"https://{HOST}/api/v1/account/list.json")
+    response = httpx.Response(
+        200,
+        content=f'{{"total": 1, "data": [{{"name": "{NESTED_KEY}"}}]}}'.encode(),
+        request=request,
+    )
+    fixture = fixture_from_response(response, scrub=recorder.scrub(KEY))
+    assert fixture.response.body is not None
+    assert json.loads(fixture.response.body) == {"total": 1, "data": [{"name": REDACTED}]}
+
+
+def test_the_step_keeps_no_search_of_a_secret_of_its_own(recorder: ModuleType) -> None:
+    """Core's verify searches every place decoded to the end, so the step takes no secrets."""
+    assert "secrets" not in inspect.signature(recorder.TenantScrub).parameters
+
+
+def test_a_key_percent_encoded_behind_a_json_escape_is_written_redacted_for_review(
     recorder: ModuleType,
     tmp_path: Path,
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A form core's ``Scrub`` does not take: the key percent-encoded, each ``%`` as ``\\u0025``.
-
-    The recorder's verify decodes a JSON body and searches its strings for the key's forms,
-    so the exchange is refused before anything is written.
+    """The form behind two encodings is core's to replace: written ``REDACTED``, for review.
 
     NOT RECORDED: a list composed in the shape the account lists were recorded, carrying the
     invented key in that form, which no scrubbed recording keeps (conventions §10, kind 2).
     """
-    nested = "".join(f"\\u0025{ord(char):02X}" for char in KEY)
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(
         return_value=httpx.Response(
-            200, content=f'{{"total": 1, "data": [{{"name": "{nested}"}}]}}'.encode()
+            200, content=f'{{"total": 1, "data": [{{"name": "{NESTED_KEY}"}}]}}'.encode()
         )
     )
-    assert recorder.main(["account/list.json", "nested_key"]) == 1
-    assert not (tmp_path / "tests" / "fixtures" / "account_list").exists()
+    assert recorder.main(["account/list.json", "nested_key"]) == 1, "review"
+    text = (tmp_path / "tests" / "fixtures" / "account_list" / "nested_key.json").read_text()
+    assert KEY[1:] not in text
+    assert json.loads(json.loads(text)["response"]["body"]) == {
+        "total": 1,
+        "data": [{"name": REDACTED}],
+    }
     out = capsys.readouterr().out
-    assert out == (
-        "not written tests/fixtures/account_list/nested_key.json: the scrubbed fixture "
-        "still holds the value of CASHCTRL_DEMO_API_KEY or its basic-auth token in the "
-        "response body; nothing is written\n"
-    )
+    assert "the response carried the value of CASHCTRL_DEMO_API_KEY" in out
     assert KEY[1:] not in out
 
 
