@@ -255,9 +255,9 @@ where it changes them.
 The sections above and the commands under `.claude/commands/` hold here as well. The
 subsections below hold cashctrl's own lines, and where a command and this section differ,
 this section is cashctrl's form. `/refresh-upstream`'s capture script declares its snapshot
-on core's frame (sdk-core ADR-0046), its own code the hooks `split` and `note`: run it as its
-docstring says, `--out` and `--check` the frame's options, in the project's environment,
-whose dev group pins the converter its hooks use. The package sends to its organisations'
+on core's frame (sdk-core ADR-0062), its own code the hooks `split` and `note`: run it as its
+docstring says, `--check` the frame's one option, in the project's environment, whose dev
+group pins the converter its hooks use. The package sends to its organisations'
 hosts alone, each organisation's requests paced by the limiter of its own client, since
 core's `Tenants.client_for` keeps a client per tenant (Rate limit above).
 
