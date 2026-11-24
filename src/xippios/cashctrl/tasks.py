@@ -269,8 +269,8 @@ PERSON_DEFAULT_COLUMNS: tuple[str, ...] | None = None
 PAGE_SIZE = 100
 """Records per request when a list task collects every page.
 
-Upstream's documented default for ``limit`` on the journal, person and order lists
-("Defaults to 100."), sent explicitly so the page size never depends on that default.
+Upstream's documented default for ``limit`` on the journal, person, order and history
+lists ("Defaults to 100."), sent explicitly so the page size never depends on that default.
 """
 WALK_PAGES = 24
 """The most pages, so the most requests, that one call of a walking list task sends.
