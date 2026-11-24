@@ -2504,6 +2504,130 @@ def test_the_rule_over_every_documented_report_type() -> None:
     assert "WITHHOLDING_TAX_RATES" not in refused, "rates, no persons"
 
 
+# The value sets written by hand in models.py, held against the snapshot in docs/upstream/
+# (https://github.com/xippios/sdk-cashctrl/issues/139): a value added to a Literal, or one
+# taken from upstream's table, fails here.
+
+UPSTREAM_DOCS = Path(__file__).resolve().parents[1] / "docs" / "upstream"
+PARAMETER_NAME = re.compile(
+    r"<tr><th><code>(?P<html>[^<]+)</code></th>|^\| `(?P<markdown>[^`]+)` \|"
+)
+POSSIBLE_VALUES = re.compile(r"Possible values: (?P<values>[^<|]*?)\.?\s*(?:</td>|\|)")
+DOCUMENTED_PATH = re.compile(r"^(?:GET|POST) /api/v1/(\S+)$")
+
+
+def documented_value_sets() -> dict[str, list[tuple[str, tuple[str, ...]]]]:
+    """Every operation's parameters with "Possible values", by its path: name and values.
+
+    An operation is a ``### `` section of a page, its parameter tables before its
+    ``#### Endpoint``, ``GET /api/v1/<path>``. A parameter of a nested table, the items of
+    a JSON array such as an address, is named under its parent: ``addresses.type``.
+    """
+    operations: dict[str, list[tuple[str, tuple[str, ...]]]] = {}
+    for page in sorted(UPSTREAM_DOCS.glob("*.md")):
+        rows: list[tuple[str, tuple[str, ...]]] = []
+        depth, parent, last = 0, "", ""
+        for line in page.read_text(encoding="utf-8").splitlines():
+            if line.startswith("### "):
+                rows, depth = [], 0
+            depth += line.count("<table>")
+            if line.count("<table>") and depth == 2:
+                parent = last
+            if (row := PARAMETER_NAME.search(line)) is not None:
+                name = row["html"] or row["markdown"]
+                if depth <= 1:
+                    last = name
+                qualified = f"{parent}.{name}" if depth >= 2 else name
+                if (listed := POSSIBLE_VALUES.search(line)) is not None:
+                    values = tuple(value.strip() for value in listed["values"].split(","))
+                    rows.append((qualified, values))
+            depth -= line.count("</table>")
+            if (path := DOCUMENTED_PATH.match(line)) is not None:
+                operations[path[1]] = rows
+    return operations
+
+
+PERSON_WRITES = ("person/create.json", "person/update.json")
+ORDER_WRITES = ("order/create.json", "order/update.json")
+RECURRING = ("journal/create.json", "journal/update.json", *ORDER_WRITES)
+VALUE_SETS: dict[str, tuple[object, str, tuple[str, ...]]] = {
+    "Comparison": (
+        models.Comparison,
+        "filter.comparison",
+        ("account/list.json", "journal/list.json"),
+    ),
+    "Direction": (models.Direction, "dir", ("account/list.json", "history/list.json")),
+    "OrderType": (models.OrderType, "type", ("order/list.json", "order/category/list.json")),
+    "CustomFieldType": (models.CustomFieldType, "type", ("customfield/list.json",)),
+    "NotifyType": (models.NotifyType, "notifyType", RECURRING),
+    "Recurrence": (models.Recurrence, "recurrence", RECURRING),
+    "Language": (models.Language, "language", (*PERSON_WRITES, *ORDER_WRITES)),
+    "Color": (models.Color, "color", PERSON_WRITES),
+    "AddressType": (models.AddressType, "addresses.type", PERSON_WRITES),
+    "Canton": (models.Canton, "addresses.canton", PERSON_WRITES),
+    "ContactType": (models.ContactType, "contacts.type", PERSON_WRITES),
+    "BankAccountType": (models.BankAccountType, "bankAccounts.type", PERSON_WRITES),
+    "OrderItemType": (models.OrderItemType, "items.type", ORDER_WRITES),
+    "PaymentType": (models.PaymentType, "type", ("order/payment/create.json",)),
+}
+"""Each ``Literal`` of a documented parameter: the parameter and the operations that take it."""
+
+
+@pytest.mark.parametrize(("literal", "parameter", "paths"), VALUE_SETS.values(), ids=VALUE_SETS)
+def test_a_value_set_written_by_hand_is_upstreams(
+    literal: object, parameter: str, paths: tuple[str, ...]
+) -> None:
+    """Each operation lists the parameter's "Possible values" as the set holds them."""
+    operations = documented_value_sets()
+    for path in paths:
+        listed = [values for name, values in operations[path] if name == parameter]
+        assert listed, f"{path} documents no {parameter} with its possible values"
+        assert listed == [typing.get_args(literal)] * len(listed), (path, parameter, listed)
+
+
+LEFT_OUT_FORMATS = {"list": frozenset({"vcf"}), "report": frozenset({"csv", "xml"})}
+"""Formats upstream documents that no file task takes yet, the persons' vCard and a report's
+CSV and XML: the release after builds them (https://github.com/xippios/sdk-cashctrl/issues/75)."""
+
+
+def test_the_file_formats_are_the_extensions_upstream_documents() -> None:
+    """``ExportFormat`` and ``ReportFormat`` are the extensions of the paths, not a table.
+
+    A list file is a format that the four lists document, a report file one that the
+    element's and the collection's downloads document, less the formats left out above.
+    """
+    operations = documented_value_sets()
+
+    def extensions(stem: str) -> set[str]:
+        return {path.rsplit(".", 1)[1] for path in operations if path.rsplit(".", 1)[0] == stem}
+
+    lists = [extensions(f"{module}/list") - {"json"} for module in EXPORT_MODULES]
+    export_formats = set(typing.get_args(models.ExportFormat))
+    assert set.union(*lists) - LEFT_OUT_FORMATS["list"] == export_formats
+    assert set.intersection(*lists) == export_formats, "each of the four lists documents each"
+    reports = [extensions(f"report/{kind}/download") for kind in ("element", "collection")]
+    assert set.union(*reports) - LEFT_OUT_FORMATS["report"] == set(
+        typing.get_args(models.ReportFormat)
+    )
+    assert set.union(*reports) >= LEFT_OUT_FORMATS["report"], "each left out is documented"
+
+
+EXPORT_MODULES = ("journal", "account", "person", "order")
+"""The lists whose file ``download_<list>`` writes, the four modules upstream exports."""
+
+
+def test_every_value_set_written_by_hand_is_held() -> None:
+    """The sixteen ``Literal`` sets of ``models.py``: fourteen tables and two file formats."""
+    held = {*VALUE_SETS, "ExportFormat", "ReportFormat"}
+    written = {
+        name
+        for name in models.__all__
+        if typing.get_origin(getattr(models, name)) is typing.Literal
+    }
+    assert written == held
+    assert len(held) == 16
+
+
 @pytest.mark.parametrize(
     ("element_id", "report_type"), REFUSED_ELEMENTS.items(), ids=map(str, REFUSED_ELEMENTS)
 )
