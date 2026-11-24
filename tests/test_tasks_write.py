@@ -39,7 +39,7 @@ from urllib.parse import parse_qsl
 
 import pytest
 import respx
-from xippios.core import InvalidRequestError, NotFoundError, Result, tool_name
+from xippios.core import InvalidRequestError, NotFoundError, Result, XippiosError, tool_name
 from xippios.core.testing import (
     ReplayFixture,
     assert_write_tools,
@@ -210,6 +210,27 @@ def test_create_journal_entry_previews_without_a_request(
     assert (preview.before, preview.changes) == (None, None)
     assert (result.meta.endpoint, result.meta.tenant) == ("journal/create.json", DEMO)
     assert result.meta.request == {"org": DEMO}, "the payload is in data, never twice"
+
+
+@pytest.mark.parametrize("status", [429, 503])
+def test_a_confirmed_write_is_sent_once_whatever_upstream_answers(
+    respx_mock: respx.MockRouter, status: int
+) -> None:
+    """Core sends a write once, after a 429 or a 5xx too (sdk-core ADR-0011).
+
+    The answer is an input of the test, not an answer from CashCtrl: a 429 or a 503 that no
+    recording holds. After a 5xx the error says that the outcome is unknown, and the
+    description of ``create_journal_entry`` names the read that shows it.
+    """
+    url = "https://demo.cashctrl.com/api/v1/journal/create.json"
+    route = respx_mock.post(url).respond(status, text="busy")
+    with pytest.raises(XippiosError) as info:
+        create_the_recorded_journal_entry(confirm=True)
+    assert route.call_count == 1, "never repeated"
+    if status >= 500:
+        assert "The request was sent once and its outcome is unknown." in str(info.value)
+    doc = " ".join((inspect.getdoc(tasks_write.create_journal_entry) or "").split())
+    assert "``list_journal_entries`` shows whether it was booked" in doc
 
 
 def test_create_journal_entry_with_confirm_replays_the_recorded_create(
