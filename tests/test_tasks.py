@@ -484,23 +484,50 @@ def test_the_filter_encoding_keeps_lists_and_text() -> None:
 def test_list_accounts_refuses_what_upstream_would_ignore(
     respx_mock: respx.MockRouter, arguments: dict[str, typing.Any], message: str
 ) -> None:
-    with pytest.raises(InvalidRequestError, match=re.escape(message)):
+    with pytest.raises(InvalidRequestError, match=re.escape(message)) as info:
         tasks.list_accounts(DEMO, **arguments)
+    assert str(info.value).endswith(". Nothing was sent.")
     assert not respx_mock.calls
 
 
-def test_every_problem_is_named_at_once(respx_mock: respx.MockRouter) -> None:
+def test_a_refusal_names_the_first_problem_and_that_nothing_was_sent(
+    respx_mock: respx.MockRouter,
+) -> None:
+    """One refusal names the first problem it finds and stops (sdk-core ADR-0061, decision 7).
+
+    Three problems: ``dir``, and two in the second filter. The refusal names ``dir``
+    alone; given a good ``dir``, it names the filter's first, its ``comparison``.
+    """
     bad = {"comparison": "EQ", "field": "number", "value": 1000}
     arguments: dict[str, typing.Any] = {"dir": "down", "filter": [NUMBER_1020, bad]}
     with pytest.raises(InvalidRequestError) as info:
         tasks.list_accounts(DEMO, **arguments)
+    assert str(info.value) == "dir must be ASC or DESC, not 'down'. Nothing was sent."
+    arguments["dir"] = "DESC"
+    with pytest.raises(InvalidRequestError) as info:
+        tasks.list_accounts(DEMO, **arguments)
     assert str(info.value) == (
-        "dir must be ASC or DESC, not 'down'; "
-        "filter[1].comparison must be one of eq, like, gt, lt, not 'EQ'; "
-        "filter[1].value.str: Input should be a valid string; "
-        "filter[1].value.list[str]: Input should be a valid list"
+        "filter[1].comparison must be one of eq, like, gt, lt, not 'EQ'. Nothing was sent."
     )
     assert not respx_mock.calls
+
+
+SOURCE_FILES = sorted((Path(__file__).resolve().parent.parent / "src").rglob("*.py"))
+"""Every module of the package, for the checks that read its code."""
+
+
+def test_no_module_gathers_problems_and_every_refusal_is_built_once() -> None:
+    """No list of every problem stands in the code, and one function words a refusal.
+
+    ``_client.refused`` builds each of the package's own refusals of the call as given,
+    so each ends with what was sent (https://github.com/xippios/sdk-cashctrl/issues/138).
+    """
+    built = {}
+    for path in SOURCE_FILES:
+        code = path.read_text(encoding="utf-8")
+        assert not re.search(r"\bproblems\s*(?::|=|\.append|\+=)", code), path.name
+        built[path.name] = len(re.findall(r"\bInvalidRequestError\(", code))
+    assert {name: count for name, count in built.items() if count} == {"_client.py": 1}
 
 
 @pytest.mark.anyio
@@ -2341,7 +2368,7 @@ REFUSED_TYPES = (
 RULE = (
     "payroll and people reports, every type that starts with SALARY_ or contains PERSON, "
     "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART "
-    "(personal data, sdk-core ADR-0017)"
+    "(personal data, sdk-core ADR-0017). Only the report tree was read."
 )
 REFUSED_DOCUMENTED_TYPES = {
     "SALARY_BOOK_ENTRIES",

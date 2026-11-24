@@ -512,12 +512,18 @@ def test_an_export_refuses_what_upstream_would_ignore(
 def test_every_export_checks_format_and_columns(
     respx_mock: respx.MockRouter, tmp_path: Path, name: str
 ) -> None:
+    """One refusal names the first problem: the format, then the columns."""
     export = EXPORTS[name][0]
     arguments: dict[str, typing.Any] = {"format": "docx", "columns": []}
     with pytest.raises(InvalidRequestError) as info:
         export(DEMO, dest=tmp_path / "x", **arguments)
-    assert "format must be csv or xlsx or pdf, not 'docx'" in str(info.value)
-    assert "columns names at least one column" in str(info.value)
+    assert str(info.value) == "format must be csv or xlsx or pdf, not 'docx'. Nothing was sent."
+    arguments["format"] = "csv"
+    with pytest.raises(InvalidRequestError) as info:
+        export(DEMO, dest=tmp_path / "x", **arguments)
+    assert str(info.value) == (
+        "columns names at least one column; leave it out for the default columns. Nothing was sent."
+    )
     assert not respx_mock.calls
 
 
@@ -677,8 +683,9 @@ def test_a_status_error_writes_nothing(
 def test_dest_names_a_file_in_a_directory_that_exists(
     respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
-    with pytest.raises(InvalidRequestError, match="dest is a directory"):
+    with pytest.raises(InvalidRequestError) as info:
         tasks.download_accounts(DEMO, "csv", dest=tmp_path)
+    assert str(info.value) == "dest is a directory; name the file to write. Nothing was sent."
     with pytest.raises(InvalidRequestError, match="dest's directory does not exist"):
         tasks.download_order_document(DEMO, [3], dest=tmp_path / "missing" / "x.pdf")
     assert not respx_mock.calls
@@ -707,7 +714,7 @@ TREE = f"{BASE}/report/tree.json"
 RULE = (
     "payroll and people reports, every type that starts with SALARY_ or contains PERSON, "
     "and SETTLEMENT, WITHHOLDING_TAX_SETTLEMENT, PEOPLE and ORG_CHART "
-    "(personal data, sdk-core ADR-0017)"
+    "(personal data, sdk-core ADR-0017). Only the report tree was read."
 )
 PAYROLL_TYPES = (
     "SALARY_BOOK_ENTRIES, SALARY_LIST, SALARY_TYPES, SALARY_TYPE_RECAP, SETTLEMENT, "
@@ -1102,14 +1109,18 @@ def test_a_report_file_refuses_its_arguments_before_anything_is_sent(
     assert files(tmp_path) == []
 
 
-def test_a_report_file_names_every_problem_at_once(
+def test_a_report_file_names_the_first_problem_alone(
     respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
+    """In the order of the arguments: the report, its format, then its period."""
     arguments: dict[str, typing.Any] = {"element_id": 1.5, "format": "docx", "language": 2}
     with pytest.raises(InvalidRequestError) as info:
         tasks.download_report(DEMO, dest=tmp_path / "x", **arguments)
-    assert str(info.value).count(";") == 2
-    assert "format must be pdf or xlsx, not 'docx'" in str(info.value)
+    assert str(info.value) == "element_id must be a whole number, not 1.5. Nothing was sent."
+    arguments["element_id"] = 1
+    with pytest.raises(InvalidRequestError) as info:
+        tasks.download_report(DEMO, dest=tmp_path / "x", **arguments)
+    assert str(info.value) == "format must be pdf or xlsx, not 'docx'. Nothing was sent."
     assert not respx_mock.calls
 
 
