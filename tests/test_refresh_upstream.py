@@ -1,7 +1,7 @@
 """The capture script's own code and its declaration on core's frame, offline: nothing is fetched.
 
 The fetch, the attribution check, ``FETCHED.md``, the write and ``--check`` are the frame's,
-``xippios.core.refresh``, which core's tests hold (sdk-core ADR-0046). What stays here is
+``xippios.core.refresh``, which core's tests hold (sdk-core ADR-0062). What stays here is
 the script's own: the declaration of its one page, split into one Markdown file per entry
 of the table of contents, and its ``split`` and ``note`` hooks. ``OBSERVED.md`` is the one
 file under ``docs/upstream/`` written by hand (conventions §3): an entry whose file would
@@ -72,8 +72,8 @@ def test_the_snapshot_declares_its_one_page_split_by_the_script(script: ModuleTy
 
 def test_the_attribution_records_the_notice_and_the_terms(script: ModuleType) -> None:
     """Both from the page, which the frame checks on every run: the footer's notice in its
-    logo's alternative text, and the error handling's link to the terms (sdk-core ADR-0046,
-    decision 7)."""
+    logo's alternative text, and the error handling's link to the terms (sdk-core ADR-0062,
+    decision 10)."""
     notice, terms = script.SNAPSHOT.attribution
     assert notice == Statement(script.NOTICE, script.PAGE_URL, where=notice.where)
     assert script.NOTICE == "\N{COPYRIGHT SIGN} 2026 CashCtrl Ltd."

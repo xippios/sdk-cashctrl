@@ -136,7 +136,7 @@ def test_a_5xx_is_recorded_after_one_request(
     """A GET that the package's client would retry is sent once and recorded as it came.
 
     The recorder sends through the demo organisation's own client with core's ``send_once``,
-    which never retries, so it builds no client of its own (sdk-core ADR-0048, decision 3).
+    which never retries, so it builds no client of its own (sdk-core ADR-0066, decision 3).
 
     NOT RECORDED: the documented 503 of error-handling.md, composed as CashCtrl's status pages
     were recorded, a line that starts CashCtrl - under text/plain (conventions §10, kind 2).
@@ -164,7 +164,7 @@ def test_a_3xx_is_refused_at_every_path_and_nothing_is_written(
 ) -> None:
     """A redirect is no final answer: core refuses it after the one request, at a .json path too.
 
-    The refusal is core's on every path (sdk-core ADR-0048, decision 4), where the recorder's
+    The refusal is core's on every path (sdk-core ADR-0066, decision 4), where the recorder's
     own reached its five file paths alone.
 
     NOT RECORDED: a redirect of no shape upstream was seen to send, composed to show the
@@ -253,6 +253,38 @@ def test_a_response_without_the_key_needs_no_key_review(
     )
     assert recorder.main(["account/list.json", "clean"]) == 0
     assert "CASHCTRL_DEMO_API_KEY" not in capsys.readouterr().out
+
+
+def test_a_key_percent_encoded_with_its_percent_behind_a_json_escape_is_never_written(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A form core's ``Scrub`` does not take: the key percent-encoded, each ``%`` as ``\\u0025``.
+
+    The recorder's verify decodes a JSON body and searches its strings for the key's forms,
+    so the exchange is refused before anything is written.
+
+    NOT RECORDED: a list composed in the shape the account lists were recorded, carrying the
+    invented key in that form, which no scrubbed recording keeps (conventions §10, kind 2).
+    """
+    nested = "".join(f"\\u0025{ord(char):02X}" for char in KEY)
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
+    route.mock(
+        return_value=httpx.Response(
+            200, content=f'{{"total": 1, "data": [{{"name": "{nested}"}}]}}'.encode()
+        )
+    )
+    assert recorder.main(["account/list.json", "nested_key"]) == 1
+    assert not (tmp_path / "tests" / "fixtures" / "account_list").exists()
+    out = capsys.readouterr().out
+    assert out == (
+        "not written tests/fixtures/account_list/nested_key.json: the scrubbed fixture "
+        "still holds the value of CASHCTRL_DEMO_API_KEY or its basic-auth token in the "
+        "response body; nothing is written\n"
+    )
+    assert KEY[1:] not in out
 
 
 def test_a_key_behind_a_json_escape_is_written_redacted_for_review(
@@ -1502,7 +1534,7 @@ def test_a_file_path_writes_no_answer_but_an_error_or_a_refusal(
     out = capsys.readouterr().out
     assert out.startswith("not written tests/fixtures/")
     content_type = answer.headers["content-type"]
-    if answer.is_redirect:  # core's refusal of a 3xx comes first, on every path (ADR-0048)
+    if answer.is_redirect:  # core's refusal of a 3xx comes first, on every path (ADR-0066)
         assert f"GET /api/v1/{endpoint} answered HTTP 302 Found, no final answer" in out
     else:
         assert (

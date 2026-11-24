@@ -139,6 +139,23 @@ def test_every_write_task_is_a_sync_facade_with_confirm_last(task: Callable[...,
         assert re.search(rf"^\s+{parameter.name}:", doc, re.MULTILINE), parameter.name
 
 
+ACCOUNT_IDS = ("debit_id", "credit_id", "account_id")
+
+
+@pytest.mark.parametrize("task", WRITE_TASKS.values(), ids=WRITE_TASKS.keys())
+def test_an_account_id_is_the_id_and_not_the_account_number(task: Callable[..., Any]) -> None:
+    """The line of each account's id under ``Args:`` says it, since it reaches the schema."""
+    doc = inspect.getdoc(task) or ""
+    args = doc.split("\nArgs:\n", 1)[1]
+    entries = {
+        match[1]: " ".join(match[2].split())
+        for match in re.finditer(r"^    (\w+): (.*?)(?=^    \w+: |\Z)", args, re.M | re.S)
+    }
+    for name in ACCOUNT_IDS:
+        if name in entries:
+            assert "not the account number" in entries[name], name
+
+
 @pytest.mark.parametrize("task", WRITE_TASKS.values(), ids=WRITE_TASKS.keys())
 def test_every_write_task_returns_a_preview_or_a_result(task: Callable[..., Any]) -> None:
     """``Result[WritePreview[<record>] | WriteResult]``: ``performed`` tells them apart."""
@@ -2758,7 +2775,7 @@ PREVIEW_RECORDINGS = [
 """The recorded reads the previews of ``PREVIEW_CALLS`` send, each for its own id."""
 
 
-def serve_the_preview_reads(replay_fixture: ReplayFixture) -> None:
+def serve_the_reads_of_the_previews(replay_fixture: ReplayFixture) -> None:
     """Each recorded read at its own path, matched by its ``id``, as recorded."""
     for endpoint, case in PREVIEW_RECORDINGS:
         replay_fixture(endpoint, case, match_params=["id"])
@@ -2775,7 +2792,7 @@ async def test_every_preview_names_what_it_read(replay_fixture: ReplayFixture, n
 
     https://github.com/xippios/sdk-cashctrl/issues/88: an agent sees what the preview cost.
     """
-    serve_the_preview_reads(replay_fixture)
+    serve_the_reads_of_the_previews(replay_fixture)
     payload = await mcp_call(
         write_server, tool_name(SOURCE, WRITE_TASKS[name]), PREVIEW_CALLS[name]
     )
@@ -2792,14 +2809,14 @@ async def test_no_preview_sends_a_write_and_each_names_its_reads(
     A preview sends no request but a read, a ``GET``, and its ``reads`` is empty exactly when
     it sent none.
     """
-    serve_the_preview_reads(replay_fixture)
+    serve_the_reads_of_the_previews(replay_fixture)
     await assert_write_tools(
         mcp_write.build(), list(WRITE_TASKS.values()), dry_run=PREVIEW_CALLS, sent=respx_mock
     )
 
 
 @pytest.mark.parametrize("name", PREVIEW_READS, ids=PREVIEW_READS)
-def test_every_write_docstring_says_whether_its_preview_reads(name: str) -> None:
+def test_every_write_docstring_says_whether_its_preview_sends_a_read(name: str) -> None:
     """The tool's description says what its preview costs (conventions §8, sdk-core ADR-0050)."""
     doc = " ".join((inspect.getdoc(WRITE_TASKS[name]) or "").split())
     reads = PREVIEW_READS[name]
