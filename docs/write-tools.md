@@ -82,7 +82,8 @@ to call the tool right, and what one argument needs stands on that argument's li
 
 - a journal `amount` with a `tax_id` is gross, VAT included, and an order item's `unitPrice`
   was read as gross;
-- a preview is free, and `confirm=true` writes;
+- a preview writes nothing and reads the record once for an update or a delete, and
+  `confirm=true` writes;
 - a write is sent once and never repeated, and the description names the read that shows
   whether a write that failed with its outcome unknown was applied; an update or a delete
   that reads first says that a confirmed call sends two requests, five with the read's

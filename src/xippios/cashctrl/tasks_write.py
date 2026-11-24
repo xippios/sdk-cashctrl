@@ -636,8 +636,10 @@ async def create_journal_entry_async(
         org: A declared organisation name, e.g. ``demo``.
         date_added: The date of the entry, e.g. ``2026-10-24``.
         amount: The amount, e.g. ``125.50``; gross when ``tax_id`` is set.
-        debit_id: The account on the debit side, an ``id`` from ``list_accounts``, e.g. ``3``.
-        credit_id: The account on the credit side, an ``id`` from ``list_accounts``, e.g. ``42``.
+        debit_id: The account on the debit side, an ``id`` from ``list_accounts``, e.g. ``3``;
+            the ``id``, not the account number.
+        credit_id: The account on the credit side, an ``id`` from ``list_accounts``, e.g.
+            ``42``; the ``id``, not the account number.
         title: The description of the entry, at most 250 characters, e.g. ``"Miete Oktober"``.
         tax_id: A tax code, an ``id`` from ``list_tax_codes``, e.g. ``9`` (``UN1``).
         associate_id: The business partner, an ``id`` from ``list_persons``, e.g. ``7``;
@@ -760,8 +762,10 @@ async def update_journal_entry_async(
         id: The entry's ``id`` from ``list_journal_entries``, e.g. ``52``.
         date_added: The date of the entry, e.g. ``2026-10-24``.
         amount: The amount, e.g. ``125.50``; gross when ``tax_id`` is set.
-        debit_id: The account on the debit side, an ``id`` from ``list_accounts``, e.g. ``3``.
-        credit_id: The account on the credit side, an ``id`` from ``list_accounts``, e.g. ``42``.
+        debit_id: The account on the debit side, an ``id`` from ``list_accounts``, e.g. ``3``;
+            the ``id``, not the account number.
+        credit_id: The account on the credit side, an ``id`` from ``list_accounts``, e.g.
+            ``42``; the ``id``, not the account number.
         title: The description of the entry, at most 250 characters, e.g. ``"Miete Oktober"``.
         tax_id: A tax code, an ``id`` from ``list_tax_codes``, e.g. ``9`` (``UN1``).
         associate_id: The business partner, an ``id`` from ``list_persons``, e.g. ``7``;
@@ -1619,7 +1623,7 @@ async def create_order_async(
         status_id: A status of the category, an id from its ``status`` in
             ``list_order_categories``, e.g. ``12``.
         account_id: The account, e.g. the debtors account, an ``id`` from
-            ``list_accounts``; the category's when left out.
+            ``list_accounts``, not the account number; the category's when left out.
         language: The document's language: ``DE``, ``EN``, ``FR`` or ``IT``.
         due_days: Days until payment is due, e.g. ``30``.
         discount_percentage: A discount on the whole order, 0 to 100, e.g. ``2``.
@@ -1916,7 +1920,7 @@ async def update_order_async(
         status_id: A status of the category, an id from its ``status`` in
             ``list_order_categories``, e.g. ``12``.
         account_id: The account, e.g. the debtors account, an ``id`` from
-            ``list_accounts``.
+            ``list_accounts``, not the account number.
         language: The document's language: ``DE``, ``EN``, ``FR`` or ``IT``.
         due_days: Days until payment is due, e.g. ``30``.
         discount_percentage: A discount on the whole order, 0 to 100, e.g. ``2``.
@@ -2191,7 +2195,7 @@ async def create_order_book_entry_async(
     Args:
         org: A declared organisation name, e.g. ``demo``.
         account_id: The contra account, a bank or cash account, an ``id`` from
-            ``list_accounts``, e.g. ``3`` (1020, the bank).
+            ``list_accounts``, e.g. ``3`` (1020, the bank); the ``id``, not the account number.
         order_ids: The orders the entry is booked against, their ``id`` from
             ``list_orders``, e.g. ``[21]``; not their numbers ``nr``.
         amount: The amount, e.g. ``100.00``; the orders' open amount when left out.
@@ -2328,7 +2332,7 @@ async def update_order_book_entry_async(
         org: A declared organisation name, e.g. ``demo``.
         id: The entry's ``id`` from ``list_order_book_entries``, e.g. ``31``.
         account_id: The contra account, a bank or cash account, an ``id`` from
-            ``list_accounts``, e.g. ``3`` (1020, the bank).
+            ``list_accounts``, e.g. ``3`` (1020, the bank); the ``id``, not the account number.
         amount: The amount, e.g. ``100.00``.
         currency_id: A currency, an ``id`` from ``list_currencies``.
         currency_rate: The exchange rate into the default currency, e.g. ``0.92``.

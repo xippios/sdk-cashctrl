@@ -8,7 +8,7 @@ with its operations. ``toc.js`` only scrolls and highlights the table of content
 ``main.css`` only styles the page, so neither is captured.
 
 The script declares its snapshot, ``SNAPSHOT``, and runs it on core's frame,
-``xippios.core.refresh`` (sdk-core ADR-0046): the fetch, the attribution check,
+``xippios.core.refresh`` (sdk-core ADR-0062): the fetch, the attribution check,
 ``FETCHED.md``, the write and ``--check`` are the frame's. Its own code is the hook
 ``split``, which makes one Markdown file per top-level entry of the table of contents from
 the page, ``<entry>.md`` named after the entry (``error-handling.md``, ``common.md``),
@@ -30,7 +30,7 @@ The frame checks the attribution on every run: the footer's copyright notice, ``
 in the alternative text of its logo, and the error handling's link to the terms.
 
 The port to the frame gave up six things the frame carries for no single source (sdk-core
-ADR-0046, decisions 2 and 7): a run from a saved copy of the page (``--from-file``), a
+ADR-0062, decisions 3 and 10): a run from a saved copy of the page (``--from-file``), a
 ``User-Agent`` of its own, the page asked for gzipped, the removal of an entry's file at
 the top of ``docs/upstream/`` once the table of contents drops the entry, the fragment of
 the entry in each file's row of ``FETCHED.md``, which names the page's URL while the file's
