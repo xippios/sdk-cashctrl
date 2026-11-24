@@ -279,15 +279,16 @@ print(done.data.insert_id)  # the new entry's id
 ## Files
 
 Eight tasks write a file instead of returning records: `download_order_document`, the
-documents of orders as one PDF; the list exports `export_journal_entries`,
-`export_accounts`, `export_persons` and `export_orders`, each with `format` (`csv`,
-`xlsx` or `pdf`), the filters of the list it mirrors and `columns`; and the report files
+documents of orders as one PDF; the list files `download_journal_entries`,
+`download_accounts`, `download_persons` and `download_orders`, upstream's exports of
+the lists, each with `format` (`csv`, `xlsx` or `pdf`), the filters of the `list_` task
+it stands beside and `columns`; and the report files
 `download_report`, one report of `get_report_tree`, `download_report_collection`, a
 collection of them as one document, each with `format` (`pdf` or `xlsx`) and the period
 `get_report_data` takes, and `download_annual_report`, a PDF. They are Python
 only: no MCP tool and no HTTP route serves them, since no tool hands an agent a file
 path (`BULK_TASKS`, sdk-core ADR-0040, decision 4). Each streams the file to `dest`, the path the caller
-gives; nothing is read into the result, kept in memory or cached, and `data` describes
+gives by keyword; nothing is read into the result, kept in memory or cached, and `data` describes
 the file (`path`, `bytes`, `content_type`, `filename`, `retrieved_at`). A refusal
 raises and writes nothing, and a file already at `dest` stays as it was:
 `RequestRejected` for one CashCtrl sends as HTTP 200, `NotFoundError` for an unknown
@@ -315,13 +316,15 @@ from pathlib import Path
 from xippios.cashctrl import tasks
 
 count = tasks.list_journal_entries("demo", fiscal_period_id=2, limit=1).meta.total or 1
-journal = tasks.export_journal_entries(
-    "demo", "csv", Path("journal-2025.csv"), fiscal_period_id=2, limit=count
+journal = tasks.download_journal_entries(
+    "demo", "csv", dest=Path("journal-2025.csv"), fiscal_period_id=2, limit=count
 )
 print(journal.data.path, journal.data.bytes, journal.data.content_type)
-invoice = tasks.download_order_document("demo", [3], Path("RE-2026-103.pdf"))
-balance = tasks.download_report("demo", 1, "xlsx", Path("balance-2025.xlsx"), fiscal_period=2)
-annual = tasks.download_annual_report("demo", Path("annual-report-2025.pdf"), fiscal_period_id=2)
+invoice = tasks.download_order_document("demo", [3], dest=Path("RE-2026-103.pdf"))
+balance = tasks.download_report("demo", 1, "xlsx", dest=Path("balance-2025.xlsx"), fiscal_period=2)
+annual = tasks.download_annual_report(
+    "demo", dest=Path("annual-report-2025.pdf"), fiscal_period_id=2
+)
 ```
 
 ## HTTP
@@ -357,7 +360,7 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET order/list.json` (List orders) | `list_orders` | `cashctrl_list_orders` | available; paged; HTTP route is `POST` |
 | `GET order/read.json` (Read order) | `get_order` | `cashctrl_get_order` | available |
 | `GET order/document/read.json` (Read document) | `get_order_document` | `cashctrl_get_order_document` | available; layout, sender, recipient, payment references; without `orgIban`, `orgQrIban` and `recipientIban`; the PDF from `download_order_document` |
-| `GET order/bookentry/list.json` (List book entries) | `list_order_book_entries` | `cashctrl_list_order_book_entries` | available; one order's (`order_id`, sent as `id`) |
+| `GET order/bookentry/list.json` (List book entries) | `list_order_book_entries` | `cashctrl_list_order_book_entries` | available; one order's (`id`, the order's) |
 | `GET order/category/list.json` (List categories) | `list_order_categories` | `cashctrl_list_order_categories` | available |
 | `GET customfield/list.json` (List custom fields) | `list_custom_fields` | `cashctrl_list_custom_fields` | available; one module (`type`) a call |
 | `GET person/category/list.json` (List categories) | `list_person_categories` | `cashctrl_list_person_categories` | available |
@@ -369,10 +372,10 @@ subdomain): set the `httpx` logger to WARNING.
 | `GET report/element/data.json` (Read JSON data) | `get_report_data` | `cashctrl_get_report_data` | available; rows as upstream sends them; payroll and people reports refused |
 | `GET history/list.json` (List history) | `list_history` | `cashctrl_list_history` | available; paged; HTTP route is `POST` |
 | `GET order/document/read.pdf` (Download PDF) | `download_order_document` | none, Python only | available; one PDF to `dest`; an invoice's QR-bill may carry the organisation's IBAN or QR-IBAN and the recipient's address |
-| `GET journal/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_journal_entries` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100 |
-| `GET account/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_accounts` | none, Python only | available; a file to `dest`; every matching account |
-| `GET person/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_persons` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100; without `ssn` and `iban` unless `columns` names them |
-| `GET order/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `export_orders` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100 |
+| `GET journal/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `download_journal_entries` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100 |
+| `GET account/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `download_accounts` | none, Python only | available; a file to `dest`; every matching account |
+| `GET person/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `download_persons` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100; without `ssn` and `iban` unless `columns` names them |
+| `GET order/list.csv`, `list.xlsx`, `list.pdf` (Export to CSV, Excel, PDF) | `download_orders` | none, Python only | available; a file to `dest`; at most `limit`, upstream's default 100 |
 | `GET report/element/download.pdf`, `download.xlsx` (Download PDF, Excel) | `download_report` | none, Python only | available; a file to `dest`; payroll and people reports refused |
 | `GET report/collection/download.pdf`, `download.xlsx` (Download PDF, Excel) | `download_report_collection` | none, Python only | available; a file to `dest`; refused whole when it holds a payroll or people report |
 | `GET report/collection/download_annualreport.pdf` (Download annual report) | `download_annual_report` | none, Python only | available; a PDF to `dest`; refused as its collection would be |
@@ -412,8 +415,8 @@ sends `is_current` false, the current period's too;
 `list_fiscal_periods` marks the current one. Without `type` (`SALES`, `PURCHASE`), `list_orders` returns both;
 `list_order_categories` lists `SALES` (upstream's default) unless given `PURCHASE`.
 
-`list_order_book_entries` lists one order's book entries (`order_id`, sent as upstream's
-`id`): the journal entries its items booked (`type` `GENERATED`) and those booked to it
+`list_order_book_entries` lists one order's book entries (`id`, the order's, as upstream
+names it): the journal entries its items booked (`type` `GENERATED`) and those booked to it
 by hand, such as payments, each with its `rows`; an order in a status that books nothing
 has none. `list_history` is the audit log, newest first: who changed what and when
 (`created_by`, `change_type`, `message`), narrowed with `order_id`, `person_id` or

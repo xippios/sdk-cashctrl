@@ -38,11 +38,14 @@ the parameters as the first request sent them; when
 every page is collected it leaves out ``limit``, the page size, so the same arguments
 collect the same records again.
 
-The file tasks, ``download_order_document``, the list exports ``export_*`` and the
-report files ``download_report``, ``download_report_collection`` and
-``download_annual_report``, are named in ``BULK_TASKS``: Python only, no tool and no
-route (sdk-core ADR-0040, decision 4). Each streams one file to the path its caller gives and
-returns core's ``Downloaded``; ``meta.endpoint`` is the file's operation
+The file tasks, ``download_order_document``, the list files
+``download_journal_entries``, ``download_accounts``, ``download_persons`` and
+``download_orders`` (upstream's exports of the lists, each beside the ``list_`` task
+whose filters it takes) and the report files ``download_report``,
+``download_report_collection`` and ``download_annual_report``, are named in
+``BULK_TASKS``: Python only, no tool and no route (sdk-core ADR-0040, decision 4). Each
+streams one file to ``dest``, the path its caller gives by keyword, the package's own
+argument, and returns core's ``Downloaded``; ``meta.endpoint`` is the file's operation
 (``journal/list.csv``) and ``meta.retrieved_at`` the time the file was complete. A
 refusal sent as HTTP 200 is raised, never written (``api/_download.py``). A file may
 hold what a projection leaves out, at its caller's request or as upstream renders it:
@@ -118,14 +121,14 @@ from xippios.cashctrl.models import (
 )
 
 __all__ = [
+    "download_accounts",
     "download_annual_report",
+    "download_journal_entries",
     "download_order_document",
+    "download_orders",
+    "download_persons",
     "download_report",
     "download_report_collection",
-    "export_accounts",
-    "export_journal_entries",
-    "export_orders",
-    "export_persons",
     "get_account",
     "get_fiscal_period",
     "get_journal_entry",
@@ -157,18 +160,18 @@ __all__ = [
 # decision 4).
 BULK_TASKS: frozenset[str] = frozenset(
     {
+        "download_accounts",
         "download_annual_report",
+        "download_journal_entries",
         "download_order_document",
+        "download_orders",
+        "download_persons",
         "download_report",
         "download_report_collection",
-        "export_accounts",
-        "export_journal_entries",
-        "export_orders",
-        "export_persons",
     }
 )
-"""The file tasks: each streams a file to the path its caller gives and returns
-``Result[Downloaded]``, so no tool or route serves it (sdk-core ADR-0040, decision 4)."""
+"""The file tasks: each streams a file to ``dest``, the path its caller gives by keyword, and
+returns ``Result[Downloaded]``, so no tool or route serves it (sdk-core ADR-0040, decision 4)."""
 
 MCP_CAPS: Mapping[str, ResultCap] = {
     "get_report_data": ResultCap(
@@ -226,7 +229,7 @@ PERSON_COLUMNS: tuple[str, ...] = tuple(
     field.validation_alias if isinstance(field.validation_alias, str) else name
     for name, field in PersonProjection.model_fields.items()
 )
-"""The ``columns`` ``export_persons`` sends when its caller names none.
+"""The ``columns`` ``download_persons`` sends when its caller names none.
 
 ``PersonProjection``'s fields, what ``list_persons`` returns, under upstream's names
 (``firstName``), in its order: the personal identifiers ``ssn`` and ``iban`` stay out of
@@ -986,7 +989,7 @@ async def get_order_document_async(org: str, id: int) -> Result[OrderDocumentPro
     return Result(data=document, meta=_meta(org, "order/document/read.json", {"id": id}))
 
 
-async def list_order_book_entries_async(org: str, order_id: int) -> Result[list[OrderBookEntry]]:
+async def list_order_book_entries_async(org: str, id: int) -> Result[list[OrderBookEntry]]:
     """List the book entries of one order: the journal entries it booked, and its payments.
 
     These are "all the journal book entries that are created for an order (e.g. an
@@ -1002,11 +1005,11 @@ async def list_order_book_entries_async(org: str, order_id: int) -> Result[list[
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
-        order_id: The order's ``id`` as ``list_orders`` gives it, e.g. ``5``; not its
-            number ``nr``. Sent as upstream's ``id``.
+        id: The order's ``id`` as ``list_orders`` gives it, e.g. ``5``; not its number
+            ``nr``.
     """
-    response = await api.order_bookentry_list(org, order_id)
-    meta = _meta(org, "order/bookentry/list.json", {"id": order_id}, total=response.total)
+    response = await api.order_bookentry_list(org, id)
+    meta = _meta(org, "order/bookentry/list.json", {"id": id}, total=response.total)
     return Result(data=response.data, meta=meta)
 
 
@@ -1635,7 +1638,7 @@ def _check_ids(ids: object) -> None:
 
 
 async def download_order_document_async(
-    org: str, ids: list[int], dest: str | os.PathLike[str]
+    org: str, ids: list[int], *, dest: str | os.PathLike[str]
 ) -> Result[Downloaded]:
     """Download the documents of one or more orders as one PDF file at ``dest``.
 
@@ -1666,11 +1669,11 @@ async def download_order_document_async(
     return Result(data=downloaded, meta=meta)
 
 
-async def export_journal_entries_async(
+async def download_journal_entries_async(
     org: str,
     format: ExportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     fiscal_period_id: int | None = None,
     account_id: int | None = None,
     associate_id: int | None = None,
@@ -1691,7 +1694,7 @@ async def export_journal_entries_async(
     start: int | None = None,
     limit: int | None = None,
 ) -> Result[Downloaded]:
-    """Export an organisation's journal entries to a CSV, Excel or PDF file at ``dest``.
+    """Download an organisation's journal entries as a CSV, Excel or PDF file at ``dest``.
 
     The file is upstream's export of the journal list (``journal/list.csv``,
     ``list.xlsx`` or ``list.pdf``) with the filters of ``list_journal_entries``, in the
@@ -1775,11 +1778,11 @@ async def export_journal_entries_async(
     )
 
 
-async def export_accounts_async(
+async def download_accounts_async(
     org: str,
     format: ExportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     query: str | None = None,
     filter: list[Filter] | None = None,
     columns: list[str] | None = None,
@@ -1791,7 +1794,7 @@ async def export_accounts_async(
     sort: str | None = None,
     dir: Direction | None = None,
 ) -> Result[Downloaded]:
-    """Export an organisation's accounts, its chart of accounts, to a CSV, Excel or PDF file.
+    """Download an organisation's accounts, its chart of accounts, as a CSV, Excel or PDF.
 
     The file is upstream's export of the account list (``account/list.csv``,
     ``list.xlsx`` or ``list.pdf``) with the filters of ``list_accounts``, balances
@@ -1849,11 +1852,11 @@ async def export_accounts_async(
     )
 
 
-async def export_persons_async(
+async def download_persons_async(
     org: str,
     format: ExportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     query: str | None = None,
     filter: list[Filter] | None = None,
     columns: list[str] | None = None,
@@ -1873,7 +1876,7 @@ async def export_persons_async(
     start: int | None = None,
     limit: int | None = None,
 ) -> Result[Downloaded]:
-    """Export an organisation's persons, its customers, vendors and contacts, to a file.
+    """Download an organisation's persons, its customers, vendors and contacts, as a file.
 
     The file is upstream's export of the people list (``person/list.csv``, ``list.xlsx``
     or ``list.pdf``) with the filters of ``list_persons``. Without ``columns`` it holds
@@ -1954,11 +1957,11 @@ async def export_persons_async(
     )
 
 
-async def export_orders_async(
+async def download_orders_async(
     org: str,
     format: ExportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     type: OrderType | None = None,
     fiscal_period_id: int | None = None,
     query: str | None = None,
@@ -1977,7 +1980,7 @@ async def export_orders_async(
     start: int | None = None,
     limit: int | None = None,
 ) -> Result[Downloaded]:
-    """Export an organisation's orders (offers, invoices and the like) to a file.
+    """Download an organisation's orders (offers, invoices and the like) as a file.
 
     The file is upstream's export of the order list (``order/list.csv``, ``list.xlsx``
     or ``list.pdf``) with the filters of ``list_orders``, in the columns upstream
@@ -2092,8 +2095,8 @@ async def download_report_async(
     org: str,
     element_id: int,
     format: ReportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     fiscal_period: int | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -2156,8 +2159,8 @@ async def download_report_collection_async(
     org: str,
     collection_id: int,
     format: ReportFormat,
-    dest: str | os.PathLike[str],
     *,
+    dest: str | os.PathLike[str],
     fiscal_period: int | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -2220,7 +2223,7 @@ async def download_report_collection_async(
 
 
 async def download_annual_report_async(
-    org: str, dest: str | os.PathLike[str], *, fiscal_period_id: int | None = None
+    org: str, *, dest: str | os.PathLike[str], fiscal_period_id: int | None = None
 ) -> Result[Downloaded]:
     """Download the annual report of a fiscal period as a PDF file at ``dest``.
 
@@ -2306,10 +2309,10 @@ list_locations = sync(list_locations_async)
 get_report_tree = sync(get_report_tree_async)
 get_report_data = sync(get_report_data_async)
 download_order_document = sync(download_order_document_async)
-export_journal_entries = sync(export_journal_entries_async)
-export_accounts = sync(export_accounts_async)
-export_persons = sync(export_persons_async)
-export_orders = sync(export_orders_async)
+download_journal_entries = sync(download_journal_entries_async)
+download_accounts = sync(download_accounts_async)
+download_persons = sync(download_persons_async)
+download_orders = sync(download_orders_async)
 download_report = sync(download_report_async)
 download_report_collection = sync(download_report_collection_async)
 download_annual_report = sync(download_annual_report_async)
