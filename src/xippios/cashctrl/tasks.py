@@ -220,6 +220,22 @@ more than the bound: a cut is resumed at ``start`` (sdk-core ADR-0038, decision 
 narrowed to one record's history.
 """
 
+MCP_INSTRUCTIONS = (
+    "CashCtrl via xippios. "
+    "Tools are read-only. cashctrl_list_organisations lists the configured organisations; "
+    "every other tool takes org, the name of one of them, and an unknown name is answered "
+    "with the declared ones. "
+    "Call the list tools (cashctrl_list_*) first to find valid ids, then query."
+)
+"""The read server's instructions, which core's ``ToolSet.from_tasks`` reads (conventions §8)."""
+MCP_BOUND_INSTRUCTIONS = (
+    "CashCtrl via xippios. "
+    "Tools are read-only. "
+    "Call the list tools (cashctrl_list_*) first to find valid ids, then query."
+)
+"""The text of a read server ``--org`` binds, whose tools take no ``org``: core's sentence
+that names the organisation ends it."""
+
 DIRECTIONS: tuple[str, ...] = get_args(Direction)
 """The values of ``dir`` on every list that documents it: ``ASC``, ``DESC``."""
 COMPARISONS: tuple[str, ...] = get_args(Comparison)

@@ -132,6 +132,21 @@ OrderOutcome = WritePreview[OrderDetailProjection] | WriteResult
 BookEntryOutcome = WritePreview[OrderBookEntry] | WriteResult
 """A book entry write's result: a preview (``performed`` false) or what was written (true)."""
 
+MCP_INSTRUCTIONS = (
+    "CashCtrl write tools via xippios. "
+    "Every tool takes org, the name of a configured organisation. "
+    "Every tool returns a preview unless confirm=true is passed. "
+    "Call it once without confirm, show the preview, then confirm."
+)
+"""The write server's instructions, which core's ``ToolSet.from_tasks`` reads (conventions §8)."""
+MCP_BOUND_INSTRUCTIONS = (
+    "CashCtrl write tools via xippios. "
+    "Every tool returns a preview unless confirm=true is passed. "
+    "Call it once without confirm, show the preview, then confirm."
+)
+"""The text of a write server ``--org`` binds, whose tools take no ``org``: core's sentence
+that names the organisation ends it."""
+
 NOTIFY_TYPES: tuple[str, ...] = get_args(NotifyType)
 RECURRENCES: tuple[str, ...] = get_args(Recurrence)
 LANGUAGES: tuple[str, ...] = get_args(Language)

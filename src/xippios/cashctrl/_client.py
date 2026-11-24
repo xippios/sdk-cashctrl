@@ -175,8 +175,11 @@ def _subdomain(org: str) -> str:
     try:
         return check_subdomain(value)
     except ValueError:
-        problem = f"{TENANTS.var(org, 'SUBDOMAIN')} holds no subdomain of organisation {org!r}"
-    raise ConfigError(f"{problem}: {_SUBDOMAIN_HINT}", source=SOURCE)
+        pass
+    # Raised outside the handler, so the check's error is neither its cause nor its context.
+    variable = TENANTS.var(org, "SUBDOMAIN")
+    message = f"{variable} does not hold a valid SUBDOMAIN for organisation {org!r}"
+    raise ConfigError(f"{message}; {_SUBDOMAIN_HINT}", source=SOURCE)
 
 
 def check_org(org: str) -> None:

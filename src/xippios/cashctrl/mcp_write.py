@@ -28,7 +28,7 @@ def build(lock: TenantLock | None = None) -> ToolSet:
     return ToolSet.from_tasks(SOURCE, tasks_write, version=__version__, lock=lock, read_only=False)
 
 
-server = build_server(build(), name="xippios-cashctrl-write")
+server = build_server(build())
 
 
 def run() -> None:
