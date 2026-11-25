@@ -1574,7 +1574,8 @@ def test_delete_order_previews_the_order_then_deletes(
 def recorded_invoice_statuses() -> list[int]:
     """The status ids of the default invoice category, in their order, as recorded.
 
-    From ``order_category_list/default`` (recorded on 2026-10-24): never a guessed id.
+    From ``order_category_list/default`` (recorded on 2026-10-24): never a guessed id. The
+    recorded category list is an input of the test, not an answer from CashCtrl.
     """
     raw = load_fixture(_FIXTURES / "order_category_list" / "default.json").response.body
     categories = ListResponse[OrderCategory].model_validate_json(raw or "")
@@ -1599,7 +1600,8 @@ def recorded_purchase_invoice_status() -> int:
 
     From ``order_category_list/purchase`` (recorded on 2026-10-29): the purchase invoice
     category's next status after the first that names no follow-up action, an open one
-    first, as https://github.com/xippios/sdk-cashctrl/pull/21 chose it.
+    first, as https://github.com/xippios/sdk-cashctrl/pull/21 chose it. The recorded category
+    list is an input of the test, not an answer from CashCtrl.
     """
     raw = load_fixture(_FIXTURES / "order_category_list" / "purchase.json").response.body
     categories = ListResponse[OrderCategory].model_validate_json(raw or "")

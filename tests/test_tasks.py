@@ -440,7 +440,8 @@ def test_list_accounts_replays_a_narrowed_list(
 
 def test_an_account_takes_currency_id_as_a_number_a_string_or_null(fixtures_dir: Path) -> None:
     """The recorded entry, its ``currencyId`` changed in memory to a number and a string, forms
-    no committed entry carries: they carry ``null`` (conventions §10, kind 4)."""
+    no committed entry carries: they carry ``null``. The changed entry is an input of the test,
+    not an answer from CashCtrl."""
     fixture = fixture_path(fixtures_dir, "account_list", "only_active_finanz")
     entry = json.loads(load_fixture(fixture).response.body)["data"][0]
     assert entry["currencyId"] is None
@@ -1255,8 +1256,11 @@ async def test_the_person_list_wrapper_stays_faithful(
 
 
 def person_with_identifiers(fixtures_dir: Path) -> dict[str, typing.Any]:
-    """The recorded person read with an ``ssn`` and a bank account, changed in memory
-    (conventions §10, kind 4)."""
+    """The recorded person read with an ``ssn`` and a bank account, changed in memory.
+
+    Served by a route, it is a recording changed in memory (conventions §10, kind 4); handed
+    straight to a model, the changed read is an input of the test, not an answer from CashCtrl.
+    """
     body = recorded_body(fixtures_dir, "person_read", "by_id")
     body["data"]["ssn"] = SSN
     body["data"]["bankAccounts"] = [{"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"}]
@@ -1266,8 +1270,8 @@ def person_with_identifiers(fixtures_dir: Path) -> dict[str, typing.Any]:
 def test_the_person_projection_itself_drops_each_iban(fixtures_dir: Path) -> None:
     """sdk-core ADR-0017 enforced by the type: ``project`` alone, no task, carries no IBAN.
 
-    The recorded person read with bank accounts, changed in memory (conventions §10, kind
-    4); the key in any case.
+    The recorded person read with bank accounts, changed in memory, the key in any case. The
+    changed read is an input of the test, not an answer from CashCtrl.
     """
     body = person_with_identifiers(fixtures_dir)
     body["data"]["bankAccounts"] = [
