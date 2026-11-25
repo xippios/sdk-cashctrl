@@ -244,9 +244,10 @@ def test_a_confirmed_write_is_sent_once_whatever_upstream_answers(
 ) -> None:
     """Core sends a write once, after a 429 or a 5xx too (sdk-core ADR-0011).
 
-    The answer is an input of the test, not an answer from CashCtrl: a 429 or a 503 that no
-    recording holds. After a 5xx the error says that the outcome is unknown, and the
-    description of ``create_journal_entry`` names the read that shows it.
+    NOT RECORDED: a 429 and a 503 composed from the rows of the status table that
+    ``docs/upstream/error-handling.md`` documents, with a text body the test does not read
+    (conventions §10, kind 2). After a 5xx the error says that the outcome is unknown, and
+    the description of ``create_journal_entry`` names the read that shows it.
     """
     url = "https://demo.cashctrl.com/api/v1/journal/create.json"
     route = respx_mock.post(url).respond(status, text="busy")
@@ -265,7 +266,8 @@ def test_a_preview_carries_the_time_of_its_read(
     """``meta.retrieved_at`` of a preview that read first is the read's, the client's time.
 
     The read is replaced by one that answers the recorded entry, parsed, with a time of its
-    own, so the preview's choice shows (conventions §4).
+    own, so the preview's choice shows (conventions §4). The read's ``Answer`` is an input of
+    the test, not an answer from CashCtrl.
     """
     body = load_fixture(fixtures_dir / "journal_read" / "for_update.json").response.body
     entry = ReadResponse[JournalEntryDetail].model_validate_json(body).data

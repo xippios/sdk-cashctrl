@@ -9,6 +9,7 @@ take its name stops the run, in any letter case.
 """
 
 import importlib.util
+import re
 from pathlib import Path
 from types import ModuleType
 
@@ -79,6 +80,24 @@ def test_the_attribution_records_the_notice_and_the_terms(script: ModuleType) ->
     assert script.NOTICE == "\N{COPYRIGHT SIGN} 2026 CashCtrl Ltd."
     assert terms.text == "Terms of Service"
     assert (terms.source, terms.link) == (script.PAGE_URL, "https://cashctrl.com/en/about/terms")
+
+
+LINK = re.compile(r"\]\((https?://[^)\s]+)\)")
+
+
+def test_every_page_a_captured_file_links_is_fetched_or_left_out(script: ModuleType) -> None:
+    """Each link of a captured page leads to a page the snapshot fetches or one that its
+    ``not_fetched`` leaves out with its reason, the terms that the 429 row links among them,
+    so that the record's ``Not fetched`` table holds every page it does not request."""
+    fetched = {page.url for page in script.SNAPSHOT.pages}
+    left_out = {entry.url: entry.reason for entry in script.SNAPSHOT.not_fetched}
+    linked: set[str] = set()
+    for path in (SCRIPT.parents[1] / "docs" / "upstream").glob("*.md"):
+        if path.name not in {"FETCHED.md", "OBSERVED.md"}:
+            text = path.read_text(encoding="utf-8")
+            linked |= {url.split("#", 1)[0] for url in LINK.findall(text)}
+    assert linked - fetched - left_out.keys() == set()
+    assert left_out[script.TERMS], "the reason is given"
 
 
 def test_split_writes_one_file_per_entry_under_its_url(script: ModuleType) -> None:

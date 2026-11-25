@@ -956,7 +956,8 @@ def test_a_task_carries_its_answers_time(
     """``meta.retrieved_at`` is the client's time of the answer, the oldest of a walk's.
 
     The wrapper is replaced by one that answers the recorded 2025 pages, parsed, with a
-    time of its own for each, so the task's choice among them shows (conventions §4).
+    time of its own for each, so the task's choice among them shows (conventions §4). Each
+    page's ``Answer`` is an input of the test, not an answer from CashCtrl.
     """
     monkeypatch.setattr(tasks, "PAGE_SIZE", 5)
     times = {0: datetime(2026, 11, 24, 9, 0, 2), 5: datetime(2026, 11, 24, 9, 0, 1)}
