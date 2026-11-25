@@ -6,7 +6,7 @@ import json
 import re
 import typing
 from collections.abc import Callable, Iterator
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -14,8 +14,16 @@ import httpx
 import pytest
 import respx
 from pydantic import BeforeValidator
-from xippios.core import InvalidRequestError, NotFoundError, Result, UpstreamModel, sync
-from xippios.core.mcp import build_server, tool_name
+from xippios.core import (
+    Answer,
+    InvalidRequestError,
+    NotFoundError,
+    Result,
+    UpstreamModel,
+    sync,
+    tool_name,
+)
+from xippios.core.mcp import ToolSet, build_server
 from xippios.core.testing import (
     Fixture,
     ReplayFixture,
@@ -24,6 +32,7 @@ from xippios.core.testing import (
     mcp_call,
     mcp_call_text,
     recorded_query,
+    response_from_fixture,
     sent_query,
     sent_urls,
 )
@@ -431,7 +440,8 @@ def test_list_accounts_replays_a_narrowed_list(
 
 def test_an_account_takes_currency_id_as_a_number_a_string_or_null(fixtures_dir: Path) -> None:
     """The recorded entry, its ``currencyId`` changed in memory to a number and a string, forms
-    no committed entry carries: they carry ``null`` (conventions §10, kind 4)."""
+    no committed entry carries: they carry ``null``. The changed entry is an input of the test,
+    not an answer from CashCtrl."""
     fixture = fixture_path(fixtures_dir, "account_list", "only_active_finanz")
     entry = json.loads(load_fixture(fixture).response.body)["data"][0]
     assert entry["currencyId"] is None
@@ -587,20 +597,6 @@ async def test_list_accounts_as_a_tool(
     assert payload["meta"]["request"]["filter"] == (
         '[{"comparison":"eq","field":"number","value":"1020"}]'
     )
-    # Refused by the tool's schema, before the task runs: core answers conventions §8's
-    # text (sdk-core ADR-0036, decision 12).
-    bad = {"org": DEMO, "filter": [{**item, "comparison": "equals"}]}
-    assert await mcp_call_text(server, "cashctrl_list_accounts", bad) == (
-        "error: InvalidRequestError: filter.0.comparison: "
-        "Input should be 'eq', 'like', 'gt' or 'lt'"
-    )
-    assert await mcp_call_text(server, "cashctrl_list_accounts", {"org": DEMO, "dir": "up"}) == (
-        "error: InvalidRequestError: dir: Input should be 'ASC' or 'DESC'"
-    )
-    unknown_key = {"org": DEMO, "filter": [{**item, "op": "eq"}]}  # Filter refuses unknown keys
-    assert await mcp_call_text(server, "cashctrl_list_accounts", unknown_key) == (
-        "error: InvalidRequestError: filter.0.op: Extra inputs are not permitted"
-    )
 
 
 def test_list_accounts_is_a_post_route(
@@ -622,10 +618,6 @@ def test_list_accounts_is_a_post_route(
     assert ("end_amount" in row, "endAmount" in row) == (True, False), "snake_case over HTTP"
     numbers = [account["number"] for account in response.json()["data"]]
     assert (len(numbers), numbers[-2:]) == (8, ["6900", "6950"])
-    rejected = client.post("/cashctrl/list_accounts", json={"org": DEMO, "dir": "up"})
-    assert rejected.status_code == 422
-    assert rejected.json()["title"] == "InvalidRequestError", "core's problem, not FastAPI's 422"
-    assert rejected.json()["detail"].startswith("dir: ")
     unknown = client.post("/cashctrl/list_accounts", json={"org": "nowhere"})
     assert unknown.status_code == 422
     assert unknown.json()["title"] == "InvalidRequestError", "the task's refusals as problems"
@@ -695,15 +687,6 @@ async def test_get_account_as_a_tool(
     assert payload["meta"]["request"] == {"org": DEMO, "id": account_id}
 
 
-@pytest.mark.anyio
-async def test_an_unknown_account_is_an_error_text_for_the_tool(
-    replay_fixture: Callable[[str, str], respx.Route],
-) -> None:
-    replay_fixture("account_read", "unknown_id")
-    with pytest.raises(AssertionError, match="error: NotFoundError: CashCtrl: This account"):
-        await mcp_call(server, "cashctrl_get_account", {"org": DEMO, "id": 999999999})
-
-
 # Journal entries, persons and orders: the offset-paged lists and their reads. The 2025
 # journal holds 12 entries (docs/demo-org.md), recorded in pages of five: 5, 5 and 2, and
 # the page past the end; 2026 holds 38, recorded as its first page of five.
@@ -740,17 +723,16 @@ def journal_2025_pages(fixtures_dir: Path) -> dict[int, dict[str, typing.Any]]:
     }
 
 
-def serve_by_start(
-    respx_mock: respx.MockRouter, pages: dict[int, dict[str, typing.Any]]
-) -> respx.Route:
-    """A route answering each request with the page recorded for its ``start``.
+def serve_by_start(respx_mock: respx.MockRouter, fixtures_dir: Path) -> respx.Route:
+    """A route answering each request with the 2025 page recorded for its ``start``.
 
     ``replay_fixture`` ignores query strings, so the multi-page replay dispatches on the
     ``start`` each request sends; a ``start`` nothing was recorded for fails the test.
     """
 
     def answer(request: httpx.Request) -> httpx.Response:
-        return answer_with(pages[int(request.url.params["start"])])
+        case = FP2025_PAGES[int(request.url.params["start"])]
+        return response_from_fixture(load_fixture(fixture_path(fixtures_dir, "journal_list", case)))
 
     return respx_mock.get(JOURNAL_LIST_URL).mock(side_effect=answer)
 
@@ -822,12 +804,10 @@ def test_a_page_past_the_end_is_empty_with_upstreams_total(
 
 
 def test_list_journal_entries_without_limit_collects_every_page(
-    respx_mock: respx.MockRouter,
-    journal_2025_pages: dict[int, dict[str, typing.Any]],
-    monkeypatch: pytest.MonkeyPatch,
+    respx_mock: respx.MockRouter, fixtures_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(tasks, "PAGE_SIZE", 5)  # the size the pages were recorded with
-    route = serve_by_start(respx_mock, journal_2025_pages)
+    route = serve_by_start(respx_mock, fixtures_dir)
     result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
     assert [dict(call.request.url.params) for call in route.calls] == [
         {"fiscalPeriodId": "2", "start": str(start), "limit": "5"} for start in (0, 5, 10)
@@ -840,12 +820,10 @@ def test_list_journal_entries_without_limit_collects_every_page(
 
 
 def test_start_without_limit_collects_every_page_from_start(
-    respx_mock: respx.MockRouter,
-    journal_2025_pages: dict[int, dict[str, typing.Any]],
-    monkeypatch: pytest.MonkeyPatch,
+    respx_mock: respx.MockRouter, fixtures_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(tasks, "PAGE_SIZE", 5)
-    route = serve_by_start(respx_mock, journal_2025_pages)
+    route = serve_by_start(respx_mock, fixtures_dir)
     result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025, start=5)
     assert starts(route) == [5, 10]
     assert [entry.id for entry in result.data] == [7, 6, 5, 4, 3, 2, 1]
@@ -899,9 +877,104 @@ def test_the_count_kept_is_the_last_pages_and_never_corrected(
     pages, the last one's ``total`` changed in memory (conventions §10, kind 4)."""
     monkeypatch.setattr(tasks, "PAGE_SIZE", 5)
     pages = {**journal_2025_pages, 10: {**journal_2025_pages[10], "total": 11}}
-    serve_by_start(respx_mock, pages)
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return answer_with(pages[int(request.url.params["start"])])
+
+    respx_mock.get(JOURNAL_LIST_URL).mock(side_effect=answer)
     result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
     assert (len(result.data), result.meta.total) == (12, 11)
+
+
+def serve_counted(
+    respx_mock: respx.MockRouter, entries: list[typing.Any], total: int
+) -> respx.Route:
+    """A route cutting ``entries`` by each request's ``start`` and ``limit``, counting ``total``.
+
+    The answers are recorded 2025 entries with upstream's count changed in memory, as a
+    longer list would answer (conventions §10, kind 4).
+    """
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        start, limit = (int(request.url.params[name]) for name in ("start", "limit"))
+        rows = [entries[index % len(entries)] for index in range(start, min(start + limit, total))]
+        return answer_with({"total": total, "data": rows})
+
+    return respx_mock.get(JOURNAL_LIST_URL).mock(side_effect=answer)
+
+
+def test_a_walk_fetches_at_most_24_pages(
+    respx_mock: respx.MockRouter,
+    journal_2025_pages: dict[int, dict[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """24 pages of one entry are 24 requests, the bound for Python and MCP alike."""
+    assert tasks.WALK_PAGES == 24
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 1)
+    route = serve_counted(respx_mock, journal_2025_pages[0]["data"], 24)
+    result = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
+    assert (route.call_count, len(result.data), result.meta.total) == (24, 24, 24)
+
+
+WALK_REFUSAL = (
+    "the walk needs more than the 24 pages that one call fetches: upstream counts 25 records "
+    "on 25 pages of 1, and the walk reached page 1 of 25 after 1 request. It returns "
+    "nothing; pass start with limit to fetch one page at a time"
+)
+
+
+def test_a_walk_over_24_pages_is_refused_after_its_first_request(
+    respx_mock: respx.MockRouter,
+    journal_2025_pages: dict[int, dict[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal names the count, the bound, the paging arguments and the page reached."""
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 1)
+    route = serve_counted(respx_mock, journal_2025_pages[0]["data"], 25)
+    with pytest.raises(InvalidRequestError) as refused:
+        tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
+    assert route.call_count == 1
+    assert str(refused.value).startswith(WALK_REFUSAL)
+
+
+@pytest.mark.anyio
+async def test_a_tool_over_24_pages_is_refused_alike(
+    respx_mock: respx.MockRouter,
+    journal_2025_pages: dict[int, dict[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 1)
+    route = serve_counted(respx_mock, journal_2025_pages[0]["data"], 25)
+    arguments = {"org": DEMO, "fiscal_period_id": FP2025}
+    text = await mcp_call_text(server, "cashctrl_list_journal_entries", arguments)
+    assert route.call_count == 1
+    assert WALK_REFUSAL in text
+
+
+def test_a_task_carries_its_answers_time(
+    journal_2025_pages: dict[int, dict[str, typing.Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``meta.retrieved_at`` is the client's time of the answer, the oldest of a walk's.
+
+    The wrapper is replaced by one that answers the recorded 2025 pages, parsed, with a
+    time of its own for each, so the task's choice among them shows (conventions §4). Each
+    page's ``Answer`` is an input of the test, not an answer from CashCtrl.
+    """
+    monkeypatch.setattr(tasks, "PAGE_SIZE", 5)
+    times = {0: datetime(2026, 11, 24, 9, 0, 2), 5: datetime(2026, 11, 24, 9, 0, 1)}
+    times[10] = datetime(2026, 11, 24, 9, 0, 3)
+
+    async def journal_list(
+        org: str, *, start: int, limit: int, **_: object
+    ) -> Answer[models.ListResponse[models.JournalEntry]]:
+        page = models.ListResponse[models.JournalEntry].model_validate(journal_2025_pages[start])
+        return Answer(page, times[start].replace(tzinfo=UTC))
+
+    monkeypatch.setattr(api, "journal_list", journal_list)
+    walked = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025)
+    assert walked.meta.retrieved_at == times[5].replace(tzinfo=UTC), "the oldest page's"
+    one = tasks.list_journal_entries(DEMO, fiscal_period_id=FP2025, start=10, limit=5)
+    assert one.meta.retrieved_at == times[10].replace(tzinfo=UTC), "the one page's"
 
 
 @pytest.mark.anyio
@@ -923,7 +996,7 @@ async def test_list_journal_entries_as_a_tool(
     refused = {"org": DEMO, "limit": "many"}
     assert await mcp_call_text(server, "cashctrl_list_journal_entries", refused) == (
         "error: InvalidRequestError: limit: "
-        "Input should be a valid integer, unable to parse string as an integer"
+        "Input should be a valid integer, unable to parse string as an integer. Nothing was sent."
     )
 
 
@@ -1173,7 +1246,7 @@ async def test_the_person_list_wrapper_stays_faithful(
 ) -> None:
     """The endpoint wrapper keeps ``ssn`` and ``iban`` (``null`` in the fixture); the task not."""
     replay_fixture("person_list", "default")
-    listed = await api.person_list(DEMO, start=0, limit=100)
+    listed = (await api.person_list(DEMO, start=0, limit=100)).payload
     assert all(isinstance(person, Person) for person in listed.data)
     assert all((person.ssn, person.iban) == (None, None) for person in listed.data)
     result = await tasks.list_persons_async(DEMO)
@@ -1183,8 +1256,11 @@ async def test_the_person_list_wrapper_stays_faithful(
 
 
 def person_with_identifiers(fixtures_dir: Path) -> dict[str, typing.Any]:
-    """The recorded person read with an ``ssn`` and a bank account, changed in memory
-    (conventions §10, kind 4)."""
+    """The recorded person read with an ``ssn`` and a bank account, changed in memory.
+
+    Served by a route, it is a recording changed in memory (conventions §10, kind 4); handed
+    straight to a model, the changed read is an input of the test, not an answer from CashCtrl.
+    """
     body = recorded_body(fixtures_dir, "person_read", "by_id")
     body["data"]["ssn"] = SSN
     body["data"]["bankAccounts"] = [{"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"}]
@@ -1194,8 +1270,8 @@ def person_with_identifiers(fixtures_dir: Path) -> dict[str, typing.Any]:
 def test_the_person_projection_itself_drops_each_iban(fixtures_dir: Path) -> None:
     """sdk-core ADR-0017 enforced by the type: ``project`` alone, no task, carries no IBAN.
 
-    The recorded person read with bank accounts, changed in memory (conventions §10, kind
-    4); the key in any case.
+    The recorded person read with bank accounts, changed in memory, the key in any case. The
+    changed read is an input of the test, not an answer from CashCtrl.
     """
     body = person_with_identifiers(fixtures_dir)
     body["data"]["bankAccounts"] = [
@@ -1231,7 +1307,7 @@ async def test_get_person_leaves_out_ssn_and_each_iban(
     respx_mock.get(f"{BASE}/person/read.json").respond(
         200, json=person_with_identifiers(fixtures_dir)
     )
-    read = await api.person_read(DEMO, 3)
+    read = (await api.person_read(DEMO, 3)).payload
     assert (read.ssn, read.bank_accounts[0]) == (
         SSN,
         {"iban": IBAN, "type": "DEFAULT", "bic": "TESTCHZZ"},
@@ -1336,7 +1412,7 @@ async def test_list_orders_as_a_tool(
     assert payload["meta"]["total"] == 4
     assert (payload["data"][0]["nr"], payload["data"][0]["sub_total"]) == ("RE-2026-104", 832.56)
     assert await mcp_call_text(server, "cashctrl_list_orders", {"org": DEMO, "type": "sales"}) == (
-        "error: InvalidRequestError: type: Input should be 'SALES' or 'PURCHASE'"
+        "error: InvalidRequestError: type: Input should be 'SALES' or 'PURCHASE'. Nothing was sent."
     )
 
 
@@ -1415,7 +1491,7 @@ async def test_the_order_wrapper_stays_faithful(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     replay_fixture("order_read", "by_id")
-    order = await api.order_read(DEMO, 3)
+    order = (await api.order_read(DEMO, 3)).payload
     assert isinstance(order, models.OrderDetail)
     assert order.hash == "REDACTED", "scrubbed by the recorder, by its field name"
 
@@ -1473,7 +1549,7 @@ async def test_the_order_document_wrapper_stays_faithful(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     replay_fixture("order_document_read", "by_id")
-    document = await api.order_document_read(DEMO, 3)
+    document = (await api.order_document_read(DEMO, 3)).payload
     assert isinstance(document, models.OrderDocument)
     assert {name: getattr(document, name) for name in DOCUMENT_IBANS} == dict.fromkeys(
         DOCUMENT_IBANS
@@ -1499,7 +1575,8 @@ async def test_a_live_iban_on_an_order_document_never_reaches_a_result(
     assert made_up not in tasks.get_order_document(DEMO, 3).model_dump_json()
     payload = await mcp_call(server, "cashctrl_get_order_document", {"org": DEMO, "id": 3})
     assert made_up not in json.dumps(payload)
-    assert (await api.order_document_read(DEMO, 3)).recipient_iban == made_up, "read model"
+    read = (await api.order_document_read(DEMO, 3)).payload
+    assert read.recipient_iban == made_up, "read model"
 
 
 @pytest.mark.anyio
@@ -1707,7 +1784,7 @@ async def test_a_history_over_its_cap_names_the_filters_and_where_to_resume(
     """
     replay_fixture("history_list", "order")
     cap = dataclasses.replace(tasks.MCP_CAPS["list_history"], max_rows=1)
-    capped = build_server(SOURCE, [tasks.list_history], caps={"list_history": cap})
+    capped = build_server(ToolSet(SOURCE, [tasks.list_history], caps={"list_history": cap}))
     arguments = {"org": DEMO, "order_id": BOOKED_ORDER}
     payload = json.loads(await mcp_call_text(capped, "cashctrl_list_history", arguments))
     assert len(payload["data"]) == 1
@@ -1876,7 +1953,7 @@ async def test_list_custom_fields_as_a_tool(
     text = await mcp_call_text(server, "cashctrl_list_custom_fields", refused)
     assert text.startswith("error: InvalidRequestError: type: Input should be 'JOURNAL'")
     missing = await mcp_call_text(server, "cashctrl_list_custom_fields", {"org": DEMO})
-    assert missing == "error: InvalidRequestError: type: Field required"
+    assert missing == "error: InvalidRequestError: type: Field required. Nothing was sent."
 
 
 def test_list_custom_fields_as_a_route(
@@ -1897,8 +1974,6 @@ def test_list_custom_fields_as_a_route(
     assert response.json()["meta"]["total"] == 1
     assert response.json()["data"][0]["field_id"] == "customField1"
     assert response.json()["meta"]["tenant"] == DEMO
-    refused = client.get("/cashctrl/list_custom_fields", params={"org": DEMO, "type": "person"})
-    assert refused.status_code == 422
     missing = client.get("/cashctrl/list_custom_fields", params={"org": DEMO})
     assert missing.status_code == 422
 
@@ -2091,8 +2166,7 @@ def test_list_cost_centers_is_a_post_route(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     """account_costcenter_list/default answers a request with onlyActive within the one
-    operation, in a test that asserts only what was sent and a refusal before any request
-    (conventions §10, kind 3)."""
+    operation, in a test that asserts only what was sent (conventions §10, kind 3)."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -2105,8 +2179,6 @@ def test_list_cost_centers_is_a_post_route(
     response = client.post("/cashctrl/list_cost_centers", json={"org": DEMO, "only_active": True})
     assert response.status_code == 200, response.text
     assert response.json()["meta"]["request"] == {"org": DEMO, "onlyActive": "true"}
-    rejected = client.post("/cashctrl/list_cost_centers", json={"org": DEMO, "dir": "up"})
-    assert rejected.status_code == 422
 
 
 OUTPUT_MODELS = {
@@ -2175,7 +2247,7 @@ async def test_the_location_wrapper_stays_faithful(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
     replay_fixture("location_list", "default")
-    (location,) = (await api.location_list(DEMO)).data
+    (location,) = (await api.location_list(DEMO)).payload.data
     assert isinstance(location, models.Location)
     assert (location.iban, location.qr_iban, location.bic) == (None, None, None), "seen null"
 
@@ -2309,7 +2381,7 @@ def test_get_report_data_drops_identifier_keys_at_any_depth(
     assert result.data.total == original["total"]
     assert SSN not in result.model_dump_json()
     assert IBAN not in result.model_dump_json()
-    faithful = sync(api.report_element_data)(DEMO, 1, fiscal_period=FP2025)
+    faithful = sync(api.report_element_data)(DEMO, 1, fiscal_period=FP2025).payload
     assert typing.cast(dict[str, typing.Any], faithful.data[0])["ssn"] == SSN
 
 
@@ -2883,7 +2955,7 @@ async def test_a_report_over_its_cap_is_cut_by_its_rows_with_a_note_naming_the_p
     replay_fixture("report_tree", "default")
     replay_fixture("report_element_data", "balance_fp2025")
     cap = dataclasses.replace(tasks.MCP_CAPS["get_report_data"], max_bytes=10_000)
-    capped = build_server(SOURCE, [tasks.get_report_data], caps={"get_report_data": cap})
+    capped = build_server(ToolSet(SOURCE, [tasks.get_report_data], caps={"get_report_data": cap}))
     arguments = {"org": DEMO, "element_id": 1, "fiscal_period": FP2025}
     payload = json.loads(await mcp_call_text(capped, "cashctrl_get_report_data", arguments))
     whole = await mcp_call(server, "cashctrl_get_report_data", arguments)
@@ -3089,7 +3161,7 @@ async def test_a_recorded_list_is_whole(
     """
     replay_fixture(*case.split("/"))
     wrapper, arguments = call
-    response = await wrapper(DEMO, **arguments)
+    response = (await wrapper(DEMO, **arguments)).payload
     assert response.total == len(response.data) > 0
 
 

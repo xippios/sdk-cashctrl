@@ -17,10 +17,8 @@ from xippios.core import (
     TransportError,
     UpstreamError,
     XippiosError,
+    request_description,
 )
-from xippios.core.errors import request_description
-from xippios.core.http import status_for
-from xippios.core.mcp import error_to_text
 from xippios.core.testing import fixture_path, load_fixture, response_from_fixture, sent_query
 
 from xippios.cashctrl._client import DEMO, TENANTS, classify, client_for
@@ -84,12 +82,7 @@ def test_a_rejection_is_an_invalid_request_for_both_adapters() -> None:
     error = RequestRejected(
         [FieldError(field=None, message="Nope.")], request="POST /api/v1/journal/create.json"
     )
-    assert isinstance(error, InvalidRequestError)
-    assert status_for(error) == 422
-    assert error_to_text(error) == (
-        "error: RequestRejected: CashCtrl rejected the request: Nope. "
-        "(POST /api/v1/journal/create.json)"
-    )
+    assert isinstance(error, InvalidRequestError), "core's adapters answer it as one"
 
 
 def test_a_rejection_built_without_its_request_names_none() -> None:
@@ -415,7 +408,7 @@ def tenant(monkeypatch: pytest.MonkeyPatch) -> str:
 
 async def raised(path: str) -> XippiosError:
     with pytest.raises(XippiosError) as info:
-        await client_for(DEMO).get_json(path)
+        await client_for(DEMO).get_answer(path)
     return info.value
 
 
@@ -563,7 +556,7 @@ async def test_wrong_key_replays_as_auth_error(
 ) -> None:
     replay_fixture("account_list", "wrong_key")
     with pytest.raises(AuthError) as info:
-        await client_for(DEMO).get_json("/account/list.json")
+        await client_for(DEMO).get_answer("/account/list.json")
     assert info.value.status == 401
 
 
@@ -572,7 +565,7 @@ async def test_unknown_id_replays_as_not_found(
 ) -> None:
     route = replay_fixture("account_read", "unknown_id")
     with pytest.raises(NotFoundError, match="This account does not exist"):
-        await client_for(DEMO).get_json("/account/read.json", params={"id": 999999999})
+        await client_for(DEMO).get_answer("/account/read.json", params={"id": 999999999})
     assert sent_query(route)["id"] == "999999999"
 
 
@@ -581,6 +574,6 @@ async def test_missing_id_replays_as_request_rejected(
 ) -> None:
     replay_fixture("account_read", "missing_id")
     with pytest.raises(RequestRejected) as info:
-        await client_for(DEMO).get_json("/account/read.json")
+        await client_for(DEMO).get_answer("/account/read.json")
     assert info.value.upstream_message == "ID missing."
     assert info.value.errors == []

@@ -9,15 +9,15 @@ as ``order/bookentry/list.json`` lists it, ``orderId`` naming its order and ``ty
 it first (``tasks_write``); no read tool serves it.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.models import OrderBookEntry, ReadResponse
 
 __all__ = ["order_bookentry_read"]
 
 
-async def order_bookentry_read(org: str, id: int) -> OrderBookEntry:
+async def order_bookentry_read(org: str, id: int) -> Answer[OrderBookEntry]:
     """Call ``order/bookentry/read.json`` for organisation ``org`` and return the entry.
 
     Args:
@@ -27,8 +27,10 @@ async def order_bookentry_read(org: str, id: int) -> OrderBookEntry:
     Raises:
         NotFoundError: No book entry has this id.
     """
-    raw = await client_for(org).get_json("/order/bookentry/read.json", params={"id": id})
-    response = parse(
-        ReadResponse[OrderBookEntry], raw, source=SOURCE, endpoint="order/bookentry/read.json"
+    answer = await client_for(org).get_answer(
+        "/order/bookentry/read.json",
+        params={"id": id},
+        parse=ReadResponse[OrderBookEntry],
+        endpoint="order/bookentry/read.json",
     )
-    return response.data
+    return Answer(answer.payload.data, answer.retrieved_at)

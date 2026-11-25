@@ -1,13 +1,3 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#     "beautifulsoup4==4.15.0",
-#     "markdownify==1.2.3",
-# ]
-#
-# [tool.uv]
-# exclude-newer = "2026-10-23T00:00:00Z"
-# ///
 """Refresh the upstream documentation snapshot in ``docs/upstream/`` (``/refresh-upstream``).
 
 The CashCtrl API documentation (https://app.cashctrl.com/static/help/en/api/index.html)
@@ -15,65 +5,78 @@ is one server-rendered HTML page. Its table of contents has five general entries
 (Introduction, Authentication, Error handling, Language, Examples) and one entry per
 module (Account, Common, File, ...), and each module groups several controllers, each
 with its operations. ``toc.js`` only scrolls and highlights the table of contents and
-``main.css`` only styles the page, so neither is captured. This script fetches the page
-once and writes:
+``main.css`` only styles the page, so neither is captured.
 
-- ``<entry>.md``: one Markdown file per top-level entry of the table of contents, named
-  after the entry (``error-handling.md``, ``common.md``), holding the page's sections for
-  that entry under a one-line provenance header (the URL with its fragment);
-- ``FETCHED.md``: regenerated entirely, with the page's fingerprint, the attribution and
-  one row per file with the fetch time, the UTC time of the run with an explicit ``Z``
-  (conventions §3), and a note naming the tables kept as HTML.
-
-``OBSERVED.md``, the one file under ``docs/upstream/`` written by hand, the notes on what
-upstream does but never documents, is never written or removed here: ``FETCHED.md`` lists
-it in a row of its own where it exists, and an entry of the table of contents that would
-be written under its name stops the run (conventions §3).
+The script declares its snapshot, ``SNAPSHOT``, and runs it on core's frame,
+``xippios.core.refresh`` (sdk-core ADR-0062): the fetch, the attribution check,
+``FETCHED.md``, the write and ``--check`` are the frame's. Its own code is the hook
+``split``, which makes one Markdown file per top-level entry of the table of contents from
+the page, ``<entry>.md`` named after the entry (``error-handling.md``, ``common.md``),
+holding the page's sections for that entry under a one-line provenance header (the URL
+with its fragment), and ``note``, which names the files that keep a table as HTML.
+``OBSERVED.md``, the one file under ``docs/upstream/`` written by hand, is never written:
+the frame lists it in a row of its own, and an entry that would be written under its name
+or ``FETCHED.md``'s, in any letter case, stops the run (conventions §3).
 
 Every table on the page is a two-column parameter table (a ``<th>`` name, a ``<td>`` with
 labels and description). It becomes a pipe table, or an HTML table where it nests another
-table. The script stops on any other table shape, on a tag in a table cell outside
+table. ``split`` stops on any other table shape, on a tag in a table cell outside
 ``CELL_TAGS``, on an unknown icon and on any other change to the page's structure, so that
 a new construct is looked at before it is converted; it also stops unless every section
-shows the same words, in the same order, on the page and in the Markdown. Files a previous
-snapshot had and this one does not are removed, ``OBSERVED.md`` never. The same page gives
-the same snapshot files on any day; only ``FETCHED.md`` carries the time. No key is needed
-or read. Run from the repository root, or give a saved copy of the page to work offline::
+shows the same words, in the same order, on the page and in the Markdown. The same page
+gives the same snapshot files on any day; only ``FETCHED.md`` carries the time.
+
+The frame checks the attribution on every run: the footer's copyright notice, ``NOTICE``,
+in the alternative text of its logo, and the error handling's link to the terms.
+
+The port to the frame gave up six things the frame carries for no single source (sdk-core
+ADR-0062, decisions 3 and 10): a run from a saved copy of the page (``--from-file``), a
+``User-Agent`` of its own, the page asked for gzipped, the removal of an entry's file at
+the top of ``docs/upstream/`` once the table of contents drops the entry, the fragment of
+the entry in each file's row of ``FETCHED.md``, which names the page's URL while the file's
+first line keeps the fragment, and its check that the notice stands in the footer's logo,
+since the frame checks it on the page as a whole. The frame removes a file it no longer
+produces from the subdirectories it writes to alone, so such a file is removed by hand, and
+``--check`` names no leftover. No key is needed or read. Run from the
+repository root, in the project's environment, whose dev group holds the converter::
 
     uv run scripts/refresh_upstream.py
-    uv run scripts/refresh_upstream.py --from-file index.html
+    uv run scripts/refresh_upstream.py --check
 """
 
-import argparse
-import gzip
-import hashlib
 import html
-import http.client
 import re
-import time
-import urllib.error
-import urllib.request
-from collections.abc import Iterator
+import sys
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup, Comment, Tag
 from bs4.element import NavigableString, PageElement
 from markdownify import ATX, BACKSLASH, MarkdownConverter
+from xippios.core.refresh import (
+    NotFetched,
+    Page,
+    Response,
+    Row,
+    Section,
+    Snapshot,
+    Statement,
+    changed,
+    decode,
+    run,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUT = ROOT / "docs/upstream"
 OBSERVED = "OBSERVED.md"
 """The notes on what upstream does but never documents, written by hand (conventions §3)."""
-COMMAND = "uv run scripts/refresh_upstream.py"
 
 PAGE_URL = "https://app.cashctrl.com/static/help/en/api/index.html"
-USER_AGENT = "xippios-cashctrl refresh_upstream (+https://github.com/xippios/sdk-cashctrl)"
-TIMEOUT = 60.0
-RETRY_PAUSE = 10.0
-"""Seconds before the one retry."""
+NOTICE = "\N{COPYRIGHT SIGN} 2026 CashCtrl Ltd."
+"""The footer's copyright notice as the page prints it, in its logo's alt text."""
+TERMS = "https://cashctrl.com/en/about/terms"
+"""CashCtrl's terms, which the error handling's text links as "Terms of Service"."""
 
 ICONS = {
     "fa-arrow-right": "\N{RIGHTWARDS ARROW}",
@@ -113,20 +116,6 @@ _WORD = re.compile(r"\w+")
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 _LINK_TARGET = re.compile(r"\]\([^()\s]*\)")
 _MARKUP_TAG = re.compile(r"(?<!\\)</?[A-Za-z][A-Za-z0-9]*(?=[\s/>])[^<>]*>")
-_COPYRIGHT = re.compile(r"\N{COPYRIGHT SIGN} (\d{4}) CashCtrl Ltd\.+")
-
-
-@dataclass(frozen=True)
-class Response:
-    """The page: status, body (decompressed) and the validators sent with it.
-
-    ``status`` is None for a page read from a local file, which has no validators either.
-    """
-
-    status: int | None
-    body: bytes
-    etag: str | None
-    last_modified: str | None
 
 
 @dataclass(frozen=True)
@@ -157,81 +146,12 @@ class _Row:
     description: Tag
 
 
-class _RetryableError(Exception):
-    """A network error or a 5xx: worth one more attempt."""
-
-
 class _CellError(Exception):
     """A tag a parameter table's cell may not hold; ``convert_section`` names the operation."""
 
 
-def _log(message: str) -> None:
-    print(message, flush=True)  # noqa: T201
-
-
-def _get(url: str) -> Response:
-    request = urllib.request.Request(
-        url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"}
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-            body: bytes = response.read()
-            status: int = response.status
-            headers = response.headers
-    except urllib.error.HTTPError as error:
-        if error.code >= 500:
-            raise _RetryableError(f"HTTP {error.code} {error.reason}") from None
-        raise SystemExit(f"GET {url}: HTTP {error.code} {error.reason}") from None
-    except (http.client.HTTPException, OSError) as error:  # URLError is an OSError
-        raise _RetryableError(str(error)) from None
-    if status != 200:
-        raise SystemExit(f"GET {url}: expected HTTP 200, got {status}")
-    content_type = headers.get("Content-Type", "").split(";")[0].strip().lower()
-    if content_type != "text/html":
-        raise SystemExit(f"GET {url}: expected text/html, got {content_type!r}")
-    encoding = headers.get("Content-Encoding", "identity").strip().lower()
-    if encoding == "gzip":
-        body = gzip.decompress(body)
-    elif encoding != "identity":
-        raise SystemExit(f"GET {url}: unexpected Content-Encoding {encoding!r}")
-    return Response(status, body, headers.get("ETag"), headers.get("Last-Modified"))
-
-
-def fetch(url: str) -> Response:
-    """GET ``url``; retry once on a network error or a 5xx."""
-    try:
-        return _get(url)
-    except _RetryableError as error:
-        _log(f"  {url}: {error}; retrying once in {RETRY_PAUSE:.0f} s")
-    time.sleep(RETRY_PAUSE)
-    try:
-        return _get(url)
-    except _RetryableError as error:
-        raise SystemExit(f"GET {url}: {error} (after one retry)") from None
-
-
-def read_file(path: Path) -> Response:
-    """The page from a saved copy (``--from-file``): its bytes as they are, no validators."""
-    try:
-        return Response(None, path.read_bytes(), None, None)
-    except OSError as error:
-        raise SystemExit(f"--from-file {path}: {error}") from None
-
-
-def _origin(response: Response) -> str:
-    """Where the page came from: the HTTP status and validators, or a local file."""
-    if response.status is None:
-        return "read from a local file: ETag not available, Last-Modified not available"
-    etag = f"`{response.etag}`" if response.etag else "not sent"
-    modified = response.last_modified or "not sent"
-    return f"HTTP {response.status}, ETag {etag}, Last-Modified {modified}"
-
-
 def _page_changed(what: str) -> SystemExit:
-    return SystemExit(
-        f"The documentation page changed: {what}.\n"
-        f"Inspect {PAGE_URL} and update scripts/refresh_upstream.py. Nothing was written."
-    )
+    return changed(PAGE_URL, what)
 
 
 def escape_stray_tags(source: str) -> tuple[str, list[str]]:
@@ -316,16 +236,6 @@ def split_page(soup: BeautifulSoup) -> list[Part]:
     if empty or len(set(names)) != len(names) or {"fetched.md", OBSERVED.lower()} & set(names):
         raise _page_changed(f"entries without sections {empty} or clashing file names {names}")
     return parts
-
-
-def copyright_year(soup: BeautifulSoup) -> str:
-    """The year in the footer's copyright notice, which is the alt text of its logo."""
-    logo = soup.select_one("main.content > footer img[alt]")
-    notice = re.sub(r"\s+", " ", str(logo.get("alt"))).strip() if logo else ""
-    match = _COPYRIGHT.fullmatch(notice)
-    if match is None:
-        raise _page_changed(f"the footer's copyright notice is {notice!r}")
-    return match[1]
 
 
 class _Converter(MarkdownConverter):
@@ -653,146 +563,24 @@ def _headings(markdown: str) -> int:
     return count
 
 
-def render_fetched(
-    parts: list[Part],
-    files: dict[str, str],
-    response: Response,
-    fetched: str,
-    year: str,
-    observed: bool = False,
-) -> str:
-    """The whole of ``FETCHED.md``; ``year`` is the year of the footer's copyright notice.
+def split(page: Page, response: Response) -> Mapping[str, bytes]:
+    """The snapshot's files from the page: one Markdown file per entry of its contents.
 
-    ``fetched`` is the UTC time of the run in ISO 8601 with an explicit ``Z``
-    (``2026-10-24T09:15:00Z``, conventions §3); a file of ``files`` that holds an HTML
-    table gets a note saying so. ``observed`` is whether the snapshot's directory holds
-    ``OBSERVED.md``, which then gets a row of its own.
+    The page must be HTML in UTF-8; every section's words must be the same on the page and
+    in the Markdown, and every ``h2`` and ``h3`` heading converted, or the run stops before
+    anything is written.
     """
-    digest = hashlib.sha256(response.body).hexdigest()
-    notice = f"\N{COPYRIGHT SIGN} {year} CashCtrl Ltd."
-    lines = [
-        "# Upstream documentation snapshot \N{EM DASH} CashCtrl",
-        "",
-        "Source of truth for every endpoint wrapper (sdk-core ADR-0028). Files in this",
-        f"directory are fetched from {PAGE_URL} by",
-        "`scripts/refresh_upstream.py` (`/refresh-upstream`), never edited by hand but",
-        f"`{OBSERVED}`, where it exists: what upstream does but never documents, each note",
-        "with its evidence. The snapshot is refreshed deliberately by PR so that changes",
-        "show up as diffs. This file is generated by the same script.",
-        "",
-        "## How the page is captured",
-        "",
-        "The documentation is one server-rendered HTML page whose table of contents links to",
-        "its sections by fragment (`#intro`, `#/account`). The script fetches the page once",
-        "and writes one Markdown file per top-level entry of the table of contents, named",
-        "after the entry: the five general sections, then one file per module holding all of",
-        "the module's controllers. Each file starts with one line, the URL of its entry; the",
-        "fetch time is recorded only in this file. Headings keep the page's levels: `##`",
-        "controller, `###` operation, `####` Parameters, Endpoint or Example; each paragraph is",
-        "one line.",
-        "",
-        "Navigation (table of contents, breadcrumbs, anchors), scripts, styles, the footer",
-        "and the parameter names the page repeats for small screens are dropped; the arrow",
-        "icons between menu items become \N{RIGHTWARDS ARROW}. `toc.js` (scrolling and",
-        "table-of-contents highlighting) and `main.css` are not captured. Endpoints, curl",
-        "examples and JSON responses become fenced code blocks, verbatim. Every table on the",
-        "page is a two-column parameter table; it becomes a pipe table with an empty header",
-        "row and three columns: name, labels (mandatory or optional, data type, limits) and",
-        "description. A table for which the page gives no labels has two columns, name and",
-        "description. A table that nests another (the fields of a JSON parameter) cannot be a",
-        "pipe table and stays an HTML table with the same columns, reduced to code, links and",
-        "line breaks. Links into the page are absolute.",
-        "",
-        f"Regenerate: `{COMMAND}`",
-        "",
-        "## Attribution and vendor examples",
-        "",
-        f"The documentation is {notice}, as the page's footer states. Its text is",
-        "reproduced here verbatim, converted to Markdown, as the reference for this package",
-        "(sdk-core ADR-0028). The page's examples contain the vendor's placeholder API key",
-        "and example pre-authenticated object-storage URLs; they are reproduced verbatim",
-        "from the public page and are not credentials of this project.",
-        "",
-        "## Files",
-        "",
-        "The page the snapshot was made from:",
-        "",
-        f"- {len(response.body)} bytes, sha256 `{digest}`",
-        f"- {_origin(response)}",
-        "",
-        "`Fetched` is the UTC time of the run in ISO 8601 with an explicit `Z`. A file whose",
-        "note says so keeps a table that nests another as its HTML, as described above.",
-        "",
-        "| File | URL | Fetched | Note |",
-        "| --- | --- | --- | --- |",
-    ]
-    lines += [
-        f"| {part.file} | {part.url} | {fetched} | {_note(files[part.file])} |" for part in parts
-    ]
-    if observed:
-        hand = "written by hand: what upstream does but never documents; not fetched or checked"
-        lines.append(f"| {OBSERVED} | - | - | {hand} |")
-    return "\n".join(lines) + "\n"
-
-
-def _note(markdown: str) -> str:
-    """The note of a snapshot file in ``FETCHED.md``: whether it keeps tables as HTML."""
-    return "nested tables kept as HTML" if "<table>" in markdown else ""
-
-
-def write_snapshot(out: Path, files: dict[str, str], fetched_md: str) -> None:
-    """Write every file, drop files the new snapshot no longer has, write ``FETCHED.md``.
-
-    ``OBSERVED.md`` is written by hand and kept as it is.
-    """
-    if out.exists() and any(out.iterdir()) and not (out / "FETCHED.md").is_file():
-        raise SystemExit(f"{out} is neither empty nor a snapshot (no FETCHED.md); not writing")
-    out.mkdir(parents=True, exist_ok=True)
-    for path in sorted(out.iterdir()):
-        if path.is_file() and path.name not in ("FETCHED.md", OBSERVED, *files):
-            path.unlink()
-            _log(f"  removed {path.name}: no longer upstream")
-    for name, text in files.items():
-        (out / name).write_text(text, encoding="utf-8", newline="\n")
-    (out / "FETCHED.md").write_text(fetched_md, encoding="utf-8", newline="\n")
-
-
-def main() -> None:
-    """Fetch the page, split and convert it, check the words, then write the snapshot."""
-    parser = argparse.ArgumentParser(description="Refresh docs/upstream/ from CashCtrl.")
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="snapshot directory")
-    parser.add_argument(
-        "--from-file",
-        type=Path,
-        metavar="PATH",
-        help="read the page from a saved copy instead of fetching it (no ETag is recorded)",
-    )
-    args = parser.parse_args()
-    out: Path = args.out
-    from_file: Path | None = args.from_file
-    fetched = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    if from_file is None:
-        _log(f"Page: {PAGE_URL}")
-        response = fetch(PAGE_URL)
-    else:
-        _log(f"Page: {PAGE_URL}, read from {from_file}")
-        response = read_file(from_file)
-    digest = hashlib.sha256(response.body).hexdigest()
-    _log(f"  {len(response.body)} bytes, sha256 {digest}, {_origin(response)}")
-    try:
-        source = response.body.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise SystemExit(f"{from_file or PAGE_URL}: not UTF-8 ({error})") from None
+    content_type = (response.content_type or "").split(";")[0].strip().lower()
+    if content_type != "text/html":
+        raise _page_changed(f"expected text/html, got {content_type!r}")
+    source = decode(response)
     if _PLACEHOLDER.search(source):
         raise _page_changed("the page contains the converter's placeholder text")
     source, stray = escape_stray_tags(source)
     if stray:
-        _log(f"  kept as text, not HTML elements: {', '.join(sorted(set(stray)))}")
-
+        print(f"  kept as text, not HTML elements: {', '.join(sorted(set(stray)))}")  # noqa: T201
     soup = BeautifulSoup(source, "html.parser")
     parts = split_page(soup)
-    year = copyright_year(soup)
     expected = sum(len(s.select("h2, h3")) for part in parts for s in part.sections)
     files: dict[str, str] = {}
     words = 0
@@ -807,14 +595,81 @@ def main() -> None:
         files[part.file] = render_part(part, sections)
     converted = sum(_headings(text) for text in files.values())
     if converted != expected:
-        raise SystemExit(f"{expected} h2/h3 headings on the page, {converted} converted")
+        raise _page_changed(f"{expected} h2/h3 headings on the page, {converted} converted")
     for part in parts:
-        _log(f"  {part.file}: {part.label}, {len(part.sections)} sections, {part.url}")
-    _log(f"  {words} words, the same on the page and in the Markdown, section by section")
-    observed = (out / OBSERVED).is_file()
-    write_snapshot(out, files, render_fetched(parts, files, response, fetched, year, observed))
-    _log(f"Wrote {len(files)} files and FETCHED.md under {out}")
+        print(f"  {part.file}: {part.label}, {len(part.sections)} sections, {part.url}")  # noqa: T201
+    print(f"  {words} words, the same on the page and in the Markdown, section by section")  # noqa: T201
+    return {name: text.encode("utf-8") for name, text in files.items()}
+
+
+def note(row: Row) -> str:
+    """A file's note in ``FETCHED.md``: whether it keeps a table that nests another as HTML."""
+    return "nested tables kept as HTML" if b"<table>" in (row.content or b"") else ""
+
+
+def sections(rows: Sequence[Row]) -> Sequence[Section]:
+    """``FETCHED.md``'s section of the source's own: the vendor's examples."""
+    return (Section("Vendor examples", VENDOR_EXAMPLES),)
+
+
+CAPTURE = """\
+The documentation is one server-rendered HTML page whose table of contents links to its
+sections by fragment (`#intro`, `#/account`). The script fetches the page once and writes
+one Markdown file per top-level entry of the table of contents, named after the entry: the
+five general sections, then one file per module holding all of the module's controllers.
+Each file starts with one line, the URL of its entry; the fetch time is recorded only in
+this file. Headings keep the page's levels: `##` controller, `###` operation, `####`
+Parameters, Endpoint or Example; each paragraph is one line.
+
+Navigation (table of contents, breadcrumbs, anchors), scripts, styles, the footer and the
+parameter names the page repeats for small screens are dropped; the arrow icons between
+menu items become \N{RIGHTWARDS ARROW}. `toc.js` (scrolling and table-of-contents highlighting) and
+`main.css` are not captured. Endpoints, curl examples and JSON responses become fenced code
+blocks, verbatim. Every table on the page is a two-column parameter table; it becomes a
+pipe table with an empty header row and three columns: name, labels (mandatory or
+optional, data type, limits) and description. A table for which the page gives no labels
+has two columns, name and description. A table that nests another (the fields of a JSON
+parameter) cannot be a pipe table and stays an HTML table with the same columns, reduced to
+code, links and line breaks. Links into the page are absolute. The script stops unless every
+section shows the same words, in the same order, on the page and in the Markdown.
+"""
+"""``FETCHED.md``'s "How this is captured", the paragraphs parted by a blank line."""
+
+VENDOR_EXAMPLES = """\
+The page's examples contain the vendor's placeholder API key and example pre-authenticated
+object-storage URLs; they are reproduced verbatim from the public page and are not
+credentials of this project.
+"""
+"""``FETCHED.md``'s section of the source's own, written as given."""
+
+SNAPSHOT = Snapshot(
+    name="CashCtrl",
+    slug="cashctrl",
+    pages=(Page(PAGE_URL, split=True),),
+    attribution=(
+        Statement(NOTICE, PAGE_URL, where="the alternative text of the logo in the page's footer"),
+        Statement(
+            "Terms of Service",
+            PAGE_URL,
+            where="the error handling's link to CashCtrl's terms, on delays between requests",
+            link=TERMS,
+        ),
+    ),
+    not_fetched=(
+        NotFetched(
+            TERMS,
+            "CashCtrl's terms of service, which the error handling's 429 row links: no API "
+            "documentation, and the attribution records the link",
+        ),
+    ),
+    capture=CAPTURE,
+    out=ROOT / "docs" / "upstream",
+    split=split,
+    note=note,
+    sections=sections,
+)
+"""The snapshot the frame fetches, checks and writes: the one page, split by ``split``."""
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(run(SNAPSHOT))

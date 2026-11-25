@@ -7,21 +7,22 @@ of all categories."). The operation documents no parameters. Its answer, as
 ``parentId``.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.models import ListResponse, PersonCategory
 
 __all__ = ["person_category_list"]
 
 
-async def person_category_list(org: str) -> ListResponse[PersonCategory]:
+async def person_category_list(org: str) -> Answer[ListResponse[PersonCategory]]:
     """Call ``person/category/list.json`` for organisation ``org``.
 
     Args:
         org: A declared organisation, e.g. ``"demo"``.
     """
-    raw = await client_for(org).get_json("/person/category/list.json")
-    return parse(
-        ListResponse[PersonCategory], raw, source=SOURCE, endpoint="person/category/list.json"
+    return await client_for(org).get_answer(
+        "/person/category/list.json",
+        parse=ListResponse[PersonCategory],
+        endpoint="person/category/list.json",
     )

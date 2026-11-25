@@ -1,8 +1,8 @@
 """Live smoke tests: skipped unless XIPPIOS_LIVE_TESTS=1 (conventions §10).
 
-Every task function gets a live smoke test here, next to the reachability check, two
-list exports excepted (below). Every live test takes the ``demo_org`` fixture: live runs
-reach the demo organisation only, whose books are synthetic (``scripts/seed_demo.py``).
+Every task function gets a live smoke test here, two list exports excepted (below).
+Every live test takes the ``demo_org`` fixture: live runs reach the demo organisation
+only, whose books are synthetic (``scripts/seed_demo.py``).
 Each read test makes one call, but the reads, which first look an id up in a list
 (account 1020 by number, the first journal entry, person and sales order),
 ``list_order_book_entries``, which first lists the purchase orders for one that books,
@@ -77,26 +77,9 @@ tree ``report_tree`` reads once: the balance sheet of 2025 and the system collec
 each download reading the tree first; the payroll collection is refused after that read
 alone, and an element no report has is ``NotFoundError`` (``docs/upstream/OBSERVED.md``).
 
-The calls of one run: 33 for the reads (19, 9 for the discovery lists and the reports:
-one each, and the tree ``get_report_data`` reads first, 3 for the book entries of an
-order, with the list of purchase orders they read first, and the history, and 2 for an
-order's document, with the list of sales orders it reads first), 5 for the files (the
-list of sales orders, the order's PDF, the refused PDF of an unknown order, the journal
-export, the person export), 14 for the report files (the tree, then a tree and a file
-for each of the five files and the unknown element, and a tree for the refusal), 5
-lookups (accounts, tax codes, customers, vendors, the
-sales categories), 9 for the journal (sweep, create, the sweep's query seeing the new
-entry, the update's preview, the update as read and write, the read back, the delete as
-read and write), 7 for a person (the same without the query, the delete one call), 10
-for an order (sweep, create, the update's preview, two updates as read and write, the
-first without items and the second with, each read back, the delete), 9 for an order's
-status and payment (the purchase categories, sweep, create, the status, its read back,
-the payment, the delete, the purchase orders' journal entries, the download probe), 2
-for the refused delete of an entry an order booked (the list, the delete's read) and 13
-for an order's book entry (the purchase categories, sweep, the order's create, the
-entry's create, the order's entries, the refused delete's read, the update's preview,
-the update as read and write, the read back, the delete as read and write, the order's
-delete); 107 in all, one more per leftover swept, two for a journal entry.
+Core's testing plugin prints the run's requests as ``requests sent by the live run: <n>``,
+the count in the log of ``live.yml`` that ``/release-prep`` cites. A leftover that a sweep
+deletes costs one request more, two for a journal entry.
 """
 
 import json
@@ -108,6 +91,7 @@ from typing import Any
 
 import pytest
 from xippios.core import InvalidRequestError, NotFoundError
+from xippios.core.testing import send_once
 
 from xippios.cashctrl import api, tasks, tasks_write
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
@@ -145,12 +129,6 @@ def fiscal_periods() -> dict[str, int]:
         for period in tasks.list_fiscal_periods(DEMO).data
         if period.name is not None
     }
-
-
-async def test_upstream_answers(demo_org: str) -> None:
-    client = client_for(demo_org)
-    response = await client.request("GET", "/fiscalperiod/list.json", raise_on_error=False)
-    assert response.status_code == 200
 
 
 def test_list_organisations(demo_org: str) -> None:
@@ -958,8 +936,8 @@ async def test_order_status_payment_delete(
     assert not [entry.id for entry in booked.data if entry.order_id == gone], (
         "a journal entry of the deleted order is left"
     )
-    response = await client_for(demo_org).request(
-        "GET", "/order/payment/download", params=paying.data.payload, raise_on_error=False
+    response = await send_once.async_fn(
+        client_for(demo_org), "/order/payment/download", params=paying.data.payload
     )
     assert response.status_code < 500, "upstream answered"
     kind = media_type(response.headers.get("content-type"))
@@ -1046,7 +1024,7 @@ async def test_order_book_entry_create_update_delete(
         )
         performed(updated)
         assert updated.meta.request == {"org": demo_org, **planned.data.payload}
-        read_back = book_entry_values(await api.order_bookentry_read(demo_org, entry))
+        read_back = book_entry_values((await api.order_bookentry_read(demo_org, entry)).payload)
         assert read_back["amount"] == Decimal("60")
         assert derived_except(read_back, "amount") == derived_except(stored, "amount")
         deleted = await tasks_write.delete_order_book_entry_async(demo_org, entry, confirm=True)

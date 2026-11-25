@@ -14,9 +14,9 @@ fiscal period 2025, as
 
 from datetime import date
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.api._params import present
 from xippios.cashctrl.models import ReportData
 
@@ -57,7 +57,7 @@ async def report_element_data(
     language: str | None = None,
     sort: str | None = None,
     start_date: date | None = None,
-) -> ReportData:
+) -> Answer[ReportData]:
     """Call ``report/element/data.json`` for organisation ``org``.
 
     Args:
@@ -78,5 +78,9 @@ async def report_element_data(
         sort=sort,
         start_date=start_date,
     )
-    raw = await client_for(org).get_json("/report/element/data.json", params=params)
-    return parse(ReportData, raw, source=SOURCE, endpoint="report/element/data.json")
+    return await client_for(org).get_answer(
+        "/report/element/data.json",
+        params=params,
+        parse=ReportData,
+        endpoint="report/element/data.json",
+    )

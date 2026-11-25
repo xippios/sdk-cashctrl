@@ -72,8 +72,7 @@ from decimal import Decimal
 from typing import Any, TypeGuard, get_args
 
 from pydantic import BaseModel, JsonValue, ValidationError
-from xippios.core import InvalidRequestError, Result, sync
-from xippios.core.models import REDACTED
+from xippios.core import REDACTED, InvalidRequestError, Result, sync
 
 from xippios.cashctrl import api
 from xippios.cashctrl._client import nothing_written, refused
@@ -133,6 +132,21 @@ OrderOutcome = WritePreview[OrderDetailProjection] | WriteResult
 BookEntryOutcome = WritePreview[OrderBookEntry] | WriteResult
 """A book entry write's result: a preview (``performed`` false) or what was written (true)."""
 
+MCP_INSTRUCTIONS = (
+    "CashCtrl write tools via xippios. "
+    "Every tool takes org, the name of a configured organisation. "
+    "Every tool returns a preview unless confirm=true is passed. "
+    "Call it once without confirm, show the preview, then confirm."
+)
+"""The write server's instructions, which core's ``ToolSet.from_tasks`` reads (conventions §8)."""
+MCP_BOUND_INSTRUCTIONS = (
+    "CashCtrl write tools via xippios. "
+    "Every tool returns a preview unless confirm=true is passed. "
+    "Call it once without confirm, show the preview, then confirm."
+)
+"""The text of a write server ``--org`` binds, whose tools take no ``org``: core's sentence
+that names the organisation ends it."""
+
 NOTIFY_TYPES: tuple[str, ...] = get_args(NotifyType)
 RECURRENCES: tuple[str, ...] = get_args(Recurrence)
 LANGUAGES: tuple[str, ...] = get_args(Language)
@@ -190,23 +204,27 @@ def _preview[T](
     endpoint: str,
     payload: dict[str, str],
     *,
+    reads: Sequence[str],
     before: T | None = None,
     changes: dict[str, str] | None = None,
+    retrieved_at: datetime | None = None,
 ) -> Result[WritePreview[T] | WriteResult]:
     preview = WritePreview[T](
         endpoint=endpoint,
         payload=_shown(payload),
+        reads=list(reads),
         before=before,
         changes=None if changes is None else _shown(changes),
     )
-    return Result[WritePreview[T] | WriteResult](data=preview, meta=_meta(org, endpoint, {}))
+    meta = _meta(org, endpoint, {}, retrieved_at=retrieved_at)
+    return Result[WritePreview[T] | WriteResult](data=preview, meta=meta)
 
 
 def _performed[T](
     org: str, endpoint: str, payload: dict[str, str], answer: WriteAnswer
 ) -> Result[WritePreview[T] | WriteResult]:
     result = WriteResult(insert_id=answer.insert_id, message=answer.message)
-    meta = _meta(org, endpoint, _shown(payload))
+    meta = _meta(org, endpoint, _shown(payload), retrieved_at=None)
     return Result[WritePreview[T] | WriteResult](data=result, meta=meta)
 
 
@@ -603,27 +621,25 @@ async def create_journal_entry_async(
 ) -> Result[JournalOutcome]:
     """Book a manual journal entry; without confirm=true it only previews the entry.
 
-    Without ``confirm`` nothing is written and no request is sent: the result is a
-    preview, ``performed`` false, whose ``payload`` holds the exact form fields CashCtrl
-    would receive. Show it, then call again with ``confirm=true`` to book; the result is
-    then ``performed`` true with ``insert_id``, the new entry's id. A simple entry takes
-    ``amount``, ``debit_id`` and ``credit_id``; a collective entry takes ``items``, and
-    upstream then ignores those three. ``amount`` with a ``tax_id`` is the gross amount,
-    VAT included, although the tax codes' calculation
-    type reads NET. Account ids come from ``list_accounts`` (the ``id``, not the account
-    number; ``list_account_categories`` gives the ``category_id`` that narrows it), tax
-    codes from ``list_tax_codes``, persons from ``list_persons``, currencies from
-    ``list_currencies``, cost centers from ``list_cost_centers`` and custom field names
-    from ``list_custom_fields`` with ``type`` ``JOURNAL``. CashCtrl
-    checks the entry and refuses it naming the fields, e.g. ``debitId: This field cannot
-    be empty.``; nothing is checked here that upstream checks itself.
+    Without ``confirm`` nothing is written: the preview, ``performed`` false, holds the exact
+    ``payload`` CashCtrl would receive; ``confirm=true`` answers ``performed`` true with
+    ``insert_id``, the new entry's id. A simple entry takes ``amount``, ``debit_id`` and
+    ``credit_id``; a collective entry takes ``items``, and upstream then ignores those three.
+    ``amount`` with a ``tax_id`` is gross, VAT included, although the tax codes' calculation
+    type reads NET. CashCtrl checks the entry and refuses it naming the fields, e.g. ``debitId:
+    This field cannot be empty.``. The write is sent once: where it fails with its outcome
+    unknown, ``list_journal_entries`` shows whether it was booked.
+
+    The preview sends no request, and its ``reads`` is empty.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         date_added: The date of the entry, e.g. ``2026-10-24``.
         amount: The amount, e.g. ``125.50``; gross when ``tax_id`` is set.
-        debit_id: The account on the debit side, an ``id`` from ``list_accounts``, e.g. ``3``.
-        credit_id: The account on the credit side, an ``id`` from ``list_accounts``, e.g. ``42``.
+        debit_id: The account on the debit side, an ``id`` from ``list_accounts``, e.g. ``3``;
+            the ``id``, not the account number.
+        credit_id: The account on the credit side, an ``id`` from ``list_accounts``, e.g.
+            ``42``; the ``id``, not the account number.
         title: The description of the entry, at most 250 characters, e.g. ``"Miete Oktober"``.
         tax_id: A tax code, an ``id`` from ``list_tax_codes``, e.g. ``9`` (``UN1``).
         associate_id: The business partner, an ``id`` from ``list_persons``, e.g. ``7``;
@@ -690,7 +706,7 @@ async def create_journal_entry_async(
     )
     endpoint = "journal/create.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.journal_create(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -728,30 +744,28 @@ async def update_journal_entry_async(
 ) -> Result[JournalOutcome]:
     """Change a manual journal entry; without confirm=true it only previews the change.
 
-    The entry is read first (``journal/read.json``), the parameters given are applied,
-    and every parameter ``journal/update.json`` documents is sent, taken from the entry
-    where not given: upstream empties every parameter an update leaves out. A parameter
-    left out here keeps its stored value; one named in ``clear`` is sent empty. Without
-    ``confirm`` nothing is written: the preview (``performed`` false) shows the
-    ``payload`` that would be sent, the entry as it is (``before``) and the
-    ``changes``, at the cost of that one read. ``confirm=true`` reads the entry again
-    and recomputes the payload, so it can differ from the preview if the entry changed
-    in between. Refused before anything is written: an entry an order or a salary run
-    booked (``order_id``, ``order_book_entry_id`` or ``salary_book_entry_id`` set); a
-    simple entry that gives no ``amount``, ``debit_id`` or ``credit_id``; an entry
-    holding attachments or allocations, which cannot be carried over, unless the call
-    replaces or clears them. ``amount`` with a ``tax_id`` is gross. The ids come from
-    the lists ``create_journal_entry`` names: ``list_accounts``, ``list_tax_codes``,
-    ``list_persons``, ``list_currencies``, ``list_cost_centers`` and
-    ``list_custom_fields`` (``JOURNAL``).
+    The entry is read first, the parameters given are applied, and every parameter the update
+    documents is sent, the stored value where none is given, since upstream empties what an
+    update leaves out. Without ``confirm`` nothing is written: the preview shows the
+    ``payload``, the entry as it is (``before``) and the ``changes``. Refused before anything is
+    written: an entry an order or a salary run booked, a simple entry without ``amount``,
+    ``debit_id`` or ``credit_id``, and one holding attachments or allocations that the call does
+    not replace or clear. A confirmed call sends two requests, the read and the write, five with
+    the read's retries; the write is sent once, and where it fails with its outcome unknown,
+    ``get_journal_entry`` shows whether it was applied.
+
+    The preview reads the entry once with ``journal/read.json``, one request, and names it in
+    ``reads``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The entry's ``id`` from ``list_journal_entries``, e.g. ``52``.
         date_added: The date of the entry, e.g. ``2026-10-24``.
         amount: The amount, e.g. ``125.50``; gross when ``tax_id`` is set.
-        debit_id: The account on the debit side, an ``id`` from ``list_accounts``, e.g. ``3``.
-        credit_id: The account on the credit side, an ``id`` from ``list_accounts``, e.g. ``42``.
+        debit_id: The account on the debit side, an ``id`` from ``list_accounts``, e.g. ``3``;
+            the ``id``, not the account number.
+        credit_id: The account on the credit side, an ``id`` from ``list_accounts``, e.g.
+            ``42``; the ``id``, not the account number.
         title: The description of the entry, at most 250 characters, e.g. ``"Miete Oktober"``.
         tax_id: A tax code, an ``id`` from ``list_tax_codes``, e.g. ``9`` (``UN1``).
         associate_id: The business partner, an ``id`` from ``list_persons``, e.g. ``7``;
@@ -784,7 +798,9 @@ async def update_journal_entry_async(
             ``["custom"]`` empties every custom field. A parameter cannot be both given
             and cleared, and ``sequence_number_id``, not stored and sent only when
             given, cannot be cleared.
-        confirm: ``true`` writes the change; ``false`` (the default) only previews it.
+        confirm: ``true`` writes the change; ``false`` (the default) only previews it; ``true``
+            reads the entry again and recomputes the payload, which can differ from the preview's if
+            the entry changed in between.
     """
     _check_id(id)
     _check_associate(associate_id)
@@ -816,7 +832,8 @@ async def update_journal_entry_async(
     _choices(notify_type=(notify_type, NOTIFY_TYPES), recurrence=(recurrence, RECURRENCES))
     cleared = _clear_names(clear, JOURNAL_UPDATE, given, custom)
     changes = _changes(api.journal_fields, JOURNAL_UPDATE, given, cleared, custom)
-    entry = await api.journal_read(org, id)
+    read = await api.journal_read(org, id)
+    entry = read.payload
     booked = _booked(entry, "updated")
     if booked is not None:
         raise booked
@@ -840,7 +857,15 @@ async def update_journal_entry_async(
     endpoint = "journal/update.json"
     if confirm is not True:
         before = _journal_entry_detail(entry)
-        return _preview(org, endpoint, fields, before=before, changes=changes)
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["journal/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=before,
+            changes=changes,
+        )
     answer = await api.journal_update(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -850,34 +875,43 @@ async def delete_journal_entry_async(
 ) -> Result[JournalOutcome]:
     """Delete one manual journal entry; without confirm=true it only shows the entry.
 
-    The entry is read first (``journal/read.json``), with ``confirm`` as well, and one
-    that an order or a salary run booked (``order_id``, ``order_book_entry_id`` or
-    ``salary_book_entry_id`` set) is refused with ``InvalidRequestError`` before
-    anything is deleted, as ``update_journal_entry`` refuses it: upstream documents that
-    such entries cannot be deleted here, but how it answers such a delete was never
-    observed, so the check is made here, and a confirmed delete reads again so that it
-    holds for the entry as it is when deleted, not as the preview saw it. Without
-    ``confirm`` nothing is deleted: the preview (``performed`` false) shows the entry
-    that would be deleted (``before``) and the ``payload``, ``ids`` with this one id.
-    ``confirm=true`` deletes it after that read. An unknown id raises
-    ``NotFoundError`` at the read; an entry deleted between the read and the delete is
-    refused by upstream with ``RequestRejected`` ("This book entry does not exist.",
-    observed).
+    The entry is read first, with ``confirm`` as well, and one that an order or a salary run
+    booked is refused with ``InvalidRequestError`` before anything is deleted, as
+    ``update_journal_entry`` refuses it: upstream documents that such entries cannot be deleted
+    here, and a confirmed delete reads again, so the check holds for the entry as it is when
+    deleted. Without ``confirm`` nothing is deleted: the preview shows the entry (``before``)
+    and the ``payload``, ``ids`` with this one id. A confirmed call sends two requests, the read
+    and the delete, five with the read's retries; the delete is sent once, and where it fails
+    with its outcome unknown, ``get_journal_entry`` shows whether it was applied.
+
+    The preview reads the entry once with ``journal/read.json``, one request, and names it in
+    ``reads``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
-        id: The entry's ``id`` from ``list_journal_entries``, e.g. ``52``.
+        id: The entry's ``id`` from ``list_journal_entries``, e.g. ``52``. An unknown id raises
+            ``NotFoundError`` at the read, and an entry deleted between the read and the delete is
+            refused by upstream with ``RequestRejected`` ("This book entry does not exist.",
+            observed).
         confirm: ``true`` deletes the entry; ``false`` (the default) only shows it.
     """
     _check_id(id)
     fields = api.delete_fields([id])
     endpoint = "journal/delete.json"
-    entry = await api.journal_read(org, id)
+    read = await api.journal_read(org, id)
+    entry = read.payload
     booked = _booked(entry, "deleted")
     if booked is not None:
         raise booked
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=_journal_entry_detail(entry))
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["journal/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=_journal_entry_detail(entry),
+        )
     answer = await api.journal_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 
@@ -1129,18 +1163,14 @@ async def create_person_async(
 ) -> Result[PersonOutcome]:
     """Create a person (customer, vendor, employee, ...); without confirm=true only a preview.
 
-    Without ``confirm`` nothing is written and no request is sent: the result is a
-    preview, ``performed`` false, whose ``payload`` holds the exact form fields CashCtrl
-    would receive. Call again with ``confirm=true`` to create; the result is then
-    ``performed`` true with ``insert_id``, the new person's id. Upstream needs at least
-    one of ``company``, ``first_name`` or ``last_name`` and refuses a person without,
-    naming the fields. The roles are flags (``is_customer``, ``is_vendor``, ...); a flag
-    left out is not sent, so upstream applies its default. Without ``nr`` and
-    ``sequence_number_id`` upstream may number the person from a sequence itself. Ids:
-    ``category_id`` from ``list_person_categories``, ``title_id`` from
-    ``list_person_titles``, an employee's ``location_id`` from ``list_locations``,
-    ``superior_id`` from ``list_persons`` and custom field names from
-    ``list_custom_fields`` with ``type`` ``PERSON``.
+    Without ``confirm`` nothing is written: the preview, ``performed`` false, holds the exact
+    ``payload`` CashCtrl would receive; ``confirm=true`` answers ``performed`` true with
+    ``insert_id``, the new person's id. Upstream needs at least one of ``company``,
+    ``first_name`` or ``last_name`` and refuses a person without, naming the fields. A role flag
+    left out is not sent, so upstream applies its default. The write is sent once: where it
+    fails with its outcome unknown, ``list_persons`` shows whether the person was created.
+
+    The preview sends no request, and its ``reads`` is empty.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1165,7 +1195,8 @@ async def create_person_async(
         is_insurance: ``true`` for an insurance company.
         is_family: ``true`` for a family.
         is_inactive: ``true`` marks the person inactive; upstream's default is false.
-        nr: The person number, at most 50 characters, e.g. ``"K-1001"``.
+        nr: The person number, at most 50 characters, e.g. ``"K-1001"``. Without it and
+            ``sequence_number_id`` upstream may number the person from a sequence itself.
         sequence_number_id: The sequence number that generates ``nr``, e.g. ``3``.
         language: ``DE``, ``EN``, ``FR`` or ``IT``, e.g. for documents.
         title_id: A title (Mr., Mrs., Dr.), an ``id`` from ``list_person_titles``,
@@ -1255,7 +1286,7 @@ async def create_person_async(
     )
     endpoint = "person/create.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.person_create(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -1310,26 +1341,18 @@ async def update_person_async(
 ) -> Result[PersonOutcome]:
     """Change a person; without confirm=true it only previews the change.
 
-    The person is read first (``person/read.json``), the parameters given are applied,
-    and every parameter ``person/update.json`` documents is sent, taken from the person
-    where not given: upstream empties every parameter an update leaves out. A parameter
-    left out here keeps its stored value; one named in ``clear`` is sent empty, a flag
-    (``is_customer``, ``is_inactive``, ...) as ``false``;
-    ``addresses`` and ``contacts`` given replace the stored lists whole. Without
-    ``confirm`` nothing is written: the preview (``performed`` false) shows the
-    ``payload`` that would be sent, the person as it is (``before``) and the
-    ``changes``, at the cost of that one read. ``confirm=true`` reads the person again
-    and recomputes the payload, so it can differ from the preview if the person changed
-    in between. Refused before anything is written, unless the call gives or clears
-    what is missing: a person with neither company nor name; one holding attachments,
-    bank accounts, children, service periods, insurance contracts, certificate values,
-    an address with a title or a contact with a purpose, which cannot be carried over;
-    an insurance whose read shows no ``insurance_nr`` or ``insurance_member_nr``, or an
-    employee whose read shows no ``user_id`` (the read leaves empty fields out, and these
-    were never seen come back, so their absence is unknown, not empty). The ids come
-    from the lists ``create_person`` names: ``list_person_categories``,
-    ``list_person_titles``, ``list_locations``, ``list_persons`` and
-    ``list_custom_fields`` (``PERSON``).
+    The person is read first, the parameters given are applied, and every parameter the update
+    documents is sent, the stored value where none is given, since upstream empties what an
+    update leaves out; ``addresses`` and ``contacts`` given replace the stored lists whole.
+    Without ``confirm`` nothing is written: the preview shows the ``payload``, the person as it
+    is (``before``) and the ``changes``. Refused before anything is written, unless the call
+    gives or clears what is missing: a person with neither company nor name, and one holding
+    what the update cannot carry over (``clear``). A confirmed call sends two requests, the read
+    and the write, five with the read's retries; the write is sent once, and where it fails with
+    its outcome unknown, ``get_person`` shows whether it was applied.
+
+    The preview reads the person once with ``person/read.json``, one request, and names it in
+    ``reads``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1390,12 +1413,19 @@ async def update_person_async(
         custom: Custom field values to set by upstream's name, ``customField<id>`` with
             an ``id`` from ``list_custom_fields`` (``type`` ``PERSON``), e.g.
             ``{"customField2": "Silber"}``; the other stored values are kept.
-        clear: Parameters to send empty, by these names, e.g. ``["department", "notes"]``
-            or ``["user_id"]``; ``["custom"]`` empties every custom field, and a flag
-            such as ``["is_vendor"]`` is sent ``false``. A parameter cannot be both
-            given and cleared, and ``sequence_number_id``, not stored and sent only
-            when given, cannot be cleared.
-        confirm: ``true`` writes the change; ``false`` (the default) only previews it.
+        clear: Parameters to send empty, by these names, e.g. ``["department", "notes"]`` or
+            ``["user_id"]``; ``["custom"]`` empties every custom field, and a flag such as
+            ``["is_vendor"]`` is sent ``false``. A parameter cannot be both given and cleared, and
+            ``sequence_number_id``, not stored and sent only when given, cannot be cleared. A person
+            holding attachments, bank accounts, children, service periods, insurance contracts,
+            certificate values, an address with a title or a contact with a purpose is refused
+            unless the call replaces or clears them, since they cannot be carried over; so is an
+            insurance whose read shows no ``insurance_nr`` or ``insurance_member_nr``, or an
+            employee whose read shows no ``user_id``: the read leaves empty fields out, and these
+            were never seen come back, so their absence is unknown, not empty.
+        confirm: ``true`` writes the change; ``false`` (the default) only previews it; ``true``
+            reads the person again and recomputes the payload, which can differ from the preview's
+            if the person changed in between.
     """
     _check_id(id)
     lists = _person_inputs(
@@ -1446,7 +1476,8 @@ async def update_person_async(
     _choices(language=(language, LANGUAGES), color=(color, COLORS))
     cleared = _clear_names(clear, PERSON_UPDATE, given, custom)
     changes = _changes(api.person_fields, PERSON_UPDATE, given, cleared, custom)
-    person = await api.person_read(org, id)
+    read = await api.person_read(org, id)
+    person = read.payload
     values, stored, unknown = _person_values(person)
     decided = [*given, *cleared]
     blocked = _blocked(stored, decided)
@@ -1472,7 +1503,15 @@ async def update_person_async(
     endpoint = "person/update.json"
     if confirm is not True:
         before = _person_detail(person)
-        return _preview(org, endpoint, fields, before=before, changes=changes)
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["person/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=before,
+            changes=changes,
+        )
     answer = await api.person_update(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -1480,10 +1519,14 @@ async def update_person_async(
 async def delete_person_async(org: str, id: int, *, confirm: bool = False) -> Result[PersonOutcome]:
     """Delete one person; without confirm=true it only shows the person.
 
-    Without ``confirm`` nothing is deleted: the preview (``performed`` false) shows the
-    person that would be deleted (``before``, read with ``person/read.json``) and the
-    ``payload``, ``ids`` with this one id. ``confirm=true`` deletes the person, without
-    reading it first; upstream decides whether a person with bookings or orders may go.
+    Without ``confirm`` nothing is deleted: the preview shows the person that would be deleted
+    (``before``) and the ``payload``, ``ids`` with this one id. ``confirm=true`` deletes the
+    person, without reading it first; upstream decides whether a person with bookings or orders
+    may go. The delete is sent once: where it fails with its outcome unknown, ``get_person``
+    shows whether it was applied.
+
+    The preview reads the person once with ``person/read.json``, one request, and names it in
+    ``reads``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1494,8 +1537,16 @@ async def delete_person_async(org: str, id: int, *, confirm: bool = False) -> Re
     fields = api.delete_fields([id])
     endpoint = "person/delete.json"
     if confirm is not True:
-        person = await api.person_read(org, id)
-        return _preview(org, endpoint, fields, before=_person_detail(person))
+        read = await api.person_read(org, id)
+        person = read.payload
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["person/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=_person_detail(person),
+        )
     answer = await api.person_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 
@@ -1540,20 +1591,16 @@ async def create_order_async(
 ) -> Result[OrderOutcome]:
     """Create an order (offer, invoice, purchase order, ...); without confirm=true a preview.
 
-    Without ``confirm`` nothing is written and no request is sent: the result is a
-    preview, ``performed`` false, whose ``payload`` holds the exact form fields CashCtrl
-    would receive. Call again with ``confirm=true`` to create; the result is then
-    ``performed`` true with ``insert_id``, the new order's id. The category decides the
-    kind of document and its statuses: take ``category_id`` and ``status_id`` from
-    ``list_order_categories`` (``type`` ``SALES`` or ``PURCHASE``); without
-    ``status_id`` the order gets the category's first status (Draft for the default
-    invoice category, which books nothing). The partner comes from ``list_persons``,
-    accounts from ``list_accounts``, tax codes from ``list_tax_codes``, currencies from
-    ``list_currencies``, cost centers from ``list_cost_centers`` and custom field names
-    from ``list_custom_fields`` with ``type`` ``ORDER``. The items'
-    ``unit_price`` was read as gross, VAT included, on the demo organisation. Without
-    ``nr`` upstream numbers the order from the category's sequence, if it has one, and
-    refuses it otherwise.
+    Without ``confirm`` nothing is written: the preview, ``performed`` false, holds the exact
+    ``payload`` CashCtrl would receive; ``confirm=true`` answers ``performed`` true with
+    ``insert_id``, the new order's id. The category decides the kind of document and its
+    statuses; without ``status_id`` the order gets the category's first status (Draft for the
+    default invoice category, which books nothing). The items' ``unit_price`` was read as gross,
+    VAT included, on the demo organisation. Without ``nr`` upstream numbers the order from the
+    category's sequence, if it has one, and refuses it otherwise. The write is sent once: where
+    it fails with its outcome unknown, ``list_orders`` shows whether the order was created.
+
+    The preview sends no request, and its ``reads`` is empty.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1576,7 +1623,7 @@ async def create_order_async(
         status_id: A status of the category, an id from its ``status`` in
             ``list_order_categories``, e.g. ``12``.
         account_id: The account, e.g. the debtors account, an ``id`` from
-            ``list_accounts``; the category's when left out.
+            ``list_accounts``, not the account number; the category's when left out.
         language: The document's language: ``DE``, ``EN``, ``FR`` or ``IT``.
         due_days: Days until payment is due, e.g. ``30``.
         discount_percentage: A discount on the whole order, 0 to 100, e.g. ``2``.
@@ -1649,7 +1696,7 @@ async def create_order_async(
     )
     endpoint = "order/create.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.order_create(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -1835,29 +1882,18 @@ async def update_order_async(
 ) -> Result[OrderOutcome]:
     """Change an order, its items included; without confirm=true it only previews the change.
 
-    The order is read first (``order/read.json``), the parameters given are applied,
-    and every parameter ``order/update.json`` documents is sent, taken from the order
-    where not given: upstream empties every parameter an update leaves out, the items
-    included. A parameter left out here keeps its stored value. Without ``items`` the
-    stored items are sent back unchanged, in their position, each with the keys the
-    items table documents (``account_id``, ``name``, ``unit_price``, ``quantity``,
-    ``tax_id``, ``description``, ...); ``items`` given replace them whole. One named in
-    ``clear`` is sent empty, ``is_display_item_gross`` as ``false``. Without ``confirm``
-    nothing is written: the preview (``performed`` false) shows the ``payload`` that
-    would be sent, the order as it is (``before``, as ``get_order`` returns it) and the
-    ``changes``, at the cost of that one read. ``confirm=true`` reads the order again and
-    recomputes the payload, so it can differ from the preview if the order changed in
-    between. Refused before anything is written, unless the call replaces or clears what
-    is missing: an order holding attachments, or an item holding allocations or
-    attachments or marked optional, which cannot be carried over; an item without its
-    account, name or unit price; an order that gives no ``associate_id``,
-    ``category_id`` or ``date``. Upstream changes the journal entries an order booked
-    only through its items. Ids: ``category_id`` and ``status_id`` from
-    ``list_order_categories``, the partner from ``list_persons``, accounts from
-    ``list_accounts``, tax codes from ``list_tax_codes``, currencies from
-    ``list_currencies``, cost centers from ``list_cost_centers`` and custom field names
-    from ``list_custom_fields`` with ``type`` ``ORDER``. The items' ``unit_price`` was
-    read as gross, VAT included, on the demo organisation.
+    The order is read first, the parameters given are applied, and every parameter the update
+    documents is sent, the stored value where none is given, since upstream empties what an
+    update leaves out, the items included. Without ``confirm`` nothing is written: the preview
+    shows the ``payload``, the order as it is (``before``) and the ``changes``. Refused before
+    anything is written, unless the call replaces or clears what is missing: what the update
+    cannot carry over (``clear``), an item without its account, name or unit price, and an order
+    without ``associate_id``, ``category_id`` or ``date``. A confirmed call sends two requests,
+    the read and the write, five with the read's retries; the write is sent once, and where it
+    fails with its outcome unknown, ``get_order`` shows whether it was applied.
+
+    The preview reads the order once with ``order/read.json``, one request, and names it in
+    ``reads``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1867,22 +1903,24 @@ async def update_order_async(
         category_id: The order category, an ``id`` from ``list_order_categories``,
             e.g. ``4`` (the default invoice category).
         date: The date of the order, e.g. ``2026-10-24``.
-        items: The items replacing the stored ones, each with ``account_id`` (an ``id``
-            from ``list_accounts``: revenue for sales, expense for purchase), ``name``
-            and ``unit_price``, optionally ``quantity`` (default 1), ``tax_id`` (from
-            ``list_tax_codes``), ``description``, ``article_nr``,
-            ``discount_percentage``, ``unit_id``, ``inventory_id``, ``type``
-            (``ARTICLE``, ``TEXT``, ``PAGEBREAK``, ``SUBTOTAL``, ``TITLE``,
-            ``OPTIONTOTAL``) and ``allocations`` (each a ``share`` and a
-            ``to_cost_center_id`` from ``list_cost_centers``), e.g.
-            ``[{"account_id": 42, "name": "Beratung", "unit_price": 150, "quantity": 2,
-            "tax_id": 9}]``.
+        items: The items replacing the stored ones, each with ``account_id`` (an ``id`` from
+            ``list_accounts``: revenue for sales, expense for purchase), ``name`` and
+            ``unit_price``, optionally ``quantity`` (default 1), ``tax_id`` (from
+            ``list_tax_codes``), ``description``, ``article_nr``, ``discount_percentage``,
+            ``unit_id``, ``inventory_id``, ``type`` (``ARTICLE``, ``TEXT``, ``PAGEBREAK``,
+            ``SUBTOTAL``, ``TITLE``, ``OPTIONTOTAL``) and ``allocations`` (each a ``share`` and a
+            ``to_cost_center_id`` from ``list_cost_centers``), e.g. ``[{"account_id": 42, "name":
+            "Beratung", "unit_price": 150, "quantity": 2, "tax_id": 9}]``. Without ``items`` the
+            stored items are sent back unchanged, in their position, each with the keys the items
+            table documents. Upstream changes the journal entries an order booked only through its
+            items. The items' ``unit_price`` was read as gross, VAT included, on the demo
+            organisation.
         nr: The order number, at most 50 characters, e.g. ``"RE-2026-201"``.
         description: A description of the document, at most 200 characters.
         status_id: A status of the category, an id from its ``status`` in
             ``list_order_categories``, e.g. ``12``.
         account_id: The account, e.g. the debtors account, an ``id`` from
-            ``list_accounts``.
+            ``list_accounts``, not the account number.
         language: The document's language: ``DE``, ``EN``, ``FR`` or ``IT``.
         due_days: Days until payment is due, e.g. ``30``.
         discount_percentage: A discount on the whole order, 0 to 100, e.g. ``2``.
@@ -1909,11 +1947,15 @@ async def update_order_async(
             an ``id`` from ``list_custom_fields`` (``type`` ``ORDER``), e.g.
             ``{"customField3": "A-18"}``; the other stored values are kept.
         clear: Parameters to send empty, by these names, e.g. ``["notes", "due_days"]``;
-            ``["items"]`` removes every item, ``["custom"]`` empties every custom field
-            and ``["is_display_item_gross"]`` sends ``false``. A parameter cannot be
-            both given and cleared, and ``sequence_number_id``, not stored and sent
-            only when given, cannot be cleared.
-        confirm: ``true`` writes the change; ``false`` (the default) only previews it.
+            ``["items"]`` removes every item, ``["custom"]`` empties every custom field and
+            ``["is_display_item_gross"]`` sends ``false``. A parameter cannot be both given and
+            cleared, and ``sequence_number_id``, not stored and sent only when given, cannot be
+            cleared. An order holding attachments, or an item holding allocations or attachments or
+            marked optional, is refused unless the call replaces or clears them, since they cannot
+            be carried over.
+        confirm: ``true`` writes the change; ``false`` (the default) only previews it; ``true``
+            reads the order again and recomputes the payload, which can differ from the preview's if
+            the order changed in between.
     """
     _check_id(id)
     _check_associate(associate_id)
@@ -1955,7 +1997,8 @@ async def update_order_async(
     )
     cleared = _clear_names(clear, ORDER_UPDATE, given, custom)
     changes = _changes(api.order_fields, ORDER_UPDATE, given, cleared, custom)
-    order = await api.order_read(org, id)
+    read = await api.order_read(org, id)
+    order = read.payload
     values, stored = _order_values(order)
     blocked = _blocked(stored, [*given, *cleared])
     if blocked is not None:
@@ -1968,7 +2011,15 @@ async def update_order_async(
     fields = api.order_fields(id=order.id, **merged)
     endpoint = "order/update.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=_order_detail(order), changes=changes)
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["order/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=_order_detail(order),
+            changes=changes,
+        )
     answer = await api.order_update(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -1976,11 +2027,14 @@ async def update_order_async(
 async def delete_order_async(org: str, id: int, *, confirm: bool = False) -> Result[OrderOutcome]:
     """Delete one order; without confirm=true it only shows the order.
 
-    Without ``confirm`` nothing is deleted: the preview (``performed`` false) shows the
-    order that would be deleted (``before``, read with ``order/read.json``, items
-    included) and the ``payload``, ``ids`` with this one id. ``confirm=true`` deletes
-    the order, without reading it first; upstream decides what happens to the journal
-    entries a booked order made.
+    Without ``confirm`` nothing is deleted: the preview shows the order that would be deleted
+    (``before``, items included) and the ``payload``, ``ids`` with this one id. ``confirm=true``
+    deletes the order, without reading it first; upstream decides what happens to the journal
+    entries a booked order made. The delete is sent once: where it fails with its outcome
+    unknown, ``get_order`` shows whether it was applied.
+
+    The preview reads the order once with ``order/read.json``, one request, and names it in
+    ``reads``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -1991,8 +2045,16 @@ async def delete_order_async(org: str, id: int, *, confirm: bool = False) -> Res
     fields = api.delete_fields([id])
     endpoint = "order/delete.json"
     if confirm is not True:
-        order = _order_detail(await api.order_read(org, id))
-        return _preview(org, endpoint, fields, before=order)
+        read = await api.order_read(org, id)
+        order = _order_detail(read.payload)
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["order/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=order,
+        )
     answer = await api.order_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 
@@ -2002,28 +2064,28 @@ async def update_order_status_async(
 ) -> Result[OrderOutcome]:
     """Set the status of one or more orders; without confirm=true it only previews the change.
 
-    Without ``confirm`` nothing is written and no request is sent: the preview
-    (``performed`` false) holds the ``payload`` CashCtrl would receive, ``ids``
-    comma-separated and ``statusId``, and shows no order (``before`` is empty; read one
-    with ``get_order``). ``confirm=true`` sends it (``order/update_status.json``) without
-    reading the orders first; the result is ``performed`` true with upstream's
-    ``message``. A status belongs to an order category: take ``status_id`` from the
-    ``status`` list of the orders' category in ``list_order_categories`` (``type``
-    ``SALES`` or ``PURCHASE``), never a guess, and the order ids from ``list_orders``.
-    That list says what a status does: ``is_book`` (the order books its journal entries
-    in it), ``is_closed`` (it completes the order) and ``action_id`` (what follows it).
-    A status with an ``action_id`` (``CATEGORY_<id>``, ``BOOK_TEMPLATE_<id>``, or one the
-    documentation does not list, such as ``CREATE_PAYMENT_ORDER`` on the purchase
-    invoices' "Payment ordered") triggers an action; upstream documents only that its app
-    asks the user first, not what this call does, and the live test avoids such
-    statuses. Upstream checks the change and refuses it with its message.
+    Without ``confirm`` nothing is written and no request is sent: the preview holds the
+    ``payload``, ``ids`` comma-separated and ``statusId``, and shows no order. ``confirm=true``
+    sends it without reading the orders first; the result is ``performed`` true with upstream's
+    ``message``. A status belongs to an order category, whose list in ``list_order_categories``
+    says what it does: ``is_book``, ``is_closed`` and ``action_id``. Upstream checks the change
+    and refuses it with its message. The write is sent once: where it fails with its outcome
+    unknown, ``get_order`` shows whether it was applied.
+
+    The preview sends no request, and its ``reads`` is empty.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         ids: The orders, their ``id`` from ``list_orders``, e.g. ``[20]`` or ``[20, 21]``;
             not their numbers ``nr``.
-        status_id: The new status, an ``id`` from the ``status`` of the orders' category
-            in ``list_order_categories``, e.g. ``16``.
+        status_id: The new status, an ``id`` from the ``status`` of the orders' category in
+            ``list_order_categories``, e.g. ``16``. Never a guess: ``is_book`` says the order books
+            its journal entries in it, ``is_closed`` that it completes the order and ``action_id``
+            what follows it. A status with an ``action_id`` (``CATEGORY_<id>``,
+            ``BOOK_TEMPLATE_<id>``, or one the documentation does not list, such as
+            ``CREATE_PAYMENT_ORDER`` on the purchase invoices' "Payment ordered") triggers an
+            action; upstream documents only that its app asks the user first, not what this call
+            does.
         confirm: ``true`` sets the status; ``false`` (the default) only previews it.
     """
     orders = _ids("ids", ids)
@@ -2031,7 +2093,7 @@ async def update_order_status_async(
     fields = api.order_update_status_fields(ids=orders, status_id=status_id)
     endpoint = "order/update_status.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.order_update_status(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -2049,20 +2111,16 @@ async def create_order_payment_async(
 ) -> Result[OrderOutcome]:
     """Create the payment order (pain.001 or PDF) of orders; without confirm=true a preview.
 
-    Without ``confirm`` nothing is written and no request is sent: the preview
-    (``performed`` false) holds the ``payload`` CashCtrl would receive. ``confirm=true``
-    creates the payment (``order/payment/create.json``); the result is ``performed`` true
-    with upstream's ``message``. Upstream documents a payment as the payment order for
-    e-banking, an ISO 20022 pain.001 file (``PAIN``, ``SEPA_PAIN``) or a PDF
-    (``WIRE_PDF``, ``CASH_PDF``), which is downloaded afterwards with the same parameters
-    through ``order/payment/download``, not wrapped by this package; created first, it
-    lets upstream match the payments of a camt.052/053/054 file later. It creates no book
-    entry (upstream: "for that see Book entries"), and upstream documents no way to read,
-    list or delete it. The order ids come from ``list_orders``, ``status_id`` from the
-    ``status`` of the orders' category in ``list_order_categories``. Upstream checks the
-    payment and refuses it naming the fields: ``PAIN`` was refused for a
-    date in the past and for a sender or recipient without a bank account or BIC, where
-    ``CASH_PDF`` for the same order and date was created.
+    Without ``confirm`` nothing is written and no request is sent: the preview holds the
+    ``payload`` CashCtrl would receive; ``confirm=true`` creates the payment and answers
+    ``performed`` true with upstream's ``message``. A payment is the payment order for
+    e-banking, an ISO 20022 pain.001 file or a PDF; it creates no book entry (upstream: "for
+    that see Book entries"), and upstream documents no way to read, list or delete it. Upstream
+    checks the payment and refuses it naming the fields. The write is sent once: where it fails
+    with its outcome unknown, no read shows whether it was applied but the orders' status where
+    the payment sets one (``get_order``).
+
+    The preview sends no request, and its ``reads`` is empty.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -2076,8 +2134,12 @@ async def create_order_payment_async(
             transaction.
         status_id: The status the orders get, an ``id`` from the ``status`` of their
             category in ``list_order_categories``, e.g. ``51``; not sent when left out.
-        type: The payment and its file: ``PAIN`` (pain.001, upstream's default),
-            ``SEPA_PAIN``, ``WIRE_PDF`` or ``CASH_PDF``.
+        type: The payment and its file: ``PAIN`` (pain.001, upstream's default), ``SEPA_PAIN``,
+            ``WIRE_PDF`` or ``CASH_PDF``. Its file is downloaded afterwards with the same parameters
+            through ``order/payment/download``, which this package does not wrap; created first, the
+            payment lets upstream match the payments of a camt.052/053/054 file later. ``PAIN`` was
+            refused for a sender or recipient without a bank account or BIC, where ``CASH_PDF`` for
+            the same order and date was created.
         confirm: ``true`` creates the payment; ``false`` (the default) only previews it.
     """
     orders = _ids("order_ids", order_ids)
@@ -2093,7 +2155,7 @@ async def create_order_payment_async(
     )
     endpoint = "order/payment/create.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.order_payment_create(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -2118,25 +2180,22 @@ async def create_order_book_entry_async(
 ) -> Result[BookEntryOutcome]:
     """Book an entry against orders, such as a payment received; without confirm=true a preview.
 
-    Without ``confirm`` nothing is written and no request is sent: the result is a
-    preview, ``performed`` false, whose ``payload`` holds the exact form fields CashCtrl
-    would receive. ``confirm=true`` books the entry (``order/bookentry/create.json``);
-    the result is ``performed`` true with ``insert_id``, the new entry's id. A book entry
-    is booked by hand against an order, as a payment of an invoice is, between
-    ``account_id`` (a bank or cash account) and the account of the order's category
-    (typically its debtors or creditors account); the entries an order's items book are
-    upstream's own. Without ``amount`` upstream books the order's open amount, without
-    ``currency_id`` in the default currency. ``list_order_book_entries`` lists an order's
-    entries. Ids: ``account_id`` from ``list_accounts`` (the ``id``, not the account
-    number), the orders from ``list_orders``, ``tax_id`` from ``list_tax_codes``,
-    ``currency_id`` from ``list_currencies`` and ``template_id`` from the
-    ``book_templates`` of the orders' category in ``list_order_categories``. Upstream
-    checks the entry and refuses it naming the fields.
+    Without ``confirm`` nothing is written: the preview, ``performed`` false, holds the exact
+    ``payload`` CashCtrl would receive; ``confirm=true`` answers ``performed`` true with
+    ``insert_id``, the new entry's id. A book entry is booked by hand against an order, as a
+    payment of an invoice is, between ``account_id`` (a bank or cash account) and the account of
+    the order's category; the entries an order's items book are upstream's own. Without
+    ``amount`` upstream books the order's open amount, without ``currency_id`` in the default
+    currency. Upstream checks the entry and refuses it naming the fields. The write is sent
+    once: where it fails with its outcome unknown, ``list_order_book_entries`` shows whether it
+    was booked.
+
+    The preview sends no request, and its ``reads`` is empty.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         account_id: The contra account, a bank or cash account, an ``id`` from
-            ``list_accounts``, e.g. ``3`` (1020, the bank).
+            ``list_accounts``, e.g. ``3`` (1020, the bank); the ``id``, not the account number.
         order_ids: The orders the entry is booked against, their ``id`` from
             ``list_orders``, e.g. ``[21]``; not their numbers ``nr``.
         amount: The amount, e.g. ``100.00``; the orders' open amount when left out.
@@ -2166,7 +2225,7 @@ async def create_order_book_entry_async(
     )
     endpoint = "order/bookentry/create.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields)
+        return _preview(org, endpoint, fields, reads=[])
     answer = await api.order_bookentry_create(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -2256,27 +2315,24 @@ async def update_order_book_entry_async(
 ) -> Result[BookEntryOutcome]:
     """Change a book entry booked by hand on an order; without confirm=true a preview.
 
-    The entry is read first (``order/bookentry/read.json``), the parameters given are
-    applied, and every parameter ``order/bookentry/update.json`` documents is sent, taken
-    from the entry where not given: upstream empties every parameter an update leaves
-    out. A parameter left out here keeps its stored value; one named in ``clear`` is sent
-    empty, so ``clear=["amount"]`` books the order's open amount. Without ``confirm``
-    nothing is written: the preview (``performed`` false) shows the ``payload`` that
-    would be sent, the entry as it is (``before``) and the ``changes``, at the cost of
-    that one read. ``confirm=true`` reads the entry again and recomputes the payload, so
-    it can differ from the preview if the entry changed in between. Refused before
-    anything is written: an entry not booked by hand (``type`` other than ``MANUAL``),
-    such as one the order's items booked (``GENERATED``), which changes only through
-    the order's items (``update_order``); an entry without
-    ``account_id``, unless the call gives it; an entry holding allocations, which the
-    update cannot send. The entry's id comes from ``list_order_book_entries``, the other
-    ids from the lists ``create_order_book_entry`` names.
+    The entry is read first, the parameters given are applied, and every parameter the update
+    documents is sent, the stored value where none is given, since upstream empties what an
+    update leaves out. Without ``confirm`` nothing is written: the preview shows the
+    ``payload``, the entry as it is (``before``) and the ``changes``. Refused before anything is
+    written: an entry not booked by hand (``type`` other than ``MANUAL``), which changes only
+    through the order's items (``update_order``), one without ``account_id`` unless the call
+    gives it, and one holding allocations. A confirmed call sends two requests, the read and the
+    write, five with the read's retries; the write is sent once, and where it fails with its
+    outcome unknown, ``list_order_book_entries`` shows whether it was applied.
+
+    The preview reads the book entry once with ``order/bookentry/read.json``, one request, and
+    names it in ``reads``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The entry's ``id`` from ``list_order_book_entries``, e.g. ``31``.
         account_id: The contra account, a bank or cash account, an ``id`` from
-            ``list_accounts``, e.g. ``3`` (1020, the bank).
+            ``list_accounts``, e.g. ``3`` (1020, the bank); the ``id``, not the account number.
         amount: The amount, e.g. ``100.00``.
         currency_id: A currency, an ``id`` from ``list_currencies``.
         currency_rate: The exchange rate into the default currency, e.g. ``0.92``.
@@ -2289,7 +2345,9 @@ async def update_order_book_entry_async(
         clear: Parameters to send empty, by these names, e.g. ``["reference"]``;
             ``["amount"]`` books the order's open amount. A parameter cannot be both
             given and cleared.
-        confirm: ``true`` writes the change; ``false`` (the default) only previews it.
+        confirm: ``true`` writes the change; ``false`` (the default) only previews it; ``true``
+            reads the entry again and recomputes the payload, which can differ from the preview's if
+            the entry changed in between.
     """
     _check_id(id)
     given = _given(
@@ -2305,7 +2363,8 @@ async def update_order_book_entry_async(
     )
     cleared = _clear_names(clear, BOOK_ENTRY_UPDATE, given, None)
     changes = _changes(api.order_bookentry_fields, BOOK_ENTRY_UPDATE, given, cleared, None)
-    entry = await api.order_bookentry_read(org, id)
+    read = await api.order_bookentry_read(org, id)
+    entry = read.payload
     not_manual = _not_manual(entry, "update")
     if not_manual is not None:
         raise not_manual
@@ -2328,7 +2387,15 @@ async def update_order_book_entry_async(
     fields = api.order_bookentry_fields(id=entry.id, **merged)
     endpoint = "order/bookentry/update.json"
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=entry, changes=changes)
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["order/bookentry/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=entry,
+            changes=changes,
+        )
     answer = await api.order_bookentry_update(org, fields)
     return _performed(org, endpoint, fields, answer)
 
@@ -2338,15 +2405,17 @@ async def delete_order_book_entry_async(
 ) -> Result[BookEntryOutcome]:
     """Delete one book entry booked by hand on an order; without confirm=true it only shows it.
 
-    The entry is read first (``order/bookentry/read.json``), with ``confirm`` as well, and
-    one not booked by hand (``type`` other than ``MANUAL``) is refused with
-    ``InvalidRequestError`` before anything is deleted: one the order's items booked
-    (``GENERATED``) goes only with the order's items (``update_order``), and a delete of
-    another type was never observed. Without ``confirm`` nothing is deleted: the preview
-    (``performed`` false) shows the entry that would be deleted (``before``) and the
-    ``payload``, ``ids`` with this one id. ``confirm=true`` deletes it after that read.
-    An unknown id raises ``NotFoundError`` at the read. The entry's id comes from
-    ``list_order_book_entries``.
+    The entry is read first, with ``confirm`` as well, and one not booked by hand (``type``
+    other than ``MANUAL``) is refused with ``InvalidRequestError`` before anything is deleted:
+    one the order's items booked goes only with the order's items (``update_order``). Without
+    ``confirm`` nothing is deleted: the preview shows the entry (``before``) and the
+    ``payload``, ``ids`` with this one id. An unknown id raises ``NotFoundError`` at the read. A
+    confirmed call sends two requests, the read and the delete, five with the read's retries;
+    the delete is sent once, and where it fails with its outcome unknown,
+    ``list_order_book_entries`` shows whether it was applied.
+
+    The preview reads the book entry once with ``order/bookentry/read.json``, one request, and
+    names it in ``reads``.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -2356,12 +2425,20 @@ async def delete_order_book_entry_async(
     _check_id(id)
     fields = api.delete_fields([id])
     endpoint = "order/bookentry/delete.json"
-    entry = await api.order_bookentry_read(org, id)
+    read = await api.order_bookentry_read(org, id)
+    entry = read.payload
     not_manual = _not_manual(entry, "delete")
     if not_manual is not None:
         raise not_manual
     if confirm is not True:
-        return _preview(org, endpoint, fields, before=entry)
+        return _preview(
+            org,
+            endpoint,
+            fields,
+            reads=["order/bookentry/read.json"],
+            retrieved_at=read.retrieved_at,
+            before=entry,
+        )
     answer = await api.order_bookentry_delete(org, [id])
     return _performed(org, endpoint, fields, answer)
 

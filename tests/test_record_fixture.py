@@ -12,8 +12,8 @@ core's at sdk-core ``cb8ecdf`` (``tests/testing/test_scrub.py``, ``test_fixtures
 """
 
 import base64
-import dataclasses
 import importlib.util
+import inspect
 import json
 import re
 from collections.abc import Callable
@@ -34,7 +34,6 @@ from xippios.core.testing import (
     load_fixture,
     response_from_fixture,
 )
-from xippios.core.testing.replay import replay
 
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
 
@@ -131,29 +130,18 @@ def test_wrong_key_never_sends_the_real_key(
     assert route.calls.last.request.headers["Authorization"] == f"Basic {token}"
 
 
-@pytest.mark.parametrize("wrong_key", [False, True])
-def test_the_recording_client_never_retries(recorder: ModuleType, wrong_key: bool) -> None:
-    """The demo organisation's configuration with ``RetryPolicy(max_attempts=1)``.
-
-    https://github.com/xippios/sdk-cashctrl/pull/19 gave the recorder a client that never
-    retries, so a 5xx is recorded as it came.
-    """
-    client = recorder.recording_client(wrong_key=wrong_key)
-    assert client.config.retry.max_attempts == 1
-    demo = client_for(DEMO).config
-    assert demo.retry.max_attempts > 1, "the package's own client retries"
-    assert dataclasses.replace(client.config, retry=demo.retry) == demo, "nothing else differs"
-    assert client is not client_for(DEMO)
-
-
 def test_a_5xx_is_recorded_after_one_request(
     recorder: ModuleType, respx_mock: respx.MockRouter, tmp_path: Path
 ) -> None:
     """A GET that the package's client would retry is sent once and recorded as it came.
 
+    The recorder sends through the demo organisation's own client with core's ``send_once``,
+    which never retries, so it builds no client of its own (sdk-core ADR-0066, decision 3).
+
     NOT RECORDED: the documented 503 of error-handling.md, composed as CashCtrl's status pages
     were recorded, a line that starts CashCtrl - under text/plain (conventions §10, kind 2).
     """
+    assert client_for(DEMO).config.retry.max_attempts > 1, "the package's own client retries"
     route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
     route.mock(
         return_value=httpx.Response(
@@ -166,6 +154,31 @@ def test_a_5xx_is_recorded_after_one_request(
     assert route.call_count == 1
     written = tmp_path / "tests" / "fixtures" / "account_list" / "unavailable.json"
     assert json.loads(written.read_text())["response"]["status"] == 503
+
+
+def test_a_3xx_is_refused_at_every_path_and_nothing_is_written(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A redirect is no final answer: core refuses it after the one request, at a .json path too.
+
+    The refusal is core's on every path (sdk-core ADR-0066, decision 4), where the recorder's
+    own reached its five file paths alone.
+
+    NOT RECORDED: a redirect of no shape upstream was seen to send, composed to show the
+    refusal (conventions §10, kind 5).
+    """
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
+    route.mock(return_value=httpx.Response(302, headers={"Location": "/login"}))
+    assert recorder.main(["account/list.json", "moved"]) == 1
+    assert route.call_count == 1
+    assert not (tmp_path / "tests" / "fixtures").exists()
+    out = capsys.readouterr().out
+    assert out.startswith("not written tests/fixtures/account_list/moved.json: GET ")
+    assert "answered HTTP 302 Found, no final answer of its operation" in out
+    assert REAL not in out.lower()
 
 
 @pytest.mark.parametrize("leak", [REAL, REAL.upper()])
@@ -242,16 +255,72 @@ def test_a_response_without_the_key_needs_no_key_review(
     assert "CASHCTRL_DEMO_API_KEY" not in capsys.readouterr().out
 
 
-def test_a_key_the_scrub_cannot_reach_is_never_written(
+NESTED_KEY = "".join(f"\\u0025{ord(char):02X}" for char in KEY)
+"""The invented key percent-encoded, each ``%`` behind a JSON escape, as a JSON body writes it."""
+
+
+def test_core_scrub_alone_takes_a_percent_encoding_behind_a_json_escape(
+    recorder: ModuleType,
+) -> None:
+    """Core's ``Scrub`` replaces the form itself (sdk-core ADR-0066, decision 11), no step given.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
+    request = httpx.Request("GET", f"https://{HOST}/api/v1/account/list.json")
+    response = httpx.Response(
+        200,
+        content=f'{{"total": 1, "data": [{{"name": "{NESTED_KEY}"}}]}}'.encode(),
+        request=request,
+    )
+    fixture = fixture_from_response(response, scrub=recorder.scrub(KEY))
+    assert fixture.response.body is not None
+    assert json.loads(fixture.response.body) == {"total": 1, "data": [{"name": REDACTED}]}
+
+
+def test_the_step_keeps_no_search_of_a_secret_of_its_own(recorder: ModuleType) -> None:
+    """Core's verify searches every place decoded to the end, so the step takes no secrets."""
+    assert "secrets" not in inspect.signature(recorder.TenantScrub).parameters
+
+
+def test_a_key_percent_encoded_behind_a_json_escape_is_written_redacted_for_review(
     recorder: ModuleType,
     tmp_path: Path,
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Behind a JSON escape the key escapes the scrub; the recorder's verify decodes it.
+    """The form behind two encodings is core's to replace: written ``REDACTED``, for review.
 
-    Core's verify searches plain values only since 0.3.0 (sdk-core ADR-0042, decision 3), so the
-    refusal is the recorder's, in its own words.
+    NOT RECORDED: a list composed in the shape the account lists were recorded, carrying the
+    invented key in that form, which no scrubbed recording keeps (conventions §10, kind 2).
+    """
+    route = respx_mock.get(f"https://{REAL}.cashctrl.com/api/v1/account/list.json")
+    route.mock(
+        return_value=httpx.Response(
+            200, content=f'{{"total": 1, "data": [{{"name": "{NESTED_KEY}"}}]}}'.encode()
+        )
+    )
+    assert recorder.main(["account/list.json", "nested_key"]) == 1, "review"
+    text = (tmp_path / "tests" / "fixtures" / "account_list" / "nested_key.json").read_text()
+    assert KEY[1:] not in text
+    assert json.loads(json.loads(text)["response"]["body"]) == {
+        "total": 1,
+        "data": [{"name": REDACTED}],
+    }
+    out = capsys.readouterr().out
+    assert "the response carried the value of CASHCTRL_DEMO_API_KEY" in out
+    assert KEY[1:] not in out
+
+
+def test_a_key_behind_a_json_escape_is_written_redacted_for_review(
+    recorder: ModuleType,
+    tmp_path: Path,
+    respx_mock: respx.MockRouter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Behind a JSON escape the key is core's to scrub: it is written ``REDACTED``, for review.
+
+    Core's ``Scrub`` takes a secret behind a JSON escape too (sdk-core ADR-0066, decision 11),
+    so no form of the key reaches the file, and the recorder sends the answer to review.
 
     NOT RECORDED: a list composed in the shape the account lists were recorded, carrying the key
     behind a JSON escape, which no scrubbed recording keeps (conventions §10, kind 2).
@@ -263,14 +332,15 @@ def test_a_key_the_scrub_cannot_reach_is_never_written(
             200, content=f'{{"total": 1, "data": [{{"name": "{escaped}"}}]}}'.encode()
         )
     )
-    assert recorder.main(["account/list.json", "escaped_key"]) == 1
-    assert not (tmp_path / "tests" / "fixtures" / "account_list").exists()
+    assert recorder.main(["account/list.json", "escaped_key"]) == 1, "review"
+    text = (tmp_path / "tests" / "fixtures" / "account_list" / "escaped_key.json").read_text()
+    assert KEY[1:] not in text
+    assert json.loads(json.loads(text)["response"]["body"]) == {
+        "total": 1,
+        "data": [{"name": REDACTED}],
+    }
     out = capsys.readouterr().out
-    assert out == (
-        "not written tests/fixtures/account_list/escaped_key.json: the scrubbed fixture "
-        "still holds the value of CASHCTRL_DEMO_API_KEY or its basic-auth token in the "
-        "response body; nothing is written\n"
-    )
+    assert "the response carried the value of CASHCTRL_DEMO_API_KEY" in out
     assert KEY[1:] not in out
 
 
@@ -1488,9 +1558,13 @@ def test_a_file_path_writes_no_answer_but_an_error_or_a_refusal(
     out = capsys.readouterr().out
     assert out.startswith("not written tests/fixtures/")
     content_type = answer.headers["content-type"]
-    assert (
-        f"{endpoint} answered HTTP {answer.status_code} ({content_type}), which a file path" in out
-    )
+    if answer.is_redirect:  # core's refusal of a 3xx comes first, on every path (ADR-0066)
+        assert f"GET /api/v1/{endpoint} answered HTTP 302 Found, no final answer" in out
+    else:
+        assert (
+            f"{endpoint} answered HTTP {answer.status_code} ({content_type}), which a file path"
+            in out
+        )
     assert REAL not in out
 
 
@@ -2173,7 +2247,7 @@ ENCODED_KEY = "".join(f"%{ord(char):02X}" for char in KEY)
 
 
 def step(recorder: ModuleType, url: str, **overrides: Any) -> Any:
-    arguments: dict[str, Any] = {"subdomain": REAL, "secrets": recorder.secrets_of(KEY)}
+    arguments: dict[str, Any] = {"subdomain": REAL}
     arguments.update(overrides)
     return recorder.TenantScrub(httpx.URL(url), **arguments)
 
@@ -2227,6 +2301,20 @@ def test_the_placeholder_host_leaves_no_trace_of_the_organisation(
     assert REAL not in capsys.readouterr().out
 
 
+def mount_recording(router: respx.MockRouter, path: Path) -> respx.Route:
+    """Answer the recording at ``path``, on its method, host and path, with its answer.
+
+    Core's public ``load_fixture`` and ``response_from_fixture`` read it, for a file outside
+    ``tests/fixtures``, which the plugin's ``replay_fixture`` reads alone; the query is not
+    matched, since a recording's may be scrubbed.
+    """
+    recorded = load_fixture(path)
+    url = httpx.URL(recorded.request.url).copy_with(query=None)
+    return router.route(method=recorded.request.method, url=str(url)).mock(
+        side_effect=lambda _: response_from_fixture(recorded)
+    )
+
+
 def test_a_recorded_fixture_replays_on_the_placeholder_host(
     recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter
 ) -> None:
@@ -2245,11 +2333,11 @@ def test_a_recorded_fixture_replays_on_the_placeholder_host(
         json.loads(written.read_text())["response"]
     ), "no cut markers on a fixture that was not cut, as core writes one"
     respx_mock.routes.clear()
-    route = replay(respx_mock, written)
+    route = mount_recording(respx_mock, written)
     config = ClientConfig(
         source="cashctrl", version="1", base_url="https://demo.cashctrl.com/api/v1"
     )
-    rows = recorder.sync(AsyncClient(config).get_json)("/account/list.json")
+    rows = recorder.sync(AsyncClient(config).get_answer)("/account/list.json").payload
     expected = recorded_body("account_list", "only_active_finanz")
     expected["data"][0]["link"] = "https://demo.cashctrl.com/a/1"
     assert rows == expected
@@ -2262,7 +2350,7 @@ def test_a_percent_encoded_key_is_redacted_and_goes_to_review(
     respx_mock: respx.MockRouter,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Core redacts the key as given only; the recorder's step takes every encoded form.
+    """Core's scrub redacts the key percent-encoded too, and the answer goes to review.
 
     NOT RECORDED: account_list/only_active_finanz changed in memory, its first account given a
     link and the answer an X-Echo header that carry the key percent-encoded, a form upstream was
@@ -2290,7 +2378,7 @@ def test_a_percent_encoded_key_is_redacted_and_goes_to_review(
 
 
 def test_secrets_are_redacted_plain_and_percent_encoded(recorder: ModuleType) -> None:
-    """Core's plain scrub first, then the step: every form ends as ``REDACTED``.
+    """Core's scrub takes every form of a secret, so the step, given none, adds nothing.
 
     The answer is an input of the test, not an answer from CashCtrl.
     """
@@ -2311,7 +2399,8 @@ def test_secrets_are_redacted_plain_and_percent_encoded(recorder: ModuleType) ->
         request=request,
     )
     core = fixture_from_response(response, scrub=Scrub(secrets=[secret]))
-    fixture = step(recorder, str(request.url), secrets=[secret]).apply(core)
+    fixture, replaced = step(recorder, str(request.url)).apply(core)
+    assert replaced == [], "the step's verify refuses what survives, not core's check"
     assert "s3cr3t" not in fixture.model_dump_json()
     assert fixture.request.url == f"https://demo.cashctrl.com/api/v1/{REDACTED}?q={REDACTED}"
     assert fixture.request.body == f"note={REDACTED}"
@@ -2336,13 +2425,13 @@ def test_the_host_then_the_secrets_then_the_rewrite(recorder: ModuleType) -> Non
 
     request = httpx.Request("POST", f"https://{HOST}/api/v1/x.json?u=signed", data={"k": KEY})
     response = httpx.Response(
-        302,
+        200,
         headers={"Location": f"https://{HOST}/signed"},
         content=f'{{"home": "https://{HOST}/", "k": "{ENCODED_KEY}"}}'.encode(),
         request=request,
     )
     core = fixture_from_response(response, scrub=recorder.scrub(KEY))
-    fixture = step(recorder, str(request.url), text_rewrite=spy).apply(core)
+    fixture, _ = step(recorder, str(request.url), text_rewrite=spy).apply(core)
     assert fixture.request.url == "https://demo.cashctrl.com/api/v1/x.json?u=neutral"
     assert fixture.request.body == f"k={REDACTED}"
     assert dict(fixture.response.headers)["location"] == "https://demo.cashctrl.com/neutral"
@@ -2414,8 +2503,10 @@ def test_the_verify_names_the_header_a_rewrite_put_a_secret_back_into(
         str(request.url),
         text_rewrite=lambda text: f"{text} {KEY}" if text == "/next" else text,
     )
-    with pytest.raises(ValueError, match=r"token in the response header 'location'; ") as info:
-        scrub_step.apply(fixture_from_response(response))
+    with pytest.raises(
+        ValueError, match=r"secret value in the response header 'location'; "
+    ) as info:
+        fixture_from_response(response, scrub=recorder.scrub(KEY), rewrite=scrub_step.apply)
     assert KEY not in str(info.value)
 
 
@@ -2432,9 +2523,8 @@ def test_the_verify_passes_a_clean_fixture(recorder: ModuleType) -> None:
         request=request,
     )
     core = fixture_from_response(response, scrub=Scrub(secrets=["ACT"]))
-    fixture: Fixture = step(recorder, str(request.url), secrets=["ACT"], subdomain="demo").apply(
-        core
-    )
+    fixture: Fixture
+    fixture, _ = step(recorder, str(request.url), subdomain="demo").apply(core)
     assert json.loads(fixture.response.body) == {
         "name": f"Caf\u00e9 {REDACTED}",
         "home": "https://demo.cashctrl.com/",
@@ -2448,10 +2538,8 @@ def test_the_verify_passes_a_clean_fixture(recorder: ModuleType) -> None:
         ("https://demo.cashctrl.com/v1/x", {}, "^the replay host is the request's own host"),
         ("https://DEMO.cashctrl.com/v1/x", {}, "^the replay host is the request's own host"),
         (f"https://{HOST}/v1/x", {"host": "demo.cashctrl.com:8443"}, "plain host name"),
-        (f"https://{HOST}/v1/x", {"secrets": [KEY, ""]}, "empty string"),
-        (f"https://{HOST}/v1/x", {"secrets": ["CashCtrl"]}, "^the replay host contains one"),
     ],
-    ids=["own-host", "own-host-upper-case", "not-a-host-name", "empty-secret", "secret-in-host"],
+    ids=["own-host", "own-host-upper-case", "not-a-host-name"],
 )
 def test_the_step_refuses_what_would_write_a_value(
     recorder: ModuleType, url: str, overrides: dict[str, Any], match: str
@@ -2476,7 +2564,7 @@ def test_an_own_host_refusal_is_printed_and_nothing_written(
     does before any write (conventions §10, kind 3).
     """
     monkeypatch.setenv(TENANTS.var(DEMO, "SUBDOMAIN"), "DEMO")
-    replay(respx_mock, FIXTURES / "account_list" / "only_active_finanz.json")
+    mount_recording(respx_mock, FIXTURES / "account_list" / "only_active_finanz.json")
     assert recorder.main(["account/list.json", "own_host"]) == 1
     assert not (tmp_path / "tests" / "fixtures").exists()
     assert capsys.readouterr().out.startswith(

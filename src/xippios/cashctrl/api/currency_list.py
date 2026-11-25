@@ -4,19 +4,20 @@ Reference: ``docs/upstream/common.md``, "List currencies" ("Returns a list of al
 currencies."). The operation documents no parameters.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.models import Currency, ListResponse
 
 __all__ = ["currency_list"]
 
 
-async def currency_list(org: str) -> ListResponse[Currency]:
+async def currency_list(org: str) -> Answer[ListResponse[Currency]]:
     """Call ``currency/list.json`` for organisation ``org``.
 
     Args:
         org: A declared organisation, e.g. ``"demo"``.
     """
-    raw = await client_for(org).get_json("/currency/list.json")
-    return parse(ListResponse[Currency], raw, source=SOURCE, endpoint="currency/list.json")
+    return await client_for(org).get_answer(
+        "/currency/list.json", parse=ListResponse[Currency], endpoint="currency/list.json"
+    )

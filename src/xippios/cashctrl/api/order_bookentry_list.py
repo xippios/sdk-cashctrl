@@ -8,22 +8,24 @@ Its answer for a seeded purchase order in a status that books, as
 1, "data": [...]}``, the one entry its items booked (``type`` ``GENERATED``).
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.models import ListResponse, OrderBookEntry
 
 __all__ = ["order_bookentry_list"]
 
 
-async def order_bookentry_list(org: str, id: int) -> ListResponse[OrderBookEntry]:
+async def order_bookentry_list(org: str, id: int) -> Answer[ListResponse[OrderBookEntry]]:
     """Call ``order/bookentry/list.json`` for organisation ``org``.
 
     Args:
         org: A declared organisation, e.g. ``"demo"``.
         id: ``id``, the order's id (not its number ``nr``), e.g. ``5``.
     """
-    raw = await client_for(org).get_json("/order/bookentry/list.json", params={"id": id})
-    return parse(
-        ListResponse[OrderBookEntry], raw, source=SOURCE, endpoint="order/bookentry/list.json"
+    return await client_for(org).get_answer(
+        "/order/bookentry/list.json",
+        params={"id": id},
+        parse=ListResponse[OrderBookEntry],
+        endpoint="order/bookentry/list.json",
     )

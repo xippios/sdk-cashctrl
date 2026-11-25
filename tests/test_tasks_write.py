@@ -31,7 +31,7 @@ import json
 import re
 import typing
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -39,10 +39,17 @@ from urllib.parse import parse_qsl
 
 import pytest
 import respx
-from xippios.core import InvalidRequestError, NotFoundError, Result
-from xippios.core.mcp import tool_name
+from xippios.core import (
+    Answer,
+    InvalidRequestError,
+    NotFoundError,
+    Result,
+    XippiosError,
+    tool_name,
+)
 from xippios.core.testing import (
     ReplayFixture,
+    assert_time_between,
     assert_write_tools,
     load_fixture,
     mcp_call,
@@ -50,7 +57,7 @@ from xippios.core.testing import (
     sent_bodies,
 )
 
-from xippios.cashctrl import api, tasks_write
+from xippios.cashctrl import api, mcp_write, tasks_write
 from xippios.cashctrl._client import DEMO, SOURCE
 from xippios.cashctrl.api._form import (
     FORM_CONTENT_TYPE,
@@ -78,6 +85,7 @@ from xippios.cashctrl.models import (
     PersonAddressInput,
     PersonDetail,
     PersonDetailProjection,
+    ReadResponse,
     WritePreview,
     WriteResult,
 )
@@ -140,6 +148,23 @@ def test_every_write_task_is_a_sync_facade_with_confirm_last(task: Callable[...,
         assert re.search(rf"^\s+{parameter.name}:", doc, re.MULTILINE), parameter.name
 
 
+ACCOUNT_IDS = ("debit_id", "credit_id", "account_id")
+
+
+@pytest.mark.parametrize("task", WRITE_TASKS.values(), ids=WRITE_TASKS.keys())
+def test_an_account_id_is_the_id_and_not_the_account_number(task: Callable[..., Any]) -> None:
+    """The line of each account's id under ``Args:`` says it, since it reaches the schema."""
+    doc = inspect.getdoc(task) or ""
+    args = doc.split("\nArgs:\n", 1)[1]
+    entries = {
+        match[1]: " ".join(match[2].split())
+        for match in re.finditer(r"^    (\w+): (.*?)(?=^    \w+: |\Z)", args, re.M | re.S)
+    }
+    for name in ACCOUNT_IDS:
+        if name in entries:
+            assert "not the account number" in entries[name], name
+
+
 @pytest.mark.parametrize("task", WRITE_TASKS.values(), ids=WRITE_TASKS.keys())
 def test_every_write_task_returns_a_preview_or_a_result(task: Callable[..., Any]) -> None:
     """``Result[WritePreview[<record>] | WriteResult]``: ``performed`` tells them apart."""
@@ -178,26 +203,8 @@ async def test_the_write_server_serves_write_tasks_only() -> None:
         "delete_order_book_entry",
     } <= WRITE_TASKS.keys()
     await assert_write_tools(
-        write_server,
-        list(WRITE_TASKS.values()),
-        source=SOURCE,
-        read_server=read_server,
-        router=router,
+        mcp_write.build(), list(WRITE_TASKS.values()), read_server=read_server, router=router
     )
-
-
-@pytest.mark.anyio
-async def test_write_tools_are_the_write_tasks_with_their_parameters() -> None:
-    """Each write tool takes its task's parameters, confirm among them, and says it writes."""
-    tools = {tool.name: tool for tool in await write_server.list_tools()}
-    for name, fn in WRITE_TASKS.items():
-        tool = tools[tool_name(SOURCE, fn)]
-        parameters = set(inspect.signature(fn).parameters)
-        assert set(tool.input_schema.get("properties", {})) == parameters, name
-        assert "confirm" in tool.input_schema["properties"], name
-        assert tool.description, f"{name} has no docstring; agents read it"
-        assert tool.annotations is not None
-        assert (tool.annotations.read_only_hint, tool.annotations.destructive_hint) == (False, True)
 
 
 # Journal entries ---------------------------------------------------------------------
@@ -229,6 +236,63 @@ def test_create_journal_entry_previews_without_a_request(
     assert (preview.before, preview.changes) == (None, None)
     assert (result.meta.endpoint, result.meta.tenant) == ("journal/create.json", DEMO)
     assert result.meta.request == {"org": DEMO}, "the payload is in data, never twice"
+
+
+@pytest.mark.parametrize("status", [429, 503])
+def test_a_confirmed_write_is_sent_once_whatever_upstream_answers(
+    respx_mock: respx.MockRouter, status: int
+) -> None:
+    """Core sends a write once, after a 429 or a 5xx too (sdk-core ADR-0011).
+
+    NOT RECORDED: a 429 and a 503, the statuses that ``docs/upstream/error-handling.md``
+    documents, with the text body ``busy``, of no shape upstream sends, to show that the source
+    leaves a write's repeat to core (conventions §10, kind 5). After a 5xx the error says that
+    the outcome is unknown, and the description of ``create_journal_entry`` names the read that
+    shows it.
+    """
+    url = "https://demo.cashctrl.com/api/v1/journal/create.json"
+    route = respx_mock.post(url).respond(status, text="busy")
+    with pytest.raises(XippiosError) as info:
+        create_the_recorded_journal_entry(confirm=True)
+    assert route.call_count == 1, "never repeated"
+    if status >= 500:
+        assert "The request was sent once and its outcome is unknown." in str(info.value)
+    doc = " ".join((inspect.getdoc(tasks_write.create_journal_entry) or "").split())
+    assert "``list_journal_entries`` shows whether it was booked" in doc
+
+
+def test_a_preview_carries_the_time_of_its_read(
+    fixtures_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``meta.retrieved_at`` of a preview that read first is the read's, the client's time.
+
+    The read is replaced by one that answers the recorded entry, parsed, with a time of its
+    own, so the preview's choice shows (conventions §4). The read's ``Answer`` is an input of
+    the test, not an answer from CashCtrl.
+    """
+    body = load_fixture(fixtures_dir / "journal_read" / "for_update.json").response.body
+    entry = ReadResponse[JournalEntryDetail].model_validate_json(body).data
+    read_at = datetime(2026, 11, 24, 9, 0, 1, tzinfo=UTC)
+
+    async def journal_read(org: str, id: int) -> Answer[JournalEntryDetail]:
+        return Answer(entry, read_at)
+
+    monkeypatch.setattr(api, "journal_read", journal_read)
+    preview = tasks_write.update_journal_entry(DEMO, JOURNAL_ENTRY, title="x")
+    assert isinstance(preview.data, WritePreview)
+    assert preview.meta.retrieved_at == read_at
+
+
+def test_a_performed_write_carries_the_time_its_result_was_built(
+    replay_fixture: ReplayFixture,
+) -> None:
+    """Core's ``post_json`` answers without a time, so a written result takes its own."""
+    replay_fixture("journal_create", "ok")
+    before = datetime.now(UTC)
+    result = create_the_recorded_journal_entry(confirm=True)
+    after = datetime.now(UTC)
+    assert isinstance(result.data, WriteResult)
+    assert_time_between(result.meta.retrieved_at, before, after)
 
 
 def test_create_journal_entry_with_confirm_replays_the_recorded_create(
@@ -1510,7 +1574,8 @@ def test_delete_order_previews_the_order_then_deletes(
 def recorded_invoice_statuses() -> list[int]:
     """The status ids of the default invoice category, in their order, as recorded.
 
-    From ``order_category_list/default`` (recorded on 2026-10-24): never a guessed id.
+    From ``order_category_list/default`` (recorded on 2026-10-24): never a guessed id. The
+    recorded category list is an input of the test, not an answer from CashCtrl.
     """
     raw = load_fixture(_FIXTURES / "order_category_list" / "default.json").response.body
     categories = ListResponse[OrderCategory].model_validate_json(raw or "")
@@ -1535,7 +1600,8 @@ def recorded_purchase_invoice_status() -> int:
 
     From ``order_category_list/purchase`` (recorded on 2026-10-29): the purchase invoice
     category's next status after the first that names no follow-up action, an open one
-    first, as https://github.com/xippios/sdk-cashctrl/pull/21 chose it.
+    first, as https://github.com/xippios/sdk-cashctrl/pull/21 chose it. The recorded category
+    list is an input of the test, not an answer from CashCtrl.
     """
     raw = load_fixture(_FIXTURES / "order_category_list" / "purchase.json").response.body
     categories = ListResponse[OrderCategory].model_validate_json(raw or "")
@@ -1962,7 +2028,7 @@ def test_the_book_entry_wrappers_build_upstreams_fields() -> None:
 async def test_the_book_entry_read_stays_faithful(replay_fixture: ReplayFixture) -> None:
     """The read an update and a delete start from: the entry as upstream sends it."""
     route = replay_fixture("order_bookentry_read", "generated")
-    entry = await api.order_bookentry_read(DEMO, GENERATED_ENTRY)
+    entry = (await api.order_bookentry_read(DEMO, GENERATED_ENTRY)).payload
     assert isinstance(entry, OrderBookEntry)
     assert (entry.id, entry.order_id, entry.type, entry.account_id) == (5, 5, "GENERATED", 45)
     assert (entry.date, entry.amount, entry.tax_id) == (datetime(2026, 2, 2), Decimal("4650"), 13)
@@ -2566,6 +2632,7 @@ async def test_the_write_tool_schemas_show_snake_case_inside_lists() -> None:
     schema = tools["cashctrl_create_order"].input_schema
     assert schema["properties"]["confirm"] == {
         "default": False,
+        "description": "``true`` creates the order; ``false`` (the default) only previews it.",
         "title": "Confirm",
         "type": "boolean",
     }
@@ -2685,3 +2752,124 @@ def test_a_preview_carries_the_form_fields_only_once(replay_fixture: ReplayFixtu
     replay_fixture("journal_create", "ok")
     performed = create_the_recorded_journal_entry(confirm=True)
     assert performed.model_dump_json().count('"title":"xippios-live fixture"') == 1
+
+
+# What a preview read -------------------------------------------------------------------
+
+PREVIEW_READS: dict[str, list[str]] = {
+    "create_journal_entry": [],
+    "update_journal_entry": ["journal/read.json"],
+    "delete_journal_entry": ["journal/read.json"],
+    "create_person": [],
+    "update_person": ["person/read.json"],
+    "delete_person": ["person/read.json"],
+    "create_order": [],
+    "update_order": ["order/read.json"],
+    "delete_order": ["order/read.json"],
+    "update_order_status": [],
+    "create_order_payment": [],
+    "create_order_book_entry": [],
+    "update_order_book_entry": ["order/bookentry/read.json"],
+    "delete_order_book_entry": ["order/bookentry/read.json"],
+}
+"""What each write task's preview reads, by the operation: one ``read.json`` or nothing."""
+
+PREVIEW_CALLS: dict[str, dict[str, Any]] = {
+    "create_journal_entry": {
+        "org": DEMO,
+        "date_added": "2026-10-24",
+        "amount": "100.00",
+        "debit_id": 3,
+        "credit_id": 42,
+        "title": "xippios-live fixture",
+        "tax_id": 9,
+    },
+    "update_journal_entry": {"org": DEMO, "id": JOURNAL_ENTRY, "title": "x"},
+    "delete_journal_entry": {"org": DEMO, "id": JOURNAL_ENTRY},
+    "create_person": {"org": DEMO, "company": "xippios-live Fixture GmbH"},
+    "update_person": {"org": DEMO, "id": PERSON, "company": "xippios-live Fixture AG"},
+    "delete_person": {"org": DEMO, "id": PERSON},
+    "create_order": {"org": DEMO, "associate_id": 7, "category_id": 4, "date": "2026-10-24"},
+    "update_order": {"org": DEMO, "id": ORDER, "due_days": 30},
+    "delete_order": {"org": DEMO, "id": 3},
+    "update_order_status": {"org": DEMO, "ids": [PAID], "status_id": REMINDED},
+    "create_order_payment": {
+        "org": DEMO,
+        "date": "2026-10-24",
+        "order_ids": [PAID],
+        "type": "CASH_PDF",
+    },
+    "create_order_book_entry": {
+        "org": DEMO,
+        "account_id": 3,
+        "order_ids": [BOOKED],
+        "amount": "50.00",
+        "date": "2026-10-24",
+        "description": "xippios-live payment",
+    },
+    "update_order_book_entry": {"org": DEMO, "id": BOOK_ENTRY, "description": "x"},
+    "delete_order_book_entry": {"org": DEMO, "id": BOOK_ENTRY},
+}
+"""A call of each write tool without ``confirm``, as an agent previews it, by the task's name."""
+
+PREVIEW_RECORDINGS = [
+    ("journal_read", "for_update"),
+    ("person_read", "for_update"),
+    ("order_read", "for_update"),
+    ("order_read", "by_id"),
+    ("order_bookentry_read", "for_update"),
+]
+"""The recorded reads the previews of ``PREVIEW_CALLS`` send, each for its own id."""
+
+
+def serve_the_reads_of_the_previews(replay_fixture: ReplayFixture) -> None:
+    """Each recorded read at its own path, matched by its ``id``, as recorded."""
+    for endpoint, case in PREVIEW_RECORDINGS:
+        replay_fixture(endpoint, case, match_params=["id"])
+
+
+def test_every_write_task_has_its_preview_call_and_reads() -> None:
+    assert PREVIEW_CALLS.keys() == PREVIEW_READS.keys() == WRITE_TASKS.keys()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("name", PREVIEW_READS, ids=PREVIEW_READS)
+async def test_every_preview_names_what_it_read(replay_fixture: ReplayFixture, name: str) -> None:
+    """``reads`` holds the record's ``read.json`` for the eight that read it, ``[]`` for six.
+
+    https://github.com/xippios/sdk-cashctrl/issues/88: an agent sees what the preview cost.
+    """
+    serve_the_reads_of_the_previews(replay_fixture)
+    payload = await mcp_call(
+        write_server, tool_name(SOURCE, WRITE_TASKS[name]), PREVIEW_CALLS[name]
+    )
+    assert payload["data"]["performed"] is False
+    assert payload["data"]["reads"] == PREVIEW_READS[name]
+
+
+@pytest.mark.anyio
+async def test_no_preview_sends_a_write_and_each_names_its_reads(
+    replay_fixture: ReplayFixture, respx_mock: respx.MockRouter
+) -> None:
+    """Core's dry run calls every write tool without ``confirm`` (sdk-core ADR-0050).
+
+    A preview sends no request but a read, a ``GET``, and its ``reads`` is empty exactly when
+    it sent none.
+    """
+    serve_the_reads_of_the_previews(replay_fixture)
+    await assert_write_tools(
+        mcp_write.build(), list(WRITE_TASKS.values()), dry_run=PREVIEW_CALLS, sent=respx_mock
+    )
+
+
+@pytest.mark.parametrize("name", PREVIEW_READS, ids=PREVIEW_READS)
+def test_every_write_docstring_says_whether_its_preview_sends_a_read(name: str) -> None:
+    """The tool's description says what its preview costs (conventions §8, sdk-core ADR-0050)."""
+    doc = " ".join((inspect.getdoc(WRITE_TASKS[name]) or "").split())
+    reads = PREVIEW_READS[name]
+    if not reads:
+        assert "The preview sends no request, and its ``reads`` is empty." in doc
+    else:
+        (read,) = reads
+        said = rf"The preview reads the [a-z ]+ once with ``{re.escape(read)}``, one request, "
+        assert re.search(said + r"and names it in ``reads``\.", doc), doc[:200]

@@ -252,8 +252,10 @@ write server only: never by the read server, never as an HTTP route.
   which the tools do not send).
 - CashCtrl checks every write and refuses with the fields it objects to, e.g. `error:
   RequestRejected: CashCtrl rejected the request: debitId: This field cannot be empty.
-  (POST /api/v1/journal/create.json)`; a refused write changed nothing. A write that meets a
-  server error or a timeout is never repeated (sdk-core ADR-0011): read back before sending it again.
+  (POST /api/v1/journal/create.json)`; a refused write changed nothing. A write is sent once
+  and never repeated, after a 429, a server error or a timeout alike (sdk-core ADR-0011): its
+  error says that its outcome is unknown, and the read its tool's description names shows
+  whether it was applied before it is sent again.
 
 ```python
 from datetime import date

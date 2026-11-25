@@ -11,9 +11,9 @@ and ``start`` ("The starting entry. Defaults to 0."). Pages are the task's busin
 
 from collections.abc import Sequence
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.api._filter import encode_filter
 from xippios.cashctrl.api._params import flag, present
 from xippios.cashctrl.models import Direction, Filter, ListResponse, Person
@@ -90,7 +90,7 @@ async def person_list(
     query: str | None = None,
     sort: str | None = None,
     start: int | None = None,
-) -> ListResponse[Person]:
+) -> Answer[ListResponse[Person]]:
     """Call ``person/list.json`` for organisation ``org``: one page and upstream's total.
 
     Args:
@@ -132,5 +132,6 @@ async def person_list(
         sort=sort,
         start=start,
     )
-    raw = await client_for(org).get_json("/person/list.json", params=params)
-    return parse(ListResponse[Person], raw, source=SOURCE, endpoint="person/list.json")
+    return await client_for(org).get_answer(
+        "/person/list.json", params=params, parse=ListResponse[Person], endpoint="person/list.json"
+    )

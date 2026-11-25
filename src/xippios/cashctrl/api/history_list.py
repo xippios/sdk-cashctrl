@@ -13,9 +13,9 @@ whose create and update the history had listed. Pages are the task's business.
 
 from collections.abc import Sequence
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.api._filter import encode_filter
 from xippios.cashctrl.api._params import present
 from xippios.cashctrl.models import Direction, Filter, HistoryEntry, ListResponse
@@ -64,7 +64,7 @@ async def history_list(
     query: str | None = None,
     start: int | None = None,
     statement_id: int | None = None,
-) -> ListResponse[HistoryEntry]:
+) -> Answer[ListResponse[HistoryEntry]]:
     """Call ``history/list.json`` for organisation ``org``: one page and upstream's total.
 
     Args:
@@ -88,5 +88,9 @@ async def history_list(
         start=start,
         statement_id=statement_id,
     )
-    raw = await client_for(org).get_json("/history/list.json", params=params)
-    return parse(ListResponse[HistoryEntry], raw, source=SOURCE, endpoint="history/list.json")
+    return await client_for(org).get_answer(
+        "/history/list.json",
+        params=params,
+        parse=ListResponse[HistoryEntry],
+        endpoint="history/list.json",
+    )

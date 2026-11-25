@@ -2,12 +2,12 @@
 
 A source with a write server names its servers ``xippios-<source>-mcp-read`` and
 ``xippios-<source>-mcp-write``, and its old ``xippios-<source>-mcp`` goes without an
-alias (sdk-core ADR-0026); ``server.name`` stays what the server is built with. The text
-that tells a user or an agent how to start a server names only these two.
+alias (sdk-core ADR-0026), which core's family check holds; both servers are named
+``xippios-<source>`` (sdk-core ADR-0063, decision 7). The text that tells a user or an
+agent how to start a server names only the two entry points.
 """
 
 import re
-import tomllib
 from pathlib import Path
 
 import pytest
@@ -31,14 +31,9 @@ TEXTS = [
 ]
 
 
-def test_the_servers_are_read_and_write_with_no_alias() -> None:
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert project["project"]["scripts"] == ENTRY_POINTS
-
-
 def test_the_server_names_stay() -> None:
     assert mcp.server.name == "xippios-cashctrl"
-    assert mcp_write.server.name == "xippios-cashctrl-write"
+    assert mcp_write.server.name == "xippios-cashctrl", "both servers take the source's name"
 
 
 @pytest.mark.parametrize("path", TEXTS)

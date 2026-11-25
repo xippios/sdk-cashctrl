@@ -8,21 +8,22 @@ notes: ``{"total": 38, "data": [...]}``, CashCtrl's default chart, flat, each ca
 of categories"), which is not wrapped: ``AccountCategory`` says why.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.models import AccountCategory, ListResponse
 
 __all__ = ["account_category_list"]
 
 
-async def account_category_list(org: str) -> ListResponse[AccountCategory]:
+async def account_category_list(org: str) -> Answer[ListResponse[AccountCategory]]:
     """Call ``account/category/list.json`` for organisation ``org``.
 
     Args:
         org: A declared organisation, e.g. ``"demo"``.
     """
-    raw = await client_for(org).get_json("/account/category/list.json")
-    return parse(
-        ListResponse[AccountCategory], raw, source=SOURCE, endpoint="account/category/list.json"
+    return await client_for(org).get_answer(
+        "/account/category/list.json",
+        parse=ListResponse[AccountCategory],
+        endpoint="account/category/list.json",
     )

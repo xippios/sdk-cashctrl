@@ -2294,6 +2294,9 @@ class WritePreview[T](UpstreamModel):
             ``false``, dates ``YYYY-MM-DD``, lists as JSON, ``custom`` as XML. A personal
             identifier, ``ssn`` or the ``iban`` of an item of ``bankAccounts``, shows as
             ``REDACTED``; upstream receives the value (sdk-core ADR-0017).
+        reads: The operations the preview read, e.g. ``["journal/read.json"]`` for an
+            update's or a delete's one read of its record, ``[]`` for a preview that sent
+            no request (sdk-core ADR-0050).
         before: For an update or a delete, the record as upstream holds it now, read with
             ``read.json``, as the task's projection, without ``ssn`` and ``iban``
             (sdk-core ADR-0017); ``None`` for a create.
@@ -2304,6 +2307,7 @@ class WritePreview[T](UpstreamModel):
     performed: Literal[False] = False
     endpoint: str
     payload: dict[str, str]
+    reads: list[str]
     before: T | None = None
     changes: dict[str, str] | None = None
 

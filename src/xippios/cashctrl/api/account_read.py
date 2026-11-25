@@ -5,15 +5,15 @@ ID."), one parameter, ``id`` (mandatory, NUMBER). An unknown id is answered with
 and ``"success": false``, which ``_client.classify`` raises as ``NotFoundError``.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.models import AccountDetail, ReadResponse
 
 __all__ = ["account_read"]
 
 
-async def account_read(org: str, id: int) -> AccountDetail:
+async def account_read(org: str, id: int) -> Answer[AccountDetail]:
     """Call ``account/read.json`` for organisation ``org`` and return the account.
 
     Args:
@@ -23,6 +23,10 @@ async def account_read(org: str, id: int) -> AccountDetail:
     Raises:
         NotFoundError: No account has this id.
     """
-    raw = await client_for(org).get_json("/account/read.json", params={"id": id})
-    response = parse(ReadResponse[AccountDetail], raw, source=SOURCE, endpoint="account/read.json")
-    return response.data
+    answer = await client_for(org).get_answer(
+        "/account/read.json",
+        params={"id": id},
+        parse=ReadResponse[AccountDetail],
+        endpoint="account/read.json",
+    )
+    return Answer(answer.payload.data, answer.retrieved_at)

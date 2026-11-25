@@ -33,10 +33,11 @@ import httpx
 from xippios.core import (
     BODY_LIMIT,
     AsyncClient,
-    BasicKeyAuth,
     ClientConfig,
+    ConfigError,
     EnvVar,
     InvalidRequestError,
+    KeyAuth,
     NotFoundError,
     RateLimit,
     Tenants,
@@ -138,8 +139,8 @@ def check_subdomain(value: str) -> str:
     the upstream would read it (sdk-core ADR-0036, decision 1).
 
     Raises:
-        ValueError: ``value`` is not one label; the message never quotes it, and core's
-            ``ConfigError`` names the variable instead.
+        ValueError: ``value`` is not one label; the message never quotes it, and
+            ``_subdomain``'s ``ConfigError`` names the variable instead.
     """
     subdomain = value.lower()
     if not _SUBDOMAIN.fullmatch(subdomain):
@@ -153,25 +154,47 @@ TENANTS = Tenants(
     param="org",
     fields=("SUBDOMAIN", "API_KEY"),
     reserved=(DEMO,),
-    validate={"SUBDOMAIN": check_subdomain},
-    hints={"SUBDOMAIN": "set the subdomain alone, one DNS label: acme for acme.cashctrl.com"},
+    noun="organisation",
 )
 """CashCtrl's organisations, declared in the environment (sdk-core ADR-0036, decision 1)."""
+
+_SUBDOMAIN_HINT = "set the subdomain alone, one DNS label: acme for acme.cashctrl.com"
+
+
+def _subdomain(org: str) -> str:
+    """Organisation ``org``'s subdomain, checked: ``check_subdomain`` of its variable's value.
+
+    Core reads the variable and checks no value (sdk-core ADR-0036), so the package checks
+    the one it knows the shape of, here, for ``_build`` and ``check_org`` alike.
+
+    Raises:
+        ConfigError: ``CASHCTRL_<NAME>_SUBDOMAIN`` is not set or holds no subdomain; the
+            message names the variable and the expected form, never the value.
+    """
+    value = TENANTS.field(org, "SUBDOMAIN")
+    try:
+        return check_subdomain(value)
+    except ValueError:
+        pass
+    # Raised outside the handler, so the check's error is neither its cause nor its context.
+    variable = TENANTS.var(org, "SUBDOMAIN")
+    message = f"{variable} does not hold a valid SUBDOMAIN for organisation {org!r}"
+    raise ConfigError(f"{message}; {_SUBDOMAIN_HINT}", source=SOURCE)
 
 
 def check_org(org: str) -> None:
     """Check a declared organisation's subdomain at a bound server's startup.
 
-    Core's ``serve_tenants`` calls it after ``TENANTS.require(org)``, before the server
-    bound to ``org`` is built, so a missing or malformed subdomain stops the server at
-    startup, exit status 2, rather than on its first call. It reads the subdomain as
-    ``client_for(org)`` would.
+    Core's ``main`` calls it after ``TENANTS.require(org)``, before the server bound to
+    ``org`` is built, so a missing or malformed subdomain stops the server at startup, exit
+    status 2, rather than on its first call. It reads the subdomain as ``client_for(org)``
+    would.
 
     Raises:
         ConfigError: ``CASHCTRL_<NAME>_SUBDOMAIN`` is not set or holds no valid subdomain;
             the message names the variable, never its value.
     """
-    TENANTS.field(org, "SUBDOMAIN")
+    _subdomain(org)
 
 
 NEUTRAL_HOST = "cashctrl.com"
@@ -383,7 +406,7 @@ def classify(response: httpx.Response) -> XippiosError | None:
     ``"success": false`` (data, malformed JSON), a download's 200, whose body core leaves
     unread (``httpx.ResponseNotRead``, counted as ``None``), and every other 2xx or 3xx.
     There is no content-type check here: a byte pre-check for ``"success": false`` and a
-    tolerant JSON parse decide, as ``get_json`` does.
+    tolerant JSON parse decide, as ``get_answer`` does.
     """
     if response.status_code >= 400:
         return _status_error(response)
@@ -410,13 +433,13 @@ def classify(response: httpx.Response) -> XippiosError | None:
 def _build(org: str) -> AsyncClient:
     """A new client for organisation ``org``: its base URL, its key, its own token bucket.
 
-    Called by ``TENANTS.client_for`` on first use and whenever one of the organisation's
-    variables changed. The subdomain is read and checked here (``ConfigError`` when it is
-    missing or malformed); the key is read on the first request. It takes no response
+    Called by ``TENANTS.client_for`` on first use, and again only after ``TENANTS.reset()``.
+    The subdomain is read and checked here (``ConfigError`` when it is missing or
+    malformed); the key is read on the first request. It takes no response
     cache (``cache=None``), since every answer is one organisation's private books, which
     no answer kept for a later call should hold.
     """
-    subdomain = TENANTS.field(org, "SUBDOMAIN")
+    subdomain = _subdomain(org)
     config = ClientConfig(
         source=SOURCE,
         version=__version__,
@@ -425,7 +448,8 @@ def _build(org: str) -> AsyncClient:
         cache=None,
         classify=classify,
     )
-    return AsyncClient(config, auth=BasicKeyAuth(TENANTS.var(org, "API_KEY"), source=SOURCE))
+    auth = KeyAuth(TENANTS.var(org, "API_KEY"), location="basic", source=SOURCE)
+    return AsyncClient(config, auth=auth)
 
 
 def client_for(org: str) -> AsyncClient:
@@ -434,10 +458,9 @@ def client_for(org: str) -> AsyncClient:
     Each organisation has its own client: its own base URL, key, token bucket and no
     response cache. The key is read from ``CASHCTRL_<NAME>_API_KEY`` on the first request,
     so a declared organisation without a key fails then, with ``ConfigError``. The
-    registry keeps the client under a digest of the organisation's variables: when the
-    environment changes the subdomain or the key, the next call builds a new client and
-    closes the one it replaces (``Tenants.client_for``). ``TENANTS.reset()`` drops every
-    cached client.
+    registry keeps one client per organisation until ``TENANTS.reset()``, the one way to a
+    new client: a subdomain or key changed in the environment takes effect at the next
+    start (``Tenants.client_for``).
 
     Raises:
         InvalidRequestError: ``org`` is not declared.

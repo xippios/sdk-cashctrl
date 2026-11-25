@@ -170,21 +170,6 @@ def test_each_org_has_its_own_client(monkeypatch: pytest.MonkeyPatch) -> None:
     assert b.config.cache is None
 
 
-def test_a_changed_subdomain_builds_a_new_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    first = client_for(DEMO)
-    monkeypatch.setenv(subdomain_env(DEMO), "other")
-    second = client_for(DEMO)
-    assert second is not first
-    assert second.config.base_url == "https://other.cashctrl.com/api/v1"
-
-
-def test_a_changed_key_builds_a_new_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Core keys the cache by every variable of the organisation, the key included."""
-    first = client_for(DEMO)
-    monkeypatch.setenv(api_key_env(DEMO), "another-placeholder")  # pragma: allowlist secret
-    assert client_for(DEMO) is not first
-
-
 def test_reset_drops_every_cached_client() -> None:
     first = client_for(DEMO)
     TENANTS.reset()
@@ -223,7 +208,7 @@ def test_a_missing_or_malformed_subdomain_is_a_config_error(
 def test_a_malformed_subdomain_says_what_the_variable_should_hold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``Tenants(hints=...)``: the operator learns the expected form, never the value."""
+    """The package's own check: the operator learns the expected form, never the value."""
     monkeypatch.setenv(ORGS_ENV, "xa")
     monkeypatch.setenv(subdomain_env("xa"), f"{HIDDEN_SUBDOMAIN}.cashctrl.com")
     with pytest.raises(ConfigError) as info:

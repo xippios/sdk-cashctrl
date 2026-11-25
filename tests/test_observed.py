@@ -4,7 +4,9 @@ sdk-core's conventions §3 keep these notes in one file written by hand, which t
 script neither writes nor checks and ``FETCHED.md`` lists in a row of its own, and give
 each note its evidence: the probe that showed it, its date, its operation and its sample, a
 recording under ``tests/fixtures/``, or its request where the probe kept no answer. A note
-here is a ``###`` section, and its last paragraph, ``Probe:``, names them. The package's
+here is a ``###`` section, and its last paragraph, ``Probe:``, names them. Core's family
+check holds the row, the label and the date of each probe and the files the notes cite
+(sdk-core ADR-0044); this module holds the rest of the evidence. The package's
 own text, ``CLAUDE.md``, ``README.md``, ``docs/demo-org.md``, ``docs/write-tools.md``,
 every module under ``src/xippios/cashctrl/`` and every test module but this one, keeps what
 its reader needs and no probe: the probes stand in ``OBSERVED.md`` alone.
@@ -19,10 +21,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM = ROOT / "docs" / "upstream"
 OBSERVED = UPSTREAM / "OBSERVED.md"
-ROW = (
-    "| OBSERVED.md | - | - | written by hand: what upstream does but never documents; "
-    "not fetched or checked |"
-)
 DATE = re.compile(r"\b20\d\d-\d\d-\d\d\b")
 CITED = re.compile(r"`((?:tests|docs|src|scripts)/[^`\s]+\.[a-z]+)`")
 OPERATION = re.compile(r"`(GET|POST) ([a-z][a-z0-9_/]*(?:\.[a-z]+)?)(?:\?[^`\s]*)?`")
@@ -85,20 +83,12 @@ def documented() -> set[tuple[str, str]]:
     return found
 
 
-def test_fetched_md_lists_observed_md_in_a_row_of_its_own() -> None:
-    fetched = (UPSTREAM / "FETCHED.md").read_text(encoding="utf-8")
-    assert fetched.splitlines()[-1] == ROW
-    assert "never edited by hand but `OBSERVED.md`" in " ".join(fetched.split())
-
-
 def test_every_note_ends_with_its_probe() -> None:
-    """The date, an operation of the snapshot, and a recording or a request."""
+    """An operation of the snapshot, and a recording or a request; the label and date are core's."""
     found = notes()
     assert len(found) >= 20
     for heading, paragraphs in found.items():
         probe = paragraphs[-1]
-        assert probe.startswith("Probe: "), heading
-        assert DATE.search(probe), heading
         assert OPERATION.search(probe), heading
         assert "`tests/fixtures/" in probe or NOT_KEPT in probe, heading
 
@@ -122,12 +112,6 @@ def test_every_operation_is_one_the_snapshot_documents() -> None:
     named = {(method, path) for method, path in OPERATION.findall(text())}
     assert named
     assert sorted(named - documented()) == []
-
-
-def test_every_file_the_notes_cite_exists() -> None:
-    cited = CITED.findall(text())
-    assert cited
-    assert [path for path in cited if not (ROOT / path).is_file()] == []
 
 
 def test_the_documents_point_to_the_notes() -> None:

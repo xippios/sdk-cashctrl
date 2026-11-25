@@ -11,9 +11,9 @@ category. Its answer without ``type``, as ``docs/upstream/OBSERVED.md`` notes:
 six default sales categories, ``total`` equal to the records.
 """
 
-from xippios.core import parse
+from xippios.core import Answer
 
-from xippios.cashctrl._client import SOURCE, client_for
+from xippios.cashctrl._client import client_for
 from xippios.cashctrl.api._params import present
 from xippios.cashctrl.models import ListResponse, OrderCategory, OrderType
 
@@ -29,7 +29,7 @@ def order_category_list_params(
 
 async def order_category_list(
     org: str, *, fiscal_period_id: int | None = None, type: OrderType | None = None
-) -> ListResponse[OrderCategory]:
+) -> Answer[ListResponse[OrderCategory]]:
     """Call ``order/category/list.json`` for organisation ``org``.
 
     Args:
@@ -39,7 +39,9 @@ async def order_category_list(
         type: ``type``, ``SALES`` or ``PURCHASE``; upstream's default is ``SALES``.
     """
     params = order_category_list_params(fiscal_period_id=fiscal_period_id, type=type)
-    raw = await client_for(org).get_json("/order/category/list.json", params=params)
-    return parse(
-        ListResponse[OrderCategory], raw, source=SOURCE, endpoint="order/category/list.json"
+    return await client_for(org).get_answer(
+        "/order/category/list.json",
+        params=params,
+        parse=ListResponse[OrderCategory],
+        endpoint="order/category/list.json",
     )

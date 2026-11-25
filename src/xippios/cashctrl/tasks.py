@@ -26,18 +26,22 @@ in any letter case and at any depth (``_report``); the endpoint wrappers' read
 models keep them. ``get_report_data`` refuses payroll and people reports by their type,
 read from ``report/tree.json`` once per organisation and kept (``_report_type``).
 
-The journal, person and order lists page by offset (``start``, ``limit``), resolved once
-in ``_offset_pages`` (conventions §4). With ``limit`` the task sends one request,
-``start`` (default 0) and ``limit``, and returns that page; ``meta.total`` tells the
-caller how many there are in all. Without ``limit`` it collects every page from
-``start`` on through core's ``paginate_offset``, ``PAGE_SIZE`` (100, upstream's
+The journal, person, order and history lists page by offset (``start``, ``limit``),
+resolved once in ``_offset_pages`` (conventions §4). With ``limit`` the task sends one
+request, ``start`` (default 0) and ``limit``, and returns that page; ``meta.total`` tells
+the caller how many there are in all. Without ``limit`` it collects every page from
+``start`` on through core's one walk, ``fetch_pages``, ``PAGE_SIZE`` (100, upstream's
 documented default for ``limit``, sent explicitly) at a time, and stops after a short
 page or, without a further request, once the next offset reaches the ``total``
-upstream reported; ``meta.total`` is the ``total`` of the last page fetched. A page past
-the end is answered with an empty ``data`` and the same ``total``. ``meta.request`` holds
-the parameters as the first request sent them; when
-every page is collected it leaves out ``limit``, the page size, so the same arguments
-collect the same records again.
+upstream reported; ``meta.total`` is the ``total`` of the last page fetched. The walk's
+bound is ``WALK_PAGES``, 24 pages, for Python and MCP alike: where upstream counts more
+records from ``start`` than 24 pages hold, the task is refused after its first request
+and returns nothing (``InvalidRequestError``). ``meta.request`` holds the parameters as
+the first request sent them; when every page is collected it leaves out ``limit``, the
+page size, so the same arguments collect the same records again.
+
+``meta.retrieved_at`` is the client's time of the answer (``get_answer``), the oldest
+where a walk assembles several, and a file's time when it was complete.
 
 The file tasks, ``download_order_document``, the list files
 ``download_journal_entries``, ``download_accounts``, ``download_persons`` and
@@ -67,15 +71,16 @@ from typing import Any, TypeGuard, get_args
 from pydantic import JsonValue, ValidationError
 from pydantic_core import ErrorDetails
 from xippios.core import (
+    Answer,
     AsyncClient,
     Downloaded,
     InvalidRequestError,
     Result,
     ResultCap,
     ResultMeta,
-    collect,
+    check_dest,
+    fetch_pages,
     list_task,
-    paginate_offset,
     sync,
 )
 
@@ -215,6 +220,22 @@ more than the bound: a cut is resumed at ``start`` (sdk-core ADR-0038, decision 
 narrowed to one record's history.
 """
 
+MCP_INSTRUCTIONS = (
+    "CashCtrl via xippios. "
+    "Tools are read-only. cashctrl_list_organisations lists the configured organisations; "
+    "every other tool takes org, the name of one of them, and an unknown name is answered "
+    "with the declared ones. "
+    "Call the list tools (cashctrl_list_*) first to find valid ids, then query."
+)
+"""The read server's instructions, which core's ``ToolSet.from_tasks`` reads (conventions §8)."""
+MCP_BOUND_INSTRUCTIONS = (
+    "CashCtrl via xippios. "
+    "Tools are read-only. "
+    "Call the list tools (cashctrl_list_*) first to find valid ids, then query."
+)
+"""The text of a read server ``--org`` binds, whose tools take no ``org``: core's sentence
+that names the organisation ends it."""
+
 DIRECTIONS: tuple[str, ...] = get_args(Direction)
 """The values of ``dir`` on every list that documents it: ``ASC``, ``DESC``."""
 COMPARISONS: tuple[str, ...] = get_args(Comparison)
@@ -251,6 +272,12 @@ PAGE_SIZE = 100
 Upstream's documented default for ``limit`` on the journal, person and order lists
 ("Defaults to 100."), sent explicitly so the page size never depends on that default.
 """
+WALK_PAGES = 24
+"""The most pages, so the most requests, that one call of a walking list task sends.
+
+One bound for Python and MCP alike (https://github.com/xippios/sdk-cashctrl/issues/135,
+part 4): 2,400 records for at most 24 requests, 96 with the client's four attempts each.
+"""
 
 
 def _meta(
@@ -258,12 +285,15 @@ def _meta(
     endpoint: str,
     params: Mapping[str, Any],
     *,
+    retrieved_at: datetime | None,
     total: int | None = None,
-    retrieved_at: datetime | None = None,
 ) -> ResultMeta:
     """``meta`` of a task's result: ``org`` as the tenant and first in ``request``.
 
-    ``retrieved_at`` is a file's, when it was complete; otherwise now.
+    ``retrieved_at`` is the client's time of the answer (``Answer.retrieved_at``), the
+    oldest of a walk's, or a file's when it was complete (conventions §4). ``None`` is now:
+    for a write's answer, which core's ``post_json`` gives without a time, and for the
+    preview of a write that read nothing.
     """
     when = {} if retrieved_at is None else {"retrieved_at": retrieved_at}
     return ResultMeta(
@@ -298,41 +328,52 @@ def _journal_entry_detail(entry: JournalEntryDetail) -> JournalEntryDetailProjec
 
 
 async def _offset_pages[T](
-    fetch_page: Callable[[int, int], Awaitable[ListResponse[T]]],
+    fetch_page: Callable[[int, int], Awaitable[Answer[ListResponse[T]]]],
     *,
     start: int,
     limit: int | None,
-) -> tuple[list[T], int]:
+) -> tuple[list[T], int | None, datetime]:
     """One page, or every page from ``start`` on, with upstream's ``total`` (sdk-core ADR-0034).
 
     Args:
         fetch_page: Fetches the page at an offset with a page size, e.g. a wrapper call
             with ``start`` and ``limit``.
         start: The offset of the first record, ``0`` for the first.
-        limit: ``None`` collects every page through ``paginate_offset``, ``PAGE_SIZE``
-            records a request; a number fetches that one page.
+        limit: ``None`` collects every page through core's ``fetch_pages``, ``PAGE_SIZE``
+            records a request and at most ``WALK_PAGES`` requests; a number fetches that
+            one page.
 
     Pages are cut by offset at request time: if the list changes while every page is
     collected, a record added or removed before the next offset shifts it by one, and a
     record is repeated or skipped. Upstream offers no cursor.
 
     Returns:
-        The records and the ``total`` upstream reported, on the last page fetched.
+        The records, the ``total`` upstream reported on the last page fetched, and the
+        oldest page's ``retrieved_at``.
+
+    Raises:
+        InvalidRequestError: Without ``limit``, upstream counts more records from
+            ``start`` than ``WALK_PAGES`` pages hold; raised after the first request.
     """
     if limit is not None:
-        page = await fetch_page(start, limit)
-        return page.data, page.total
-    totals: list[int] = []
+        answer = await fetch_page(start, limit)
+        return answer.payload.data, answer.payload.total, answer.retrieved_at
+    times: list[datetime] = []
 
-    async def fetch(offset: int) -> list[T]:
-        if totals and offset >= totals[-1]:
-            return []  # upstream counts nothing past this offset: no further request
-        page = await fetch_page(offset, PAGE_SIZE)
-        totals.append(page.total)
-        return page.data
+    async def fetch(offset: int) -> tuple[list[T], int]:
+        answer = await fetch_page(offset, PAGE_SIZE)
+        times.append(answer.retrieved_at)
+        return answer.payload.data, answer.payload.total
 
-    records = await collect(paginate_offset(fetch, page_size=PAGE_SIZE, start=start))
-    return records, totals[-1]
+    records, total = await fetch_pages(
+        fetch,
+        page_size=PAGE_SIZE,
+        most=WALK_PAGES,
+        paging="start with limit",
+        start=start,
+        source=SOURCE,
+    )
+    return records, total, min(times)
 
 
 def _wrong_comparison(where: str, value: object) -> str:
@@ -449,8 +490,11 @@ async def list_fiscal_periods_async(org: str) -> Result[list[FiscalPeriod]]:
     Args:
         org: A declared organisation name, e.g. ``demo``.
     """
-    response = await api.fiscalperiod_list(org)
-    meta = _meta(org, "fiscalperiod/list.json", {}, total=response.total)
+    answer = await api.fiscalperiod_list(org)
+    response = answer.payload
+    meta = _meta(
+        org, "fiscalperiod/list.json", {}, total=response.total, retrieved_at=answer.retrieved_at
+    )
     return Result(data=response.data, meta=meta)
 
 
@@ -472,8 +516,12 @@ async def get_fiscal_period_async(org: str, id: int | None = None) -> Result[Fis
         id: The fiscal period's ``id`` as ``list_fiscal_periods`` gives it, e.g. ``2``;
             left out, the current fiscal period.
     """
-    period = await api.fiscalperiod_read(org, id)
-    return Result(data=period, meta=_meta(org, "fiscalperiod/read.json", {"id": id}))
+    answer = await api.fiscalperiod_read(org, id)
+    period = answer.payload
+    return Result(
+        data=period,
+        meta=_meta(org, "fiscalperiod/read.json", {"id": id}, retrieved_at=answer.retrieved_at),
+    )
 
 
 async def list_currencies_async(org: str) -> Result[list[Currency]]:
@@ -488,8 +536,11 @@ async def list_currencies_async(org: str) -> Result[list[Currency]]:
     Args:
         org: A declared organisation name, e.g. ``demo``.
     """
-    response = await api.currency_list(org)
-    meta = _meta(org, "currency/list.json", {}, total=response.total)
+    answer = await api.currency_list(org)
+    response = answer.payload
+    meta = _meta(
+        org, "currency/list.json", {}, total=response.total, retrieved_at=answer.retrieved_at
+    )
     return Result(data=response.data, meta=meta)
 
 
@@ -506,8 +557,14 @@ async def list_tax_codes_async(org: str) -> Result[list[TaxCode]]:
     Args:
         org: A declared organisation name, e.g. ``demo``.
     """
-    response = await api.tax_list(org)
-    return Result(data=response.data, meta=_meta(org, "tax/list.json", {}, total=response.total))
+    answer = await api.tax_list(org)
+    response = answer.payload
+    return Result(
+        data=response.data,
+        meta=_meta(
+            org, "tax/list.json", {}, total=response.total, retrieved_at=answer.retrieved_at
+        ),
+    )
 
 
 async def list_accounts_async(
@@ -565,8 +622,11 @@ async def list_accounts_async(
         "sort": sort,
     }
     sent = api.account_list_params(**arguments)
-    response = await api.account_list(org, **arguments)
-    meta = _meta(org, "account/list.json", sent, total=response.total)
+    answer = await api.account_list(org, **arguments)
+    response = answer.payload
+    meta = _meta(
+        org, "account/list.json", sent, total=response.total, retrieved_at=answer.retrieved_at
+    )
     return Result(data=response.data, meta=meta)
 
 
@@ -584,8 +644,12 @@ async def get_account_async(org: str, id: int) -> Result[AccountDetail]:
         id: The account's ``id`` as ``list_accounts`` gives it, e.g. ``100``; not the
             account number.
     """
-    account = await api.account_read(org, id)
-    return Result(data=account, meta=_meta(org, "account/read.json", {"id": id}))
+    answer = await api.account_read(org, id)
+    account = answer.payload
+    return Result(
+        data=account,
+        meta=_meta(org, "account/read.json", {"id": id}, retrieved_at=answer.retrieved_at),
+    )
 
 
 async def list_journal_entries_async(
@@ -612,33 +676,25 @@ async def list_journal_entries_async(
 ) -> Result[list[JournalEntry]]:
     """List an organisation's journal entries, newest first: every page, or one.
 
-    Every entry comes back with its date ``date_added``, ``title``, ``reference``,
-    ``amount``, the accounts it books (``debit_id`` and ``debit_name``, ``credit_id`` and
-    ``credit_name``), the partner (``associate_id``, ``associate_name``), the tax code
-    (``tax_code``, ``tax_rate``) and its ``type`` (``MANUAL``, ``COLLECTIVE``, or
-    ``ORDER`` with ``order_id`` for one an order booked, which only that order changes).
-    A collective entry has ``items_count`` lines, which ``get_journal_entry`` returns.
-    Pass ``fiscal_period_id`` (an id from ``list_fiscal_periods``) for a reproducible
-    answer; without it upstream uses the API user's current period, server-side state
-    that ``fiscalperiod/switch.json`` changes, and ``meta.request`` does not show which
-    period answered.
+    Every entry comes back with its date ``date_added``, ``title``, ``reference``, ``amount``,
+    the accounts it books (``debit_id``, ``credit_id`` and their names), the partner
+    (``associate_id``, ``associate_name``), the tax code and its ``type`` (``MANUAL``,
+    ``COLLECTIVE``, or ``ORDER`` with ``order_id`` for one an order booked). A collective entry
+    has ``items_count`` lines, which ``get_journal_entry`` returns. Pass ``fiscal_period_id``
+    for a reproducible answer.
 
-    Paging: with ``limit``, one page of at most ``limit`` entries from ``start``; without
-    it, every matching entry from ``start`` on. ``meta.total`` is upstream's count of all
-    matching entries. The next page starts at ``start`` plus the number of records
-    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
-    should always pass ``limit`` (about 20): collecting a large journal costs about 1 s
-    per 100 entries. Offset pages over a list that changes meanwhile can repeat or skip
-    entries: an entry added or removed shifts every later page by one.
-
-    Upstream ignores values it does not understand, so ``dir`` and the filters'
-    ``comparison`` are checked first and a wrong one is refused.
+    With ``limit``, one page of at most ``limit`` entries from ``start``, one request; without
+    it, every matching entry from ``start`` on, at most 24 pages of 100: 24 requests, 96 with
+    the client's retries, and where upstream counts more the call is refused after its first
+    request. ``meta.total`` is upstream's count of all matching entries. MCP agents should pass
+    ``limit`` (about 20).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         fiscal_period_id: The fiscal period, an ``id`` from ``list_fiscal_periods``,
             e.g. ``2``. When left out, upstream uses the API user's current period,
-            which ``meta.request`` does not show.
+            server-side state that ``fiscalperiod/switch.json`` changes, which
+            ``meta.request`` does not show.
         account_id: Only the entries that book to one account, an ``id`` from
             ``list_accounts`` (not the account number), e.g. ``3``.
         associate_id: Only the entries that name one person, an ``id`` from
@@ -649,6 +705,7 @@ async def list_journal_entries_async(
             e.g. ``reference``) and ``value`` (a text, or a list of texts of which any
             may match), e.g.
             ``[{"comparison": "eq", "field": "reference", "value": "RE-2025-003"}]``.
+            Each ``comparison`` is checked first, since upstream ignores one it does not know.
         only_collective: ``true`` for collective entries only.
         only_cost_centers: ``true`` for entries with cost centers only.
         only_imported: ``true`` for imported entries only.
@@ -659,11 +716,14 @@ async def list_journal_entries_async(
         only_sales: ``true`` for entries booked by sales orders only.
         only_untaxed: ``true`` for untaxed entries only.
         sort: The column to sort by, e.g. ``dateAdded`` (upstream's default).
-        dir: ``DESC`` (upstream's default) or ``ASC``.
+        dir: ``DESC`` (upstream's default) or ``ASC``, checked first, since upstream
+            ignores a value it does not know.
         start: The offset of the first entry, ``0`` (the default) for the first page;
-            for the next, ``start`` plus the number of entries received, e.g. ``20``.
+            for the next, ``start`` plus the number of entries received, e.g. ``20``,
+            which can be fewer than ``limit``: never advance by ``limit``. Offset pages
+            over a list that changes meanwhile can repeat or skip entries.
         limit: One page of at most this many entries, e.g. ``20``; every entry when
-            left out.
+            left out, at most 24 pages, about 1 s per 100 entries.
     """
     filters = _check_list_arguments(
         dir=dir, filter=filter, texts={"query": query, "sort": sort}, start=start, limit=limit
@@ -687,12 +747,12 @@ async def list_journal_entries_async(
         "sort": sort,
     }
 
-    async def page(offset: int, size: int) -> ListResponse[JournalEntry]:
+    async def page(offset: int, size: int) -> Answer[ListResponse[JournalEntry]]:
         return await api.journal_list(org, **arguments, start=offset, limit=size)
 
-    entries, total = await _offset_pages(page, start=start, limit=limit)
+    entries, total, retrieved_at = await _offset_pages(page, start=start, limit=limit)
     sent = api.journal_list_params(**arguments, start=start, limit=limit)
-    meta = _meta(org, "journal/list.json", sent, total=total)
+    meta = _meta(org, "journal/list.json", sent, total=total, retrieved_at=retrieved_at)
     return Result(data=entries, meta=meta)
 
 
@@ -711,8 +771,12 @@ async def get_journal_entry_async(org: str, id: int) -> Result[JournalEntryDetai
         org: A declared organisation name, e.g. ``demo``.
         id: The entry's ``id`` as ``list_journal_entries`` gives it, e.g. ``11``.
     """
-    entry = _journal_entry_detail(await api.journal_read(org, id))
-    return Result(data=entry, meta=_meta(org, "journal/read.json", {"id": id}))
+    answer = await api.journal_read(org, id)
+    entry = _journal_entry_detail(answer.payload)
+    return Result(
+        data=entry,
+        meta=_meta(org, "journal/read.json", {"id": id}, retrieved_at=answer.retrieved_at),
+    )
 
 
 async def list_persons_async(
@@ -740,22 +804,16 @@ async def list_persons_async(
 
     Every person comes back with its ``name``, ``nr`` (e.g. ``P-00001``), ``company``,
     ``first_name`` and ``last_name``, its roles (``is_customer``, ``is_vendor``,
-    ``is_employee``, ``is_insurance``, ``is_family``), ``category_id`` and
-    ``category_name``, ``is_inactive``, the main address flattened (``address``,
-    ``zip``, ``city``, ``country``) and ``email_work``. CashCtrl creates insurance
-    records of its own (``is_insurance``). Addresses and contacts in full come from
-    ``get_person``. The personal identifiers ``ssn`` and ``iban`` are left out.
+    ``is_employee``, ``is_insurance``, ``is_family``), ``category_id`` and ``category_name``,
+    ``is_inactive``, the main address flattened (``address``, ``zip``, ``city``, ``country``)
+    and ``email_work``. Addresses and contacts in full come from ``get_person``. The personal
+    identifiers ``ssn`` and ``iban`` are left out.
 
-    Paging: with ``limit``, one page of at most ``limit`` persons from ``start``; without
-    it, every matching person from ``start`` on. ``meta.total`` is upstream's count of
-    all matching persons. The next page starts at ``start`` plus the number of records
-    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
-    should always pass ``limit`` (about 20): collecting many persons costs about 1 s per
-    100. Offset pages over a list that changes meanwhile can repeat or skip persons: a
-    person added or removed shifts every later page by one.
-
-    Upstream ignores values it does not understand, so ``dir`` and the filters'
-    ``comparison`` are checked first and a wrong one is refused.
+    With ``limit``, one page of at most ``limit`` persons from ``start``, one request; without
+    it, every matching person from ``start`` on, at most 24 pages of 100: 24 requests, 96 with
+    the client's retries, and where upstream counts more the call is refused after its first
+    request. ``meta.total`` is upstream's count of all matching persons. MCP agents should pass
+    ``limit`` (about 20).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
@@ -764,23 +822,28 @@ async def list_persons_async(
             ``gt`` or ``lt``; ``like`` when left out), ``field`` (a column of the list,
             e.g. ``city``) and ``value`` (a text, or a list of texts of which any may
             match), e.g. ``[{"comparison": "eq", "field": "city", "value": "Basel"}]``.
+            Each ``comparison`` is checked first, since upstream ignores one it does not know.
         category_id: Only the persons of one person category, e.g. ``1``.
         only_active: ``true`` to leave out inactive persons.
         only_customers: ``true`` for customers only.
         only_vendors: ``true`` for vendors only.
         only_employees: ``true`` for employees only.
-        only_insurances: ``true`` for insurances only.
+        only_insurances: ``true`` for insurances only, among them the insurance records
+            CashCtrl creates of its own.
         only_families: ``true`` for families only.
         only_notes: ``true`` for persons with notes only.
         only_with_images: ``true`` for persons with images only.
         only_without_category: ``true`` for persons without a category only.
         only_without_role: ``true`` for persons without a role only.
         sort: The column to sort by, e.g. ``name`` (upstream's default) or ``nr``.
-        dir: ``ASC`` (upstream's default) or ``DESC``.
+        dir: ``ASC`` (upstream's default) or ``DESC``, checked first, since upstream
+            ignores a value it does not know.
         start: The offset of the first person, ``0`` (the default) for the first page;
-            for the next, ``start`` plus the number of persons received, e.g. ``20``.
+            for the next, ``start`` plus the number of persons received, e.g. ``20``,
+            which can be fewer than ``limit``: never advance by ``limit``. Offset pages
+            over a list that changes meanwhile can repeat or skip persons.
         limit: One page of at most this many persons, e.g. ``20``; every person when
-            left out.
+            left out, at most 24 pages, about 1 s per 100 persons.
     """
     filters = _check_list_arguments(
         dir=dir, filter=filter, texts={"query": query, "sort": sort}, start=start, limit=limit
@@ -803,12 +866,12 @@ async def list_persons_async(
         "sort": sort,
     }
 
-    async def page(offset: int, size: int) -> ListResponse[Person]:
+    async def page(offset: int, size: int) -> Answer[ListResponse[Person]]:
         return await api.person_list(org, **arguments, start=offset, limit=size)
 
-    persons, total = await _offset_pages(page, start=start, limit=limit)
+    persons, total, retrieved_at = await _offset_pages(page, start=start, limit=limit)
     sent = api.person_list_params(**arguments, start=start, limit=limit)
-    meta = _meta(org, "person/list.json", sent, total=total)
+    meta = _meta(org, "person/list.json", sent, total=total, retrieved_at=retrieved_at)
     return Result(data=[_person(person) for person in persons], meta=meta)
 
 
@@ -830,8 +893,12 @@ async def get_person_async(org: str, id: int) -> Result[PersonDetailProjection]:
         id: The person's ``id`` as ``list_persons`` gives it, e.g. ``3``; not its
             number ``nr``.
     """
-    person = _person_detail(await api.person_read(org, id))
-    return Result(data=person, meta=_meta(org, "person/read.json", {"id": id}))
+    answer = await api.person_read(org, id)
+    person = _person_detail(answer.payload)
+    return Result(
+        data=person,
+        meta=_meta(org, "person/read.json", {"id": id}, retrieved_at=answer.retrieved_at),
+    )
 
 
 async def list_orders_async(
@@ -856,39 +923,33 @@ async def list_orders_async(
 ) -> Result[list[Order]]:
     """List an organisation's orders (offers, invoices and the like), newest first.
 
-    Every order comes back with its ``type`` (``SALES`` or ``PURCHASE``), ``nr``
-    (e.g. ``RE-2026-101``), ``date``, the partner (``associate_id``,
-    ``associate_name``), ``description``, the amounts ``sub_total`` (net), ``tax`` and
-    ``total`` (gross), ``open`` (still to be paid), ``status_id`` and ``status_name``,
-    and ``is_book`` (whether its status books it to the journal). The items come from
-    ``get_order``. Without ``type`` upstream lists both types. Pass
-    ``fiscal_period_id`` (an id from ``list_fiscal_periods``) for a reproducible answer;
-    without it upstream uses the API user's current period, server-side state that
-    ``fiscalperiod/switch.json`` changes, and ``meta.request`` does not show which period
-    answered.
+    Every order comes back with its ``type`` (``SALES`` or ``PURCHASE``), ``nr`` (e.g.
+    ``RE-2026-101``), ``date``, the partner (``associate_id``, ``associate_name``),
+    ``description``, the amounts ``sub_total`` (net), ``tax`` and ``total`` (gross), ``open``
+    (still to be paid), ``status_id`` and ``status_name``, and ``is_book`` (whether its status
+    books it to the journal). The items come from ``get_order``. Pass ``fiscal_period_id`` for a
+    reproducible answer.
 
-    Paging: with ``limit``, one page of at most ``limit`` orders from ``start``; without
-    it, every matching order from ``start`` on. ``meta.total`` is upstream's count of all
-    matching orders. The next page starts at ``start`` plus the number of records
-    received, which can be fewer than ``limit``: never advance by ``limit``. MCP agents
-    should always pass ``limit`` (about 20): collecting many orders costs about 1 s per
-    100. Offset pages over a list that changes meanwhile can repeat or skip orders: an
-    order added or removed shifts every later page by one.
-
-    Upstream ignores values it does not understand, so ``type``, ``dir`` and the
-    filters' ``comparison`` are checked first and a wrong one is refused.
+    With ``limit``, one page of at most ``limit`` orders from ``start``, one request; without
+    it, every matching order from ``start`` on, at most 24 pages of 100: 24 requests, 96 with
+    the client's retries, and where upstream counts more the call is refused after its first
+    request. ``meta.total`` is upstream's count of all matching orders. MCP agents should pass
+    ``limit`` (about 20).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
-        type: ``SALES`` or ``PURCHASE``; both when left out.
+        type: ``SALES`` or ``PURCHASE``; both when left out. Checked first, since
+            upstream ignores a value it does not know.
         fiscal_period_id: The fiscal period, an ``id`` from ``list_fiscal_periods``,
             e.g. ``1``. When left out, upstream uses the API user's current period,
-            which ``meta.request`` does not show.
+            server-side state that ``fiscalperiod/switch.json`` changes, which
+            ``meta.request`` does not show.
         query: Full-text search, e.g. ``"Büromöbel"``.
         filter: Filters that must all match, each with ``comparison`` (``eq``, ``like``,
             ``gt`` or ``lt``; ``like`` when left out), ``field`` (a column of the list,
             e.g. ``nr``) and ``value`` (a text, or a list of texts of which any may
             match), e.g. ``[{"comparison": "eq", "field": "nr", "value": "RE-2026-101"}]``.
+            Each ``comparison`` is checked first, since upstream ignores one it does not know.
         category_id: Only the orders of one order category, e.g. ``4``.
         status_id: Only the orders in one status, e.g. ``12``.
         person_id: Only the orders of one person, an ``id`` from ``list_persons``,
@@ -899,11 +960,14 @@ async def list_orders_async(
         only_cost_centers: ``true`` for orders with cost centers only.
         only_notes: ``true`` for orders with notes only.
         sort: The column to sort by, e.g. ``date`` (upstream's default) or ``nr``.
-        dir: ``DESC`` (upstream's default) or ``ASC``.
+        dir: ``DESC`` (upstream's default) or ``ASC``, checked first, since upstream
+            ignores a value it does not know.
         start: The offset of the first order, ``0`` (the default) for the first page;
-            for the next, ``start`` plus the number of orders received, e.g. ``20``.
+            for the next, ``start`` plus the number of orders received, e.g. ``20``,
+            which can be fewer than ``limit``: never advance by ``limit``. Offset pages
+            over a list that changes meanwhile can repeat or skip orders.
         limit: One page of at most this many orders, e.g. ``20``; every order when
-            left out.
+            left out, at most 24 pages, about 1 s per 100 orders.
     """
     filters = _check_list_arguments(
         dir=dir,
@@ -930,12 +994,12 @@ async def list_orders_async(
         "type": type,
     }
 
-    async def page(offset: int, size: int) -> ListResponse[Order]:
+    async def page(offset: int, size: int) -> Answer[ListResponse[Order]]:
         return await api.order_list(org, **arguments, start=offset, limit=size)
 
-    orders, total = await _offset_pages(page, start=start, limit=limit)
+    orders, total, retrieved_at = await _offset_pages(page, start=start, limit=limit)
     sent = api.order_list_params(**arguments, start=start, limit=limit)
-    meta = _meta(org, "order/list.json", sent, total=total)
+    meta = _meta(org, "order/list.json", sent, total=total, retrieved_at=retrieved_at)
     return Result(data=orders, meta=meta)
 
 
@@ -962,8 +1026,11 @@ async def get_order_async(org: str, id: int) -> Result[OrderDetailProjection]:
         id: The order's ``id`` as ``list_orders`` gives it, e.g. ``3``; not its number
             ``nr``.
     """
-    order = _order_detail(await api.order_read(org, id))
-    return Result(data=order, meta=_meta(org, "order/read.json", {"id": id}))
+    answer = await api.order_read(org, id)
+    order = _order_detail(answer.payload)
+    return Result(
+        data=order, meta=_meta(org, "order/read.json", {"id": id}, retrieved_at=answer.retrieved_at)
+    )
 
 
 def _order_document(document: OrderDocument) -> OrderDocumentProjection:
@@ -974,27 +1041,26 @@ def _order_document(document: OrderDocument) -> OrderDocumentProjection:
 async def get_order_document_async(org: str, id: int) -> Result[OrderDocumentProjection]:
     """Read the document of one order: how it is printed and sent, sender and recipient.
 
-    The document is not the order itself (``get_order`` has its items and amounts) but
-    how it goes out: ``nr`` and ``name_singular`` (the kind, e.g. ``Rechnung``), the
-    layout (``layout_id``, ``template_id``) and ``language``, the sender
-    (``org_location_id``, ``org_address`` as printed, ``org_bank_account_id``), the
-    recipient (``associate_id``, ``recipient_address_id``, ``recipient_address`` as
-    printed, ``recipient_bank_account_id``), the ``header`` and ``footer`` texts, the
-    payment references a QR-bill carries (``qr_reference``, ``iso11649_reference``,
-    ``generated_reference``, ``custom_reference``) and what mailing it would use
-    (``mail_to``, ``mail_subject``, ``mail_text``, ``sent_status_id``, the status set
-    after sending). The bank account numbers of the organisation and the recipient
-    (``orgIban``, ``orgQrIban``, ``recipientIban``) are left out. The PDF itself comes
-    from ``download_order_document``, from Python only. An id no order has raises
-    ``NotFoundError`` (assumed, as for ``get_order``).
+    The document is not the order itself (``get_order`` has its items and amounts) but how it
+    goes out: ``nr`` and ``name_singular`` (the kind, e.g. ``Rechnung``), the layout and
+    ``language``, the sender (``org_location_id``, ``org_address`` as printed), the recipient
+    (``associate_id``, ``recipient_address`` as printed), the ``header`` and ``footer`` texts,
+    the payment references a QR-bill carries and what mailing it would use (``mail_to``,
+    ``mail_subject``, ``mail_text``). The bank account numbers of the organisation and the
+    recipient are left out. The PDF comes from ``download_order_document``, from Python only. An
+    id no order has raises ``NotFoundError`` (assumed, as for ``get_order``).
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         id: The order's ``id`` as ``list_orders`` gives it, e.g. ``3``; not its number
             ``nr``.
     """
-    document = _order_document(await api.order_document_read(org, id))
-    return Result(data=document, meta=_meta(org, "order/document/read.json", {"id": id}))
+    answer = await api.order_document_read(org, id)
+    document = _order_document(answer.payload)
+    return Result(
+        data=document,
+        meta=_meta(org, "order/document/read.json", {"id": id}, retrieved_at=answer.retrieved_at),
+    )
 
 
 async def list_order_book_entries_async(org: str, id: int) -> Result[list[OrderBookEntry]]:
@@ -1016,8 +1082,15 @@ async def list_order_book_entries_async(org: str, id: int) -> Result[list[OrderB
         id: The order's ``id`` as ``list_orders`` gives it, e.g. ``5``; not its number
             ``nr``.
     """
-    response = await api.order_bookentry_list(org, id)
-    meta = _meta(org, "order/bookentry/list.json", {"id": id}, total=response.total)
+    answer = await api.order_bookentry_list(org, id)
+    response = answer.payload
+    meta = _meta(
+        org,
+        "order/bookentry/list.json",
+        {"id": id},
+        total=response.total,
+        retrieved_at=answer.retrieved_at,
+    )
     return Result(data=response.data, meta=meta)
 
 
@@ -1035,30 +1108,23 @@ async def list_history_async(
 ) -> Result[list[HistoryEntry]]:
     """List an organisation's history, the audit log of its changes, newest first.
 
-    Every entry comes back with ``created`` (when the change was made), ``created_by``
-    (who made it: a user's name or ``SYSTEM``; an API user shows as ``API:REDACTED``),
-    ``type`` (the module, e.g. ``ORDER``), ``change_type`` (``CREATE``, ``STATUS``,
-    ``UPDATE``), the record it
-    concerns (``order_id``, ``person_id``, ``statement_id``) and ``message``, upstream's
-    text of the change as upstream writes it (``Rechnung 'EK-2026-001' created.``): it
-    names records and may name persons, a customer, a vendor or an employee. Identifiers
-    stay out as everywhere: no ``ssn`` or ``iban`` field comes back. ``order_id``,
-    ``person_id`` or ``statement_id`` narrow it to one record's history; the history of
-    an order that was deleted is not listed.
+    Every entry comes back with ``created`` (when the change was made), ``created_by`` (a user's
+    name or ``SYSTEM``; an API user shows as ``API:REDACTED``), ``type`` (the module, e.g.
+    ``ORDER``), ``change_type`` (``CREATE``, ``STATUS``, ``UPDATE``), the record it concerns
+    (``order_id``, ``person_id``, ``statement_id``) and ``message``, upstream's text of the
+    change, which names records and may name persons. No ``ssn`` or ``iban`` field comes back.
+    The history of an order that was deleted is not listed.
 
-    Paging: with ``limit``, one page of at most ``limit`` entries from ``start``; without
-    it, every matching entry from ``start`` on, which for a whole organisation is long:
-    pass ``limit`` (about 20), or one record's id. ``meta.total`` is upstream's count of
-    all matching entries. The next page starts at ``start`` plus the number of entries
-    received, which can be fewer than ``limit``: never advance by ``limit``. Offset pages
-    over a log that grows meanwhile can repeat entries: one added shifts every later page
-    by one. Upstream ignores values it does not understand, so ``dir`` and the filters'
-    ``comparison`` are checked first and a wrong one is refused.
+    With ``limit``, one page of at most ``limit`` entries from ``start``, one request; without
+    it, every matching entry from ``start`` on, at most 24 pages of 100: 24 requests, 96 with
+    the client's retries, and where upstream counts more the call is refused after its first
+    request. ``meta.total`` is upstream's count of all matching entries. Pass ``limit`` (about
+    20), or one record's id.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         order_id: Only the history of one order, an ``id`` from ``list_orders``,
-            e.g. ``5``.
+            e.g. ``5``; the whole organisation's history is long.
         person_id: Only the history of one person, an ``id`` from ``list_persons``,
             e.g. ``3``.
         statement_id: Only the history of one salary statement, its id, e.g. ``4``.
@@ -1068,11 +1134,15 @@ async def list_history_async(
             e.g. ``changeType``) and ``value`` (a text, or a list of texts of which any
             may match), e.g.
             ``[{"comparison": "eq", "field": "changeType", "value": "CREATE"}]``.
-        dir: ``DESC`` (upstream's default, newest first) or ``ASC``.
+            Each ``comparison`` is checked first, since upstream ignores one it does not know.
+        dir: ``DESC`` (upstream's default, newest first) or ``ASC``, checked first,
+            since upstream ignores a value it does not know.
         start: The offset of the first entry, ``0`` (the default) for the first page;
-            for the next, ``start`` plus the number of entries received, e.g. ``20``.
+            for the next, ``start`` plus the number of entries received, e.g. ``20``,
+            which can be fewer than ``limit``: never advance by ``limit``. Offset pages
+            over a log that grows meanwhile can repeat entries.
         limit: One page of at most this many entries, e.g. ``20``; every entry when
-            left out.
+            left out, at most 24 pages, about 1 s per 100 entries.
     """
     filters = _check_list_arguments(
         dir=dir, filter=filter, texts={"query": query}, start=start, limit=limit
@@ -1086,12 +1156,12 @@ async def list_history_async(
         "statement_id": statement_id,
     }
 
-    async def page(offset: int, size: int) -> ListResponse[HistoryEntry]:
+    async def page(offset: int, size: int) -> Answer[ListResponse[HistoryEntry]]:
         return await api.history_list(org, **arguments, start=offset, limit=size)
 
-    entries, total = await _offset_pages(page, start=start, limit=limit)
+    entries, total, retrieved_at = await _offset_pages(page, start=start, limit=limit)
     sent = api.history_list_params(**arguments, start=start, limit=limit)
-    meta = _meta(org, "history/list.json", sent, total=total)
+    meta = _meta(org, "history/list.json", sent, total=total, retrieved_at=retrieved_at)
     return Result(data=entries, meta=meta)
 
 
@@ -1120,8 +1190,15 @@ async def list_order_categories_async(
     _check_list_arguments(choices={"type": (type, ORDER_TYPES)})
     arguments: dict[str, Any] = {"fiscal_period_id": fiscal_period_id, "type": type}
     sent = api.order_category_list_params(**arguments)
-    response = await api.order_category_list(org, **arguments)
-    meta = _meta(org, "order/category/list.json", sent, total=response.total)
+    answer = await api.order_category_list(org, **arguments)
+    response = answer.payload
+    meta = _meta(
+        org,
+        "order/category/list.json",
+        sent,
+        total=response.total,
+        retrieved_at=answer.retrieved_at,
+    )
     return Result(data=response.data, meta=meta)
 
 
@@ -1147,9 +1224,12 @@ async def list_custom_fields_async(org: str, type: CustomFieldType) -> Result[li
     """
     if type not in CUSTOM_FIELD_TYPES:
         raise refused(f"type must be one of {', '.join(CUSTOM_FIELD_TYPES)}, not {type!r}")
-    response = await api.customfield_list(org, type)
+    answer = await api.customfield_list(org, type)
+    response = answer.payload
     sent = api.customfield_list_params(type)
-    meta = _meta(org, "customfield/list.json", sent, total=response.total)
+    meta = _meta(
+        org, "customfield/list.json", sent, total=response.total, retrieved_at=answer.retrieved_at
+    )
     return Result(data=response.data, meta=meta)
 
 
@@ -1166,8 +1246,11 @@ async def list_person_categories_async(org: str) -> Result[list[PersonCategory]]
     Args:
         org: A declared organisation name, e.g. ``demo``.
     """
-    response = await api.person_category_list(org)
-    meta = _meta(org, "person/category/list.json", {}, total=response.total)
+    answer = await api.person_category_list(org)
+    response = answer.payload
+    meta = _meta(
+        org, "person/category/list.json", {}, total=response.total, retrieved_at=answer.retrieved_at
+    )
     return Result(data=response.data, meta=meta)
 
 
@@ -1182,8 +1265,11 @@ async def list_person_titles_async(org: str) -> Result[list[PersonTitle]]:
     Args:
         org: A declared organisation name, e.g. ``demo``.
     """
-    response = await api.person_title_list(org)
-    meta = _meta(org, "person/title/list.json", {}, total=response.total)
+    answer = await api.person_title_list(org)
+    response = answer.payload
+    meta = _meta(
+        org, "person/title/list.json", {}, total=response.total, retrieved_at=answer.retrieved_at
+    )
     return Result(data=response.data, meta=meta)
 
 
@@ -1201,8 +1287,15 @@ async def list_account_categories_async(org: str) -> Result[list[AccountCategory
     Args:
         org: A declared organisation name, e.g. ``demo``.
     """
-    response = await api.account_category_list(org)
-    meta = _meta(org, "account/category/list.json", {}, total=response.total)
+    answer = await api.account_category_list(org)
+    response = answer.payload
+    meta = _meta(
+        org,
+        "account/category/list.json",
+        {},
+        total=response.total,
+        retrieved_at=answer.retrieved_at,
+    )
     return Result(data=response.data, meta=meta)
 
 
@@ -1259,8 +1352,15 @@ async def list_cost_centers_async(
         "sort": sort,
     }
     sent = api.account_costcenter_list_params(**arguments)
-    response = await api.account_costcenter_list(org, **arguments)
-    meta = _meta(org, "account/costcenter/list.json", sent, total=response.total)
+    answer = await api.account_costcenter_list(org, **arguments)
+    response = answer.payload
+    meta = _meta(
+        org,
+        "account/costcenter/list.json",
+        sent,
+        total=response.total,
+        retrieved_at=answer.retrieved_at,
+    )
     return Result(data=response.data, meta=meta)
 
 
@@ -1283,8 +1383,11 @@ async def list_locations_async(org: str) -> Result[list[LocationProjection]]:
     Args:
         org: A declared organisation name, e.g. ``demo``.
     """
-    response = await api.location_list(org)
-    meta = _meta(org, "location/list.json", {}, total=response.total)
+    answer = await api.location_list(org)
+    response = answer.payload
+    meta = _meta(
+        org, "location/list.json", {}, total=response.total, retrieved_at=answer.retrieved_at
+    )
     return Result(data=[_location(location) for location in response.data], meta=meta)
 
 
@@ -1305,9 +1408,12 @@ async def get_report_tree_async(org: str) -> Result[list[ReportTreeNode]]:
         org: A declared organisation name, e.g. ``demo``.
     """
     client = client_for(org)
-    response = await api.report_tree(org)
+    answer = await api.report_tree(org)
+    response = answer.payload
     _keep_report_types(client, response.data)
-    meta = _meta(org, "report/tree.json", {}, total=response.total)
+    meta = _meta(
+        org, "report/tree.json", {}, total=response.total, retrieved_at=answer.retrieved_at
+    )
     return Result(data=response.data, meta=meta)
 
 
@@ -1317,8 +1423,8 @@ _REPORT_TYPES: weakref.WeakKeyDictionary[AsyncClient, dict[int, str | None]] = (
 """Each organisation's report types by element id, as ``report/tree.json`` last listed them.
 
 Keyed on the organisation's client (``client_for(org)``), not on its name: the entry lives
-as long as the client does. ``TENANTS.reset()`` drops every client, and a changed
-subdomain or key builds a new one, so the next ``get_report_data`` reads the tree again;
+as long as the client does. ``TENANTS.reset()`` drops every client, so the next
+``get_report_data`` reads the tree again;
 an organisation never sees another's types. Read once per organisation and process;
 ``get_report_tree`` refreshes it with every tree it returns.
 """
@@ -1379,7 +1485,8 @@ async def _report_type(org: str, element_id: int) -> tuple[str | None, bool]:
         kept = _REPORT_TYPES.get(client)
     if kept is not None and element_id in kept:
         return kept[element_id], False
-    tree = await api.report_tree(org)
+    answer = await api.report_tree(org)
+    tree = answer.payload
     return _keep_report_types(client, tree.data).get(element_id), True
 
 
@@ -1392,7 +1499,8 @@ async def _tree_now(org: str) -> list[ReportTreeNode]:
     reads the tree it keeps (``_report_type``).
     """
     client = client_for(org)
-    tree = await api.report_tree(org)
+    answer = await api.report_tree(org)
+    tree = answer.payload
     _keep_report_types(client, tree.data)
     return tree.data
 
@@ -1514,42 +1622,28 @@ async def get_report_data_async(
 ) -> Result[ReportData]:
     """Read one report's data for a period, such as a balance sheet or a profit and loss.
 
-    The report is the element ``element_id`` of ``get_report_tree``, for the fiscal
-    period ``fiscal_period`` or for ``start_date`` to ``end_date``; passing the fiscal
-    period and a date is refused before anything is sent, since upstream derives the
-    dates from the period and would ignore the ones given. Pass one of the two for a
-    reproducible answer: which period upstream uses without either is not documented.
-
-    The data comes back as upstream sends it, since the documentation gives no schema
-    and the rows differ by report type: ``data``, the rows, each with its child rows in
-    ``data`` (a balance sheet's are categories and accounts, with ``text``,
-    ``accountId`` and the amounts ``openingAmount``, ``endAmount`` and more; a total is
-    a row of its own); ``properties``, among them the ``columns`` the report shows (each
-    a ``title`` and the row field it shows, ``dataIndex``); and ``total``, upstream's
-    count of the top-level rows, which ``meta.total`` repeats. Rows keep upstream's
-    camelCase names, and amounts are JSON numbers.
-
-    Payroll and people reports are refused before their data is requested: a report
-    whose ``type`` starts with ``SALARY_`` or contains ``PERSON``, or is ``SETTLEMENT``,
-    ``WITHHOLDING_TAX_SETTLEMENT``, ``PEOPLE`` or ``ORG_CHART``; among CashCtrl's default
-    reports ``SALARY_LIST``, ``SALARY_TYPE_RECAP``, ``SALARY_TYPES``,
-    ``SALARY_BOOK_ENTRIES``, ``SETTLEMENT``, ``WITHHOLDING_TAX_SETTLEMENT``,
-    ``REVENUE_BY_PERSON``, ``EXPENSE_BY_PERSON``, ``REVENUE_BY_PERSON_CHART`` and
-    ``EXPENSE_BY_PERSON_CHART``. ``WITHHOLDING_TAX_RATES`` is read, and so are the debtor
-    and creditor reports (``OPEN_DEBTORS``, ``OPEN_CREDITORS``), which name business
-    partners as ``list_persons`` does, the identifier drop below their guard. The type is
-    the one ``get_report_tree`` shows: the first call for an organisation reads its
-    report tree and keeps it, and an element the kept tree does not list reads it once
-    more; one the tree does not list at all is asked of upstream as given. From every
-    other report, each key named ``ssn`` or ending in ``iban`` (``qrIban``, ``orgIban``),
-    in any letter case and at any depth, is dropped before the data comes back; nothing
-    else is.
+    The report is ``element_id`` of ``get_report_tree``, for ``fiscal_period`` or for
+    ``start_date`` to ``end_date``, never both; pass one for a reproducible answer. The data
+    comes back as upstream sends it, since the rows differ by report type: ``data``, the rows
+    with their child rows in ``data``, under upstream's camelCase names; ``properties``, the
+    ``columns`` the report shows among them; and ``total``, the count of the top-level rows,
+    which ``meta.total`` repeats. Payroll and people reports are refused, and from every other
+    report each key named ``ssn`` or ending in ``iban`` is dropped at any depth. One call sends
+    at most two requests, the organisation's report tree and the data, eight with the client's
+    retries.
 
     Args:
         org: A declared organisation name, e.g. ``demo``.
         element_id: The report, an ``element_id`` from ``get_report_tree``, e.g. ``1``.
+            A payroll or people report is refused before its data is requested: its
+            ``type`` starts with ``SALARY_`` or contains ``PERSON``, or is ``SETTLEMENT``,
+            ``WITHHOLDING_TAX_SETTLEMENT``, ``PEOPLE`` or ``ORG_CHART``, as the report tree
+            shows it, which the first call for an organisation reads and keeps, and an
+            element the kept tree does not list reads once more. The debtor and creditor
+            reports are read.
         fiscal_period: The fiscal period, an ``id`` from ``list_fiscal_periods``, e.g.
-            ``2``; not together with ``start_date`` or ``end_date``.
+            ``2``; together with ``start_date`` or ``end_date`` it is refused before
+            anything is sent, since upstream derives the dates from the period.
         start_date: The first day of the report period, ``YYYY-MM-DD``, e.g.
             ``2025-01-01``.
         end_date: The last day of the report period, ``YYYY-MM-DD``, e.g.
@@ -1579,8 +1673,11 @@ async def get_report_data_async(
         subject = f"report element {element_id} is of type {report_type}"
         raise _report_refusal(subject, "get_report_data", tree_read=tree_read)
     sent = api.report_element_data_params(element_id, **arguments)
-    report = _report(await api.report_element_data(org, element_id, **arguments))
-    meta = _meta(org, "report/element/data.json", sent, total=report.total)
+    answer = await api.report_element_data(org, element_id, **arguments)
+    report = _report(answer.payload)
+    meta = _meta(
+        org, "report/element/data.json", sent, total=report.total, retrieved_at=answer.retrieved_at
+    )
     return Result(data=report, meta=meta)
 
 
@@ -2127,6 +2224,8 @@ async def download_report_async(
     ``NotFoundError`` (HTTP 404), a refusal ``RequestRejected``;
     either way nothing is written, and a file already at ``dest`` stays as it was.
 
+    One call sends two requests, the report tree and the file, eight with the client's retries.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         element_id: The report, an ``element_id`` from ``get_report_tree``, e.g. ``1``.
@@ -2148,7 +2247,7 @@ async def download_report_async(
         "start_date": start_date,
     }
     _check_report_file(format, {"element_id": element_id}, period)
-    api.check_dest(dest)
+    check_dest(dest, source=SOURCE)
     report_type = _element_types(await _tree_now(org)).get(element_id)
     if report_type is not None and _is_refused_report_type(report_type):
         subject = f"report element {element_id} is of type {report_type}"
@@ -2191,6 +2290,8 @@ async def download_report_collection_async(
     refusal ``RequestRejected``; either way nothing is written, and a file already at
     ``dest`` stays as it was.
 
+    One call sends two requests, the report tree and the file, eight with the client's retries.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         collection_id: The collection, the ``collection_id`` of a node of
@@ -2213,7 +2314,7 @@ async def download_report_collection_async(
         "start_date": start_date,
     }
     _check_report_file(format, {"collection_id": collection_id}, period)
-    api.check_dest(dest)
+    check_dest(dest, source=SOURCE)
     tree = await _tree_now(org)
     held = [node for node in _collections(tree) if node.collection_id == collection_id]
     kinds = _refused_types(held)
@@ -2249,6 +2350,8 @@ async def download_annual_report_async(
     ``RequestRejected``; nothing is written then, and a
     file already at ``dest`` stays as it was.
 
+    One call sends two requests, the report tree and the file, eight with the client's retries.
+
     Args:
         org: A declared organisation name, e.g. ``demo``.
         dest: The PDF to write, e.g. ``"annual-report-2025.pdf"``, in a directory that
@@ -2258,7 +2361,7 @@ async def download_annual_report_async(
     """
     if fiscal_period_id is not None and not _whole(fiscal_period_id):
         raise refused(f"fiscal_period_id must be a whole number, not {fiscal_period_id!r}")
-    api.check_dest(dest)
+    check_dest(dest, source=SOURCE)
     system = [node for node in _collections(await _tree_now(org)) if node.is_system]
     if not system:
         raise _report_refusal(_SYSTEM_UNMARKED, "download_annual_report")
