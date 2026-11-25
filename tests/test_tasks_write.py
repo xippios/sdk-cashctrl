@@ -244,10 +244,11 @@ def test_a_confirmed_write_is_sent_once_whatever_upstream_answers(
 ) -> None:
     """Core sends a write once, after a 429 or a 5xx too (sdk-core ADR-0011).
 
-    NOT RECORDED: a 429 and a 503 composed from the rows of the status table that
-    ``docs/upstream/error-handling.md`` documents, with a text body the test does not read
-    (conventions §10, kind 2). After a 5xx the error says that the outcome is unknown, and
-    the description of ``create_journal_entry`` names the read that shows it.
+    NOT RECORDED: a 429 and a 503, the statuses that ``docs/upstream/error-handling.md``
+    documents, with the text body ``busy``, of no shape upstream sends, to show that the source
+    leaves a write's repeat to core (conventions §10, kind 5). After a 5xx the error says that
+    the outcome is unknown, and the description of ``create_journal_entry`` names the read that
+    shows it.
     """
     url = "https://demo.cashctrl.com/api/v1/journal/create.json"
     route = respx_mock.post(url).respond(status, text="busy")
