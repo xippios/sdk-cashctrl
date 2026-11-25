@@ -33,10 +33,10 @@ from xippios.core.testing import (
     ReplayFixture,
     fixture_path,
     load_fixture,
+    response_from_fixture,
     sent_query,
     sent_urls,
 )
-from xippios.core.testing.replay import replay
 
 from xippios.cashctrl import api, tasks
 from xippios.cashctrl._client import DEMO, SOURCE
@@ -784,7 +784,8 @@ def mount_tree(
     """Answer ``report/tree.json`` with the recorded tree, replayed as recorded, or with the
     nodes ``changes`` names changed in memory by ``tree_body`` (conventions §10, kind 4)."""
     if changes is None:
-        return replay(router, fixture_path(fixtures_dir, "report_tree", "default"))
+        recorded = load_fixture(fixture_path(fixtures_dir, "report_tree", "default"))
+        return router.get(TREE).mock(side_effect=lambda _: response_from_fixture(recorded))
     return router.get(TREE).respond(200, json=tree_body(fixtures_dir, changes))
 
 

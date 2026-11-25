@@ -34,7 +34,6 @@ from xippios.core.testing import (
     load_fixture,
     response_from_fixture,
 )
-from xippios.core.testing.replay import replay
 
 from xippios.cashctrl._client import DEMO, TENANTS, client_for
 
@@ -2302,6 +2301,20 @@ def test_the_placeholder_host_leaves_no_trace_of_the_organisation(
     assert REAL not in capsys.readouterr().out
 
 
+def mount_recording(router: respx.MockRouter, path: Path) -> respx.Route:
+    """Answer the recording at ``path``, on its method, host and path, with its answer.
+
+    Core's public ``load_fixture`` and ``response_from_fixture`` read it, for a file outside
+    ``tests/fixtures``, which the plugin's ``replay_fixture`` reads alone; the query is not
+    matched, since a recording's may be scrubbed.
+    """
+    recorded = load_fixture(path)
+    url = httpx.URL(recorded.request.url).copy_with(query=None)
+    return router.route(method=recorded.request.method, url=str(url)).mock(
+        side_effect=lambda _: response_from_fixture(recorded)
+    )
+
+
 def test_a_recorded_fixture_replays_on_the_placeholder_host(
     recorder: ModuleType, tmp_path: Path, respx_mock: respx.MockRouter
 ) -> None:
@@ -2320,7 +2333,7 @@ def test_a_recorded_fixture_replays_on_the_placeholder_host(
         json.loads(written.read_text())["response"]
     ), "no cut markers on a fixture that was not cut, as core writes one"
     respx_mock.routes.clear()
-    route = replay(respx_mock, written)
+    route = mount_recording(respx_mock, written)
     config = ClientConfig(
         source="cashctrl", version="1", base_url="https://demo.cashctrl.com/api/v1"
     )
@@ -2551,7 +2564,7 @@ def test_an_own_host_refusal_is_printed_and_nothing_written(
     does before any write (conventions §10, kind 3).
     """
     monkeypatch.setenv(TENANTS.var(DEMO, "SUBDOMAIN"), "DEMO")
-    replay(respx_mock, FIXTURES / "account_list" / "only_active_finanz.json")
+    mount_recording(respx_mock, FIXTURES / "account_list" / "only_active_finanz.json")
     assert recorder.main(["account/list.json", "own_host"]) == 1
     assert not (tmp_path / "tests" / "fixtures").exists()
     assert capsys.readouterr().out.startswith(

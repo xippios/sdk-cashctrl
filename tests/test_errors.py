@@ -17,8 +17,8 @@ from xippios.core import (
     TransportError,
     UpstreamError,
     XippiosError,
+    request_description,
 )
-from xippios.core.errors import request_description
 from xippios.core.testing import fixture_path, load_fixture, response_from_fixture, sent_query
 
 from xippios.cashctrl._client import DEMO, TENANTS, classify, client_for
