@@ -203,8 +203,8 @@ MCP_CAPS: Mapping[str, ResultCap] = {
         )
     ),
 }
-"""Per-tool MCP result caps (sdk-core ADR-0038, decision 5), which ``mcp.py`` passes to
-``build_server``.
+"""Per-tool MCP result caps (sdk-core ADR-0038, decision 5), which core's
+``ToolSet.from_tasks`` reads from this module when ``mcp.build()`` builds the tool set.
 
 Every other tool keeps the family default, 200 rows or 64 KB. ``list_custom_fields`` has
 no filter or paging beyond its ``type`` and a write needs a type's custom fields whole
