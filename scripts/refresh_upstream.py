@@ -56,6 +56,7 @@ from bs4 import BeautifulSoup, Comment, Tag
 from bs4.element import NavigableString, PageElement
 from markdownify import ATX, BACKSLASH, MarkdownConverter
 from xippios.core.refresh import (
+    NotFetched,
     Page,
     Response,
     Row,
@@ -652,6 +653,13 @@ SNAPSHOT = Snapshot(
             PAGE_URL,
             where="the error handling's link to CashCtrl's terms, on delays between requests",
             link=TERMS,
+        ),
+    ),
+    not_fetched=(
+        NotFetched(
+            TERMS,
+            "CashCtrl's terms of service, which the error handling's 429 row links: no API "
+            "documentation, and the attribution records the link",
         ),
     ),
     capture=CAPTURE,
