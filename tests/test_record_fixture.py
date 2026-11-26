@@ -2419,7 +2419,7 @@ def test_the_host_then_the_secrets_then_the_rewrite(recorder: ModuleType) -> Non
     """
     seen: list[str] = []
 
-    def spy(text: str) -> str:
+    def spy(text: str, replaced: list[str]) -> str:
         seen.append(text)
         return text.replace("signed", "neutral")
 
@@ -2501,7 +2501,7 @@ def test_the_verify_names_the_header_a_rewrite_put_a_secret_back_into(
     scrub_step = step(
         recorder,
         str(request.url),
-        text_rewrite=lambda text: f"{text} {KEY}" if text == "/next" else text,
+        text_rewrite=lambda text, replaced: f"{text} {KEY}" if text == "/next" else text,
     )
     with pytest.raises(
         ValueError, match=r"secret value in the response header 'location'; "
@@ -2582,7 +2582,7 @@ def test_core_refuses_a_fixture_that_still_holds_the_host_the_step_replaced(
     scrub_step = step(
         recorder,
         str(request.url),
-        text_rewrite=lambda text: f"https://{HOST}{text}" if text == "/next" else text,
+        text_rewrite=lambda text, replaced: f"https://{HOST}{text}" if text == "/next" else text,
     )
     monkeypatch.setattr(scrub_step, "verify", lambda fixture: None)
     with pytest.raises(

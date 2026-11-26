@@ -128,8 +128,9 @@ core also refuses a body that is not UTF-8 text, which no scrub can read (export
 scope for fixtures, which the recorder's message says first), after the recorder has
 refused any file a file path answered. Then the recorder's own
 step, ``TenantScrub``, passed as ``rewrite=``, runs on the ``Fixture`` core returns (sdk-core
-ADR-0042, decision 4; ADR-0066, decisions 1 and 2), and returns it with the host it replaced,
-which core's check then searches for as given: the
+ADR-0042, decision 4; ADR-0066, decisions 1 and 2), and returns it with every value it
+replaced, the host and what ``scrub_text`` replaced, which core's check then searches for as
+given: the
 demo host (``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``, in any case, IDNA or
 percent-encoded) becomes ``demo.cashctrl.com``, the host offline tests replay against, in
 the URL, the headers and both bodies; and ``scrub_text`` runs over the URL, every response header
@@ -331,7 +332,7 @@ Every name that ends in ``iban``, a dot or a space in it included (``bank.iban``
 behind a JSON escape is the decoded checks' to find.
 """
 _TOKEN_FIELD = re.compile(
-    r'(?P<field>"(?:' + _RAW_SECRET_NAME + r')"\s*:\s*)"(?:[^"\\]|\\.)*"',
+    r'(?P<field>"(?:' + _RAW_SECRET_NAME + r')"\s*:\s*)"(?P<value>(?:[^"\\]|\\.)*)"',
     re.IGNORECASE,
 )
 """A token-like field with a text value in raw JSON: ``"hash": "..."``."""
@@ -653,13 +654,31 @@ async def unmarked_orders_async(
 unmarked_orders = sync(unmarked_orders_async)
 
 
-def _placeholder(match: re.Match[str]) -> str:
-    return SCRUBBED_EMAIL.replace("@", "%40") if match["at"] == "%40" else SCRUBBED_EMAIL
+_PLACEHOLDERS = frozenset({REDACTED, SCRUBBED_API_USER, *_SCRUBBED_EMAILS})
+"""What the recorder writes in place of a value, which it never notes as a value replaced."""
 
 
-def scrub_emails(text: str) -> str:
-    """``text`` with every e-mail address made the placeholder."""
-    return _EMAIL_IN_TEXT.sub(_placeholder, text)
+def _noted(replaced: list[str] | None, value: str, replacement: str) -> str:
+    """``replacement``, with ``value`` appended to ``replaced`` unless it reads as a placeholder.
+
+    A value that already reads as a placeholder the recorder writes, the placeholder address,
+    ``API:REDACTED`` or ``REDACTED``, was replaced by nothing, or by an earlier scrub that
+    noted what it replaced: core would find it in every place that rightly holds it. An empty
+    value cannot survive.
+    """
+    if replaced is not None and value and value != replacement and value not in _PLACEHOLDERS:
+        replaced.append(value)
+    return replacement
+
+
+def _placeholder(match: re.Match[str], replaced: list[str] | None = None) -> str:
+    placeholder = SCRUBBED_EMAIL.replace("@", "%40") if match["at"] == "%40" else SCRUBBED_EMAIL
+    return _noted(replaced, match.group(0), placeholder)
+
+
+def scrub_emails(text: str, replaced: list[str] | None = None) -> str:
+    """``text`` with every e-mail address made the placeholder, each appended to ``replaced``."""
+    return _EMAIL_IN_TEXT.sub(lambda match: _placeholder(match, replaced), text)
 
 
 def _decoded(body: str) -> tuple[bool, Any]:
@@ -749,9 +768,9 @@ def _holds_an_address(fixture: dict[str, Any]) -> bool:
     return any(address not in _SCRUBBED_EMAILS for address in found)
 
 
-def scrub_api_users(text: str) -> str:
-    """``text`` with every API user tag made ``API:REDACTED``."""
-    return API_USER.sub(SCRUBBED_API_USER, text)
+def scrub_api_users(text: str, replaced: list[str] | None = None) -> str:
+    """``text`` with every API user tag made ``API:REDACTED``, each appended to ``replaced``."""
+    return API_USER.sub(lambda match: _noted(replaced, match.group(0), SCRUBBED_API_USER), text)
 
 
 def _searched_texts(text: str, fixture: dict[str, Any]) -> list[str]:
@@ -785,22 +804,41 @@ def _holds_the_bare_prefix(texts: Sequence[str], key: str) -> bool:
     return len(key) >= 4 and any(key[:4] in text for text in texts)
 
 
-def scrub_token_fields(text: str) -> str:
+def _token_value(match: re.Match[str], replaced: list[str] | None) -> str:
+    """The field with ``REDACTED`` for its value; the value as it stood and decoded noted."""
+    value = match["value"]
+    try:
+        decoded = json.loads(f'"{value}"')
+    except ValueError:
+        decoded = value
+    for form in dict.fromkeys((value, decoded)):
+        _noted(replaced, form, REDACTED)
+    return f'{match["field"]}"{REDACTED}"'
+
+
+def scrub_token_fields(text: str, replaced: list[str] | None = None) -> str:
     """``text`` with the text value of every token-like JSON field made ``REDACTED``.
 
     Only the value changes, in the raw text, so the body stays the JSON upstream sent.
-    A ``null`` or a number under such a name is left as it is.
+    A ``null`` or a number under such a name is left as it is. Each value replaced is
+    appended to ``replaced`` as it stood in the raw text and, where a JSON escape makes it
+    differ, decoded as well, so that a copy of it elsewhere in either form is found.
     """
-    return _TOKEN_FIELD.sub(lambda m: f'{m["field"]}"{REDACTED}"', text)
+    return _TOKEN_FIELD.sub(lambda match: _token_value(match, replaced), text)
 
 
-def scrub_text(text: str) -> str:
+def scrub_text(text: str, replaced: list[str] | None = None) -> str:
     """The recorder's own scrub: e-mail addresses, API user tags, token-like fields, identifiers.
 
     ``TenantScrub``'s ``text_rewrite``: applied after the host and the key to the request
-    URL, every response header value and both bodies.
+    URL, every response header value and both bodies. Each value it replaces is appended to
+    ``replaced`` as it stood in ``text``, but one that already reads as its replacement, so
+    that the step returns it for core's check (conventions §10).
     """
-    return scrub_token_fields(scrub_api_users(scrub_emails(text)))
+    return scrub_token_fields(
+        scrub_api_users(scrub_emails(text, replaced), replaced),
+        replaced,
+    )
 
 
 def secrets_of(key: str) -> list[str]:
@@ -887,7 +925,9 @@ class TenantScrub:
         url: The request's URL as sent, whose host is the demo organisation's.
         subdomain: The demo organisation's subdomain, searched for on its own by the verify.
         host: The placeholder host, ``demo.cashctrl.com``.
-        text_rewrite: The text hook applied after the host.
+        text_rewrite: The text hook applied after the host: it takes a text and a list,
+            appends to the list each value it replaces, and returns the text rewritten, as
+            ``scrub_text`` does.
 
     Raises:
         ValueError: ``host`` is no plain host name or is the request's own host; the
@@ -900,7 +940,7 @@ class TenantScrub:
         *,
         subdomain: str,
         host: str = REPLAY_HOST,
-        text_rewrite: Callable[[str], str] | None = None,
+        text_rewrite: Callable[[str, list[str]], str] | None = None,
     ) -> None:
         if not _HOST_NAME.fullmatch(host):
             raise ValueError(
@@ -930,40 +970,46 @@ class TenantScrub:
         placeholder = self._placeholder
         return self._host.sub(lambda _: placeholder, text)
 
-    def rewritten(self, text: str) -> str:
-        """``text`` scrubbed, then passed through ``text_rewrite``."""
+    def rewritten(self, text: str, replaced: list[str]) -> str:
+        """``text`` scrubbed, then passed through ``text_rewrite``, which notes in ``replaced``."""
         text = self.text(text)
-        return self._rewrite(text) if self._rewrite is not None else text
+        return self._rewrite(text, replaced) if self._rewrite is not None else text
 
-    def url(self, url: str) -> str:
+    def url(self, url: str, replaced: list[str]) -> str:
         """The URL scrubbed in one pass, its host set to the placeholder, then rewritten.
 
         The host is set after the pass, so a placeholder that contains the original host
         is not replaced again.
         """
         scrubbed = str(httpx.URL(self.text(url)).copy_with(host=self._placeholder))
-        return self._rewrite(scrubbed) if self._rewrite is not None else scrubbed
+        return self._rewrite(scrubbed, replaced) if self._rewrite is not None else scrubbed
 
-    def headers(self, items: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
+    def headers(
+        self, items: Iterable[tuple[str, str]], replaced: list[str]
+    ) -> list[tuple[str, str]]:
         """Header names scrubbed, header values scrubbed and rewritten."""
-        return [(self.text(name), self.rewritten(value)) for name, value in items]
+        return [(self.text(name), self.rewritten(value, replaced)) for name, value in items]
 
-    def rewrite(self, fixture: Fixture) -> Fixture:
-        """``fixture`` with the host and ``text_rewrite`` applied; not verified."""
+    def rewrite(self, fixture: Fixture, replaced: list[str] | None = None) -> Fixture:
+        """``fixture`` with the host and ``text_rewrite`` applied; not verified.
+
+        Each value that ``text_rewrite`` replaced is appended to ``replaced`` when it is given.
+        """
+        noted: list[str] = [] if replaced is None else replaced
         sent = fixture.request
         body = sent.body
         request = sent.model_copy(
             update={
-                "url": self.url(sent.url),
-                "body": body if body is None or sent.body_base64 else self.rewritten(body),
+                "url": self.url(sent.url, noted),
+                "body": body if body is None or sent.body_base64 else self.rewritten(body, noted),
                 "content_type": None if sent.content_type is None else self.text(sent.content_type),
             }
         )
         answer = fixture.response
         response = answer.model_copy(
             update={
-                "headers": self.headers(answer.headers),
-                "body": answer.body if answer.body_base64 else self.rewritten(answer.body),
+                "headers": self.headers(answer.headers, noted),
+                "body": answer.body if answer.body_base64 else self.rewritten(answer.body, noted),
             }
         )
         return fixture.model_copy(update={"request": request, "response": response})
@@ -972,15 +1018,20 @@ class TenantScrub:
         """``rewrite``, then ``verify``: the fixture as the recorder writes it, as core's step.
 
         Passed as ``rewrite=`` of core's ``fixture_from_response`` (sdk-core ADR-0066,
-        decisions 1 and 2), it returns the fixture with the values it replaced, the request's
-        host as given and its IDNA form where that differs, and core's check then refuses a
-        fixture in which one of them still stands as given. Its own verify by pattern refuses
-        first what such a search would miss, the host in another letter case or encoded, and
-        the subdomain on its own, which the step never replaces but refuses wherever it stands.
+        decisions 1 and 2), it returns the fixture with every value it replaced, each once:
+        the request's host as given and its IDNA form where that differs, then what
+        ``text_rewrite`` replaced as it stood, the e-mail addresses, the API user tags and the
+        values of token-like fields. Core's check then refuses a fixture in which one of them
+        still stands as given. The step's own verify by pattern refuses first what such a
+        search would miss, the host in another letter case or encoded, and the subdomain on
+        its own, which the step never replaces but refuses wherever it stands; the recorder's
+        final check finds an address, a tag or a token-like value that the hook could not
+        reach. The values are held for this one call, and no message names one.
         """
-        rewritten = self.rewrite(fixture)
+        replaced: list[str] = []
+        rewritten = self.rewrite(fixture, replaced)
         self.verify(rewritten)
-        return rewritten, list(self._replaced)
+        return rewritten, list(dict.fromkeys([*self._replaced, *replaced]))
 
     def verify(self, fixture: Fixture) -> None:
         r"""Refuse a rewritten fixture that still holds the demo host or the subdomain.
