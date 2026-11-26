@@ -80,6 +80,13 @@ All notable changes to this project are documented here. The format follows
   or that nothing was sent where the tree kept from an earlier call answered.
   (https://github.com/xippios/sdk-cashctrl/issues/138)
 
+### Removed
+
+- `xippios.cashctrl.api` no longer exports `check_dest`, the package's own check of a
+  download's `dest`. Core's `check_dest(dest, *, source=None)`, exported from
+  `xippios.core`, takes its place, and the file tasks call it before their first request.
+  (https://github.com/xippios/sdk-core/issues/481)
+
 ### Breaking
 
 - The package depends on `xippios-core~=0.5.0`, its extras likewise, is updated to
