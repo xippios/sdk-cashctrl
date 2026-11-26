@@ -1,0 +1,7 @@
+- `docs/upstream/FETCHED.md` is written whole by xippios-core's snapshot frame: one row per
+  file with its page's HTTP status, size, sha256, ETag and Last-Modified, the copyright line
+  and the link to the terms as the page prints them, the table `Not fetched` with CashCtrl's
+  terms page as not requested, and a last line that names the frame's form of the file. The
+  fifteen files of the snapshot are unchanged, since the page is the one captured on
+  2026-11-17. (sdk-core ADR-0062, https://github.com/xippios/sdk-core/issues/482,
+  https://github.com/xippios/sdk-cashctrl/issues/145)
