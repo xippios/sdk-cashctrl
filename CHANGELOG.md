@@ -4,6 +4,118 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/) (pre-1.0: breaking changes bump the minor).
 
+## [0.6.0] - 2026-11-26
+
+### Added
+
+- A person's `language` and `country`, a person's `language_code` and a report tree node's
+  `type` declare with core's `NamedBy` the field beside them that holds their name, so a check
+  of the models finds each code beside its label. Answers are unchanged: the name stands on the
+  record, and `meta.names` takes no entry for these codes.
+  (sdk-core ADR-0067, https://github.com/xippios/sdk-cashctrl/issues/167)
+- A write tool's preview carries `reads`, the operations it read: the record's `read.json`
+  for the previews of the eight updates and deletes, such as `["journal/read.json"]`, and
+  `[]` for the four creates, `update_order_status` and `create_order_payment`, which send no
+  request. Each of the fourteen tools' descriptions says whether its preview reads and what
+  that costs, one request or none. (sdk-core ADR-0050,
+  https://github.com/xippios/sdk-cashctrl/issues/88)
+
+### Changed
+
+- `docs/upstream/FETCHED.md` is written whole by xippios-core's snapshot frame: one row per
+  file with its page's HTTP status, size, sha256, ETag and Last-Modified, the copyright line
+  and the link to the terms as the page prints them, the table `Not fetched` with CashCtrl's
+  terms page as not requested, and a last line that names the frame's form of the file. The
+  fifteen files of the snapshot are unchanged, since the page is the one captured on
+  2026-11-17. (sdk-core ADR-0062, https://github.com/xippios/sdk-core/issues/482,
+  https://github.com/xippios/sdk-cashctrl/issues/145)
+- A write whose answer is not JSON raises `ValidationError` with core's text, which names
+  why after `is not JSON`, as in `cashctrl: response from /journal/create.json is not JSON:
+  Expecting value at line 1 column 1 (char 0)`, where the text of 0.4.0 ended at
+  `is not JSON`. The text changed with 0.5.0, whose notes left it out, and the class, `raw`
+  and `source` are unchanged. (https://github.com/xippios/sdk-cashctrl/issues/131)
+- The fourteen write tools send their write once, after a 429 too: an error after a 5xx or a
+  failure in transit says that the request was sent once and that its outcome is unknown,
+  and each tool's description names the read that shows whether the write was applied,
+  `list_journal_entries`, `get_journal_entry`, `list_persons`, `get_person`, `list_orders`,
+  `get_order` or `list_order_book_entries`, and for `create_order_payment` the orders' status
+  where the payment sets one. (https://github.com/xippios/sdk-core/issues/480)
+- The MCP tools' refusal of an argument that their schema refuses ends with "Nothing was
+  sent.", as the package's own refusals do, and so does the refusal of a `dest` that names a
+  directory or a directory that does not exist, which is core's `check_dest`. The refusals'
+  classes are unchanged. (https://github.com/xippios/sdk-core/issues/481)
+- The write server is named `xippios-cashctrl`, as the read server is, where it was
+  `xippios-cashctrl-write`, so a client that reads a server's name sees the change. The help
+  of `--allow-remote` takes core's one wording, and both servers' instructions come from the
+  tasks modules. (https://github.com/xippios/sdk-core/issues/476)
+- An amount without fractional digits is a JSON integer in the answers of the tools and
+  routes, `45` where it read `45.0`. (https://github.com/xippios/sdk-core/issues/478)
+- An organisation's client is kept until `TENANTS.reset()`, so a changed subdomain or key
+  takes effect at the next start, where a running server built a new client. A malformed
+  subdomain is refused by the package's own `ConfigError`, which names the variable and the
+  expected form and no value. (https://github.com/xippios/sdk-core/issues/475)
+- `meta.retrieved_at` of every read task is the client's time of upstream's answer, the
+  oldest page's for a list that collects several, where it was the time the result was
+  built. (https://github.com/xippios/sdk-core/issues/479)
+- The description of `get_report_data`, `list_journal_entries`, `list_orders`,
+  `list_history`, `list_persons`, `get_order_document` and of the write tools
+  `create_journal_entry`, `update_journal_entry`, `delete_journal_entry`, `create_person`,
+  `update_person`, `create_order`, `update_order`, `update_order_status`,
+  `create_order_payment`, `create_order_book_entry` and `update_order_book_entry` is its
+  task's docstring before `Args:`, under 1,000 characters, and the text of each of a tool's
+  arguments stands in its input schema. The description of each of them that spends more
+  than one request states the most a call sends, retries counted. (https://github.com/xippios/sdk-core/issues/485,
+  https://github.com/xippios/sdk-cashctrl/issues/144)
+- `list_journal_entries`, `list_persons`, `list_orders` and `list_history` without `limit`
+  collect at most 24 pages of 100, for Python and MCP alike, and send no request at or past
+  upstream's count. Where they need more pages they refuse with `InvalidRequestError` after
+  the first request and return nothing, naming the count, the bound, the paging arguments,
+  the requests sent, the page reached and the total of pages.
+  (https://github.com/xippios/sdk-core/issues/480,
+  https://github.com/xippios/sdk-cashctrl/issues/135)
+- A refusal of a call names the first problem it finds, where it named every problem at
+  once, and ends with what was sent: "Nothing was sent." before any request, and that the
+  record was read and nothing was written when an update or a delete refuses after its
+  read. The refusal of a payroll or people report says that only the report tree was read,
+  or that nothing was sent where the tree kept from an earlier call answered.
+  (https://github.com/xippios/sdk-cashctrl/issues/138)
+
+### Removed
+
+- `xippios.cashctrl.api` no longer exports `check_dest`, the package's own check of a
+  download's `dest`. Core's `check_dest(dest, *, source=None)`, exported from
+  `xippios.core`, takes its place, and the file tasks call it before their first request.
+  (https://github.com/xippios/sdk-core/issues/481)
+
+### Breaking
+
+- The package depends on `xippios-core~=0.5.0`, its extras likewise, is updated to
+  sdk-template v0.5.0 and applies conventions 1.30. The endpoint wrappers under `api/`
+  answer core's `Answer`, the payload with the time it was retrieved.
+  (https://github.com/xippios/sdk-cashctrl/issues/137)
+- `download_persons` without `columns` sends none, so the file holds upstream's default
+  columns, ten labels such as `Name` and `E-Mail Work`, none of them `ssn` or an `iban`,
+  where it held the fields `list_persons` returns. Pass `columns=list(tasks.PERSON_COLUMNS)`
+  for those fields. (https://github.com/xippios/sdk-cashctrl/issues/143)
+- `get_order` and the `before` of an order's write preview leave out `hash`, an undocumented
+  text that may be the token of a public link to the order's document and that the fixture
+  recorder already treated as one. They return the new `OrderDetailProjection`, every field
+  of `OrderDetail` but `hash`. (https://github.com/xippios/sdk-cashctrl/issues/142)
+- Thirteen fields that upstream sends with a time of day are naive `datetime` values, where
+  they were dates cut from it: a fiscal period's `start`, `end`, `salary_start` and
+  `salary_end`, a tax rate's `date_valid`, a journal entry's `date_added`, `start_date` and
+  `end_date`, a person's `date_birth`, an order's `date`, `start_date` and `end_date`, and a
+  book entry's `date`. A fiscal period's `end` reads `2025-12-31T23:59:59` where it read
+  `2025-12-31`, and a write still sends the date alone.
+  (https://github.com/xippios/sdk-cashctrl/issues/141)
+- The four list files take the verb `download_`: `export_journal_entries`,
+  `export_accounts`, `export_persons` and `export_orders` are now `download_journal_entries`,
+  `download_accounts`, `download_persons` and `download_orders`, with no alias.
+  `list_order_book_entries` takes the order as `id`, upstream's name, in place of
+  `order_id`, and `dest` of the eight file tasks is keyword-only
+  (`download_report(org, 1, "pdf", dest=path)`).
+  (https://github.com/xippios/sdk-cashctrl/issues/140)
+
 ## [0.5.0] - 2026-11-21
 
 ### Added
