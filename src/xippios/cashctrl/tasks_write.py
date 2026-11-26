@@ -54,7 +54,7 @@ into ``False``, and refuses anything else. The decisions taken for these tools:
 ``meta.endpoint`` is the write operation (``journal/create.json``) and ``meta.tenant``
 the organisation. ``meta.request`` is ``org`` plus the form fields as sent when the
 write was performed, and ``org`` alone for a preview, whose ``payload`` holds them:
-the payload never appears twice. ``tests/test_tasks.py`` checks every name in
+the payload never appears twice. ``tests/test_tasks_write.py`` checks every name in
 ``__all__``.
 
 Personal identifiers (sdk-core ADR-0017): ``create_person`` and ``update_person`` take ``ssn``

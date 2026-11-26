@@ -2,10 +2,11 @@
 
 `xippios-cashctrl` wraps CashCtrl as a typed Python client, an MCP server
 and FastAPI routes, built on `xippios-core`. This file holds what an agent needs to work on
-the package: what it wraps, its layout, its commands and its code rules. The documents it
+the package: what it wraps, its layout, its commands and what only it knows. The documents it
 follows, sdk-core's conventions among them, are listed under
-[`## Documents` in the README](README.md#documents); read them before you change a file.
-Each section keeps its rules and names the document or docstring that holds the details.
+[`## Documents` in the README](README.md#documents); read them before you change a file. The
+rules that no change breaks stand in `.claude/rules/never.md`, which Claude Code loads with
+this file.
 
 ## What this package wraps
 
@@ -17,7 +18,7 @@ Each section keeps its rules and names the document or docstring that holds the 
 | Credentials | `CASHCTRL_ORGS` names the organisations; per name `CASHCTRL_<NAME>_SUBDOMAIN` and `CASHCTRL_<NAME>_API_KEY`, the key sent as the HTTP basic user name, with no password. The reserved `demo` is declared by its own pair and never listed |
 | Rate limit | 60 requests per minute per organisation, burst 1; a self-imposed pace, upstream documents none, only a 429 (sdk-core ADR-0033, decision 1); enforced client-side in `_client.py`, one token bucket per organisation; see Rate limit below |
 | Write tools | yes, in `tasks_write.py`, served by `xippios-cashctrl-mcp-write` |
-| Core | `xippios-core~=0.4.0` from PyPI, its `mcp`, `http` and `testing` extras likewise: one core minor, adopted through conventions §15 (sdk-core ADR-0039) |
+| Core | `xippios-core~=0.5.0` from PyPI, its `mcp`, `http` and `testing` extras likewise: one core minor, adopted through conventions §15 (sdk-core ADR-0039) |
 
 The snapshot listed in `docs/upstream/FETCHED.md` is the reference for names, parameters and
 semantics; a wrapper is never written from memory of the API.
@@ -27,25 +28,27 @@ semantics; a wrapper is never written from memory of the API.
 CashCtrl serves each organisation from its own subdomain, and an API user belongs to one
 organisation. `_client.py` is therefore a registry, not one client: `TENANTS`, core's
 `Tenants` (conventions §7), declared as `CASHCTRL_ORGS` with the fields `SUBDOMAIN` and
-`API_KEY`, `param="org"`, the reserved `demo` and `check_subdomain` as the subdomain's check.
-The registry, `list_organisations` and the `--org` lock are core's (sdk-core ADR-0042,
-decision 1); the docstrings of `_client.py` and `tests/test_org_lock.py` say how the
-package wires them.
+`API_KEY`, `param="org"`, the reserved `demo` and the noun `organisation`; the package checks
+the subdomain itself, with `check_subdomain`, where it reads it. The registry,
+`list_organisations` and the `--org` lock are core's (sdk-core ADR-0042, decision 1); the
+docstrings of `_client.py` and `tests/test_org_lock.py` say how the package wires them.
 
 - `org` is the first, required parameter of every task; the MCP tools take it too unless
   the server is started with `--org`, which binds it so no tool takes it. It is the name
   of a declared organisation (`demo`, `acme`), and every result names it as
   `meta.tenant`. `client_for(org)` is that organisation's own client, own base URL, own
-  key, own token bucket, no shared cache, rebuilt when one of its variables changes. An
-  undeclared name is an `InvalidRequestError` listing the declared ones; a malformed
-  `CASHCTRL_ORGS` or a missing or malformed subdomain is a `ConfigError` naming the
-  variable, never its value.
+  key, own token bucket, kept until `TENANTS.reset()`, so a changed variable takes effect at
+  the next start. It takes no response cache, since every answer is one organisation's
+  private books, which no answer kept for a later call should hold. An undeclared name is
+  an `InvalidRequestError` listing the declared ones; a malformed `CASHCTRL_ORGS` or a
+  missing or malformed subdomain is a `ConfigError` naming the variable, never its value.
 - `TENANTS.names()` reads `CASHCTRL_ORGS` on every call and appends `demo` when its pair is
   set. `list_organisations` (core's `list_task`, the tool `cashctrl_list_organisations`)
   returns those names, nothing else; on a bound server, the bound organisation only.
 - `--org <name>` binds an MCP server (read or write) to one organisation through core's
-  `serve_tenants`: an undeclared name or a missing or malformed subdomain (`check_org`)
-  stops it at startup (exit status 2). Core's `bind_tasks` binds `org` into every tool,
+  `main`, which binds a server to one tenant given `tenants=TENANTS` and calls `check_org`
+  after `TENANTS.require`: an undeclared name or a missing or malformed subdomain stops it
+  at startup (exit status 2). Core's `bind_tasks` binds `org` into every tool,
   as the docstring of `tests/test_org_lock.py` says, so no tool of a bound server takes
   `org`, and its instructions name the organisation. A call that still passes `org` is
   refused by core's argument check before the tool runs (`tests/test_org_lock.py`). Core
@@ -95,9 +98,10 @@ The docstring of `RATE_LIMIT` in `_client.py` gives the reasons.
    or per-minute limit, only a 429 (`docs/upstream/error-handling.md`).
 2. **Quotas.** No longer-window quota is documented, so nothing is rationed.
 3. **A spent limit.** A 429 becomes `RateLimitError` through core's status mapping inside
-   `classify`, with `retry_after` from `Retry-After` when upstream sends it; retries
-   honour it up to `backoff_max`, beyond which the error reaches the caller
-   (`tests/test_errors.py`). `x-cashctrl-requests-left` has
+   `classify`, with `retry_after` from `Retry-After` when upstream sends it; a read's
+   retries honour it up to `backoff_max`, beyond which the error reaches the caller
+   (`tests/test_errors.py`), and a write is sent once, after a 429 too (sdk-core ADR-0011).
+   `x-cashctrl-requests-left` has
    an unknown window and scope, so it is not read.
 4. **No firing into a spent quota** is deliberately not applied: no `QuotaPolicy` is
    installed, since CashCtrl documents no window to give one.
@@ -106,81 +110,10 @@ The docstring of `RATE_LIMIT` in `_client.py` gives the reasons.
 
 ## Layout
 
-```
-src/xippios/cashctrl/
-  __init__.py      public surface: __version__ and re-exported task functions
-  py.typed         PEP 561 marker; consumers' mypy --strict needs it
-  _version.py      __version__ from distribution metadata
-  _client.py       organisation registry: TENANTS, client_for(org), check_org, classify, ENV_VARS
-  errors.py        RequestRejected (HTTP 200 with success:false) and FieldError
-  models.py        pydantic models mirroring upstream payloads (UpstreamModel), the
-                   projections tasks return without ssn and iban (sdk-core ADR-0017) and, written by
-                   hand, the value sets upstream documents that no packaged list renders
-  api/             endpoint wrappers, one module per upstream operation (conventions §2);
-                   _form.py encodes and posts writes, _download.py streams files
-  tasks.py         task functions and list_organisations; __all__ is what the adapters register but
-                   BULK_TASKS, the file tasks (Python only); MCP_CAPS the per-tool result caps
-  tasks_write.py   confirm-gated write tasks for the separate write server (Write tools below)
-  mcp_write.py     xippios-cashctrl-mcp-write entry point: build() the write tool set, server
-  mcp.py           xippios-cashctrl-mcp-read entry point: build() the read tool set, server
-  http.py          FastAPI router
-scripts/
-  refresh_upstream.py    regenerates docs/upstream/ and its FETCHED.md from upstream
-  record_fixture.py      records one exchange with the demo organisation; core's Scrub, then its own
-                         TenantScrub (host, encoded and JSON checks) and scrub_text
-  seed_demo.py           seeds a fresh, empty demo organisation with synthetic books (docs/demo-org.md);
-                         --discovery adds one custom field and one cost centre
-  adr_index.py           writes docs/adr.md and docs/adr.json from the records in docs/adr/;
-                         --check fails while either is stale
-tests/
-  conftest.py      core's plugin; demo-only environment, placeholder subdomain, clients reset per test, demo_org
-  fixtures/        recorded responses, <wrapper>/<case>.json, never hand-written
-  test_contract.py the package contract: ENV_VARS, and no reference scaffold shipped
-  test_family.py   core's family check, one line: namespace levels, py.typed, __version__,
-                   the adapters serving exactly the tasks, task shapes and docstrings, the
-                   README status table, the template tag, the core bound
-  test_tasks.py    structural checks on every task plus per-task replay tests
-  test_downloads.py  the file tasks on synthetic bytes mounted by respx; a refusal leaves no file
-  test_tasks_write.py  the write tasks: previews send nothing, writes replay, updates fail
-                   closed; the write server's own test (core's assert_write_tools)
-  test_registry.py organisation declaration, lookup and per-organisation clients
-  test_key_resolution.py  keys resolved as in production: placeholder_api_key pins nothing
-  test_errors.py   classify, RequestRejected and the recorded refusals
-  test_org_lock.py the --org lock's wiring: bound tasks, both entry points, through core's mcp_call
-  test_entry_points.py  the servers' entry points, -read and -write, and the text that names them
-  test_record_fixture.py  the recorder never writes the demo host, subdomain or key
-  test_seed_demo.py       the seeder refuses unsafe states before any write, offline
-  test_refresh_upstream.py  the capture script's declaration and hooks on core's frame, offline
-  test_observed.py  OBSERVED.md's notes and probes
-  test_claude_md.py  this file stays under 37,000 characters
-  test_built_answers.py  core's check that every answer a test builds names its kind of
-                   conventions §10, and its census of the replays, collected in one line
-  test_live.py     @pytest.mark.live smoke tests, demo_org only; the writes mark, sweep and delete
-docs/
-  upstream/        documentation snapshot, FETCHED.md, OBSERVED.md
-  demo-org.md      the synthetic demo organisation: why, how to create and seed it, its books
-  write-tools.md   how a write tool is built and tested
-  adr/             this package's design decisions, one NNNN-<slug>.md record each, laid
-                   out in its README.md
-  adr.md           the index of the decisions, written by scripts/adr_index.py, never by hand
-  adr.json         the same index, for machines
-  reports/         dated reports, the evidence a decision cites, laid out in its README.md
-changelog/         the next release's changelog entries, one fragment per change, laid out
-                   in its README.md
-CHANGELOG.md       the releases, each section assembled from the fragments
-.github/workflows/ ci.yml (the required ci check, with the changelog and fixture-size steps),
-                   publish.yml (the release train: tag, build, PyPI), live.yml (nightly live
-                   tests), organization.yml (the organization's checks from xippios/.github:
-                   conventions, a review of a pull request against the documents the README
-                   lists, and adr-index, which runs scripts/adr_index.py --check)
-.claude/commands/  add-endpoint, record-fixture, refresh-upstream, release-prep
-```
+What this package adds to the family's tree, and its import path, stand in `docs/layout.md`,
+imported here:
 
-`src/xippios/` has **no** `__init__.py`: it is a PEP 420 namespace package shared with
-`xippios-core` and every other source package. The import path is `xippios.cashctrl`
-(sdk-core ADR-0006).
-Where the API's operation ids repeat across its services, `api/` keeps one module per service
-instead, named after the service, and this Layout says so (conventions §2).
+@docs/layout.md
 
 ## Write tools
 
@@ -264,9 +197,10 @@ stays out.
   `ssn` or ending in `iban` dropped at any depth, in any case (`_report`).
 - A task that fetches them deliberately may return them and says so in its docstring.
   Files may carry them, at the caller's path, never in a result or a tool
-  (`BULK_TASKS`): `export_persons` names `PERSON_COLUMNS` unless its caller names
-  columns, and a report file is refused by `get_report_data`'s type rule, but no key is
-  dropped from a file.
+  (`BULK_TASKS`): `download_persons` sends no `columns` unless its caller names them, so
+  the file holds upstream's default columns, which name neither (`docs/upstream/OBSERVED.md`),
+  and a report file is refused by `get_report_data`'s type rule, but no key is dropped
+  from a file.
 
 ## Commands
 
@@ -276,24 +210,17 @@ uv run pytest                      # offline, replays the fixtures
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
 uv run pre-commit run --all-files
-python3 scripts/adr_index.py --check   # the index matches the records in docs/adr/
+python3 -I scripts/adr_index.py --check   # the index matches the records in docs/adr/
 direnv exec . env -u CASHCTRL_ORGS XIPPIOS_LIVE_TESTS=1 uv run pytest -m live --tb=short --assert=plain   # demo only
 
 uv run xippios-cashctrl-mcp-read --org demo   # stdio, bound to demo; --http for streamable HTTP
 uv run xippios-cashctrl-mcp-write --org demo   # the write tools; --http on loopback only
 ```
 
-`uv run pytest` is offline: core's plugin refuses the network and skips the rate limiter's
-waits in every test not marked `live` (conventions §10, sdk-core ADR-0035). A test that
-asserts a limiter wait or a quota pause is marked `rate_limited`, one that must reach the
-network `network`. The key's placeholder stands in `CASHCTRL_DEMO_API_KEY`, which
-`pyproject.toml` names under `xippios_placeholder_key_envs`, so the package keeps no
-placeholder fixture of its own.
-
 A keyed command, the live tests, the recorder and the seeder, runs under `direnv exec .`
 from the clone or a directory under it, a worktree among them: direnv loads the demo
 organisation's pair from the clone's own `.envrc`, which `.gitignore` lists and nobody
-reads or prints (Never below).
+reads or prints (`.claude/rules/never.md`).
 
 `.github/workflows/live.yml` runs the live tests nightly at 02:36 UTC and on demand; a pull
 request never runs them. Every `live` test runs, write tests included, so a live write test
@@ -305,77 +232,34 @@ Every live run takes `--tb=short --assert=plain`, since the log of `live.yml` is
 they keep a failing test's frame arguments and the values a failed `assert` compares out
 of it. A live test asserts on shapes and counts, never on a raw payload.
 
-## Code rules
-
-- Three layers (sdk-core ADR-0001, conventions §2): endpoint wrappers in `api/`, task
-  functions in `tasks.py`, adapters in `mcp.py` and `http.py`. The adapters register
-  `tasks.__all__` and call only tasks, the tasks call only wrappers, and a wrapper
-  returns models.
-- Upstream's documented error shapes go into `classify` in `_client.py`, once, and an error
-  class of the package's own into `errors.py`; a wrapper never inspects a status code
-  (conventions §5, §6).
-- Each organisation's client, `client_for(org)`, paces that organisation's requests with a
-  rate limiter of its own, since core's `Tenants.client_for` keeps a client per tenant, and
-  one limiter paces each other host the package sends to (conventions §2, §6, §7); the
-  package sends to its organisations' hosts alone, so a second base or host takes the
-  form conventions §2 and §6 give it, with its row under What this package wraps.
-- A change brings its tests, written before the code, and passes the offline checks above;
-  its changelog entry is a fragment under `changelog/`, one file holding its bullet, as
-  `changelog/README.md` lays it out (conventions §12). Commit subjects follow Conventional
-  Commits (conventions §13): the rule binds a pull request's own commits, not the commit
-  that lands the pull request on `main`, whose subject GitHub writes.
-- `ruff` leaves `docs/` and `.claude/` alone (`pyproject.toml`), so the upstream snapshot
-  keeps its bytes: never reformat it.
-- A convention that seems wrong is followed anyway and said in the pull request; changing
-  it is a change of sdk-core's `docs/conventions.md` with an ADR.
-
-## Never
-
-- Never hand-write a fixture, and never commit one without grepping it for key patterns
-  (conventions §10).
-- Never read or print `.envrc`, `.env`, the credential variables of this package,
-  `CASHCTRL_<NAME>_SUBDOMAIN` and `CASHCTRL_<NAME>_API_KEY` of every organisation,
-  `CASHCTRL_DEMO_SUBDOMAIN` and `CASHCTRL_DEMO_API_KEY` among them, or any variable ending in `_API_KEY`, `_TOKEN` or `_SECRET`.
-- Never write a key, a token or another credential into a file or a commit.
-- Never put logic in `mcp.py` or `http.py`, and never add a route or a tool by hand: the
-  adapters register `tasks.__all__` (sdk-core ADR-0001).
-- Never rename or re-map an upstream concept to another source's (sdk-core ADR-0028, decision 1).
-- Never return a documented personal identifier in a task's projection, echo one in
-  `meta.request`, or commit one in a fixture (sdk-core ADR-0017).
-- Never edit `docs/upstream/` by hand but `docs/upstream/OBSERVED.md`, the notes on what
-  upstream does but never documents: `/refresh-upstream` fetches the rest, and the pull
-  request shows its diff (conventions §3).
-- Never add `src/xippios/__init__.py`, nor an `__init__.py` at a level between it and the
-  package (sdk-core ADR-0006).
-- Never push a tag by hand: a release's tag comes from `publish.yml` alone (conventions §12).
-
 ## Template updates
 
 This repository is generated from sdk-template, at the tag `.copier-answers.yml` records. A
 template release reaches it in a pull request of its own, with
-`uvx --from 'copier>=9.19' copier update --defaults --vcs-ref=<tag>` (conventions §15): the
-update renders the template's files again and never overwrites the files this package
-fills, `__init__.py`, `_client.py`, `errors.py`, `models.py`, `api/`, `parse/`, `tasks.py`,
-`tasks_write.py`, `scripts/refresh_upstream.py`, `tests/test_tasks.py`, `tests/test_live.py`,
-`tests/fixtures/`, `docs/upstream/`, `docs/adr.md`, `docs/adr.json`, `README.md`,
-`CHANGELOG.md` and `CLAUDE.md`. sdk-template's
+`uvx --from 'copier>=9.19' copier update --defaults --vcs-ref=<tag>` (conventions §15). The
+update never overwrites a file this package fills, those that `_skip_if_exists` lists in
+sdk-template's [`copier.yml`](https://github.com/xippios/sdk-template/blob/main/copier.yml),
+and sdk-template's
 [CHANGELOG](https://github.com/xippios/sdk-template/blob/main/CHANGELOG.md) says, per
 release, what to port into those by hand in the same pull request.
 
-## When something is unclear
-
-Prefer the smallest change that satisfies the documents the README lists, state the
-assumption in the pull request's description, and stop rather than guess at upstream
-semantics or the shape of the public API.
+The update writes every other file it renders again, since they are the template's,
+`.claude/rules/never.md` among them. This package keeps no text of its own in them, the
+docstring of `mcp.py` included: its own words go into a file it fills. A line it has to
+add to one, such as a dependency in `pyproject.toml`, the update carries into the new
+render, silently where the release leaves the lines around it alone and as a conflict
+where it changes them.
 
 ## CashCtrl specifics
 
 The sections above and the commands under `.claude/commands/` hold here as well. The
 subsections below hold cashctrl's own lines, and where a command and this section differ,
 this section is cashctrl's form. `/refresh-upstream`'s capture script declares its snapshot
-on core's frame (sdk-core ADR-0046), its own code the hooks `split` and `note`: run it as its
-docstring says, `--out` and `--check` the frame's options, in the project's environment,
-whose dev group pins the converter its hooks use.
+on core's frame (sdk-core ADR-0062), its own code the hooks `split` and `note`: run it as its
+docstring says, `--check` the frame's one option, in the project's environment, whose dev
+group pins the converter its hooks use. The package sends to its organisations'
+hosts alone, each organisation's requests paced by the limiter of its own client, since
+core's `Tenants.client_for` keeps a client per tenant (Rate limit above).
 
 ### How to add an endpoint
 
@@ -388,11 +272,12 @@ above its status table); steps 2 to 4 and 6 read here:
    `Field(alias=...)`: the adapters serialise by alias, and results stay snake_case.
    `created_by` and `last_updated_by` are `AuditUser`, which masks CashCtrl's API user
    tag to `API:REDACTED`, the fixtures' value.
-3. `api/<operation>.py`: one async wrapper that takes `org` first, calls
-   `_client.client_for(org)` and returns models through `xippios.core.parse`.
+3. `api/<operation>.py`: one async wrapper that takes `org` first, reads through
+   `_client.client_for(org).get_answer` with `parse=` and returns core's `Answer` of its
+   models, the payload with the time it was retrieved.
 4. `tasks.py`: an async task, `org` its first parameter, that composes wrappers and
-   returns `Result[T]` with full `ResultMeta` through `_meta(org, ...)`, as the docstring
-   of `tasks.py` lays the meta out. Derive the sync one with `sync()`, add its name to
+   returns `Result[T]` with full `ResultMeta` through `_meta(org, ...)`, its
+   `retrieved_at` the answer's, as the docstring of `tasks.py` lays the meta out. Derive the sync one with `sync()`, add its name to
    `__all__`, re-export it from `__init__.py`. What it returns leaves out documented
    personal identifiers (`ssn`, `iban` and their like) unless it fetches them
    deliberately and says so, and a write task does not echo one in `meta.request`
@@ -410,8 +295,10 @@ Step 5, the docstring for agents, is the command's; then:
    that takes the `demo_org` fixture.
 
 A list that documents `start` and `limit` (journal, persons, orders, history) pages through
-`_offset_pages` in `tasks.py` (conventions §4, sdk-core ADR-0034), as the docstring of
-`tasks.py` says. `meta.total` is upstream's `total` on every list task, never `len(data)`.
+`_offset_pages` in `tasks.py` (conventions §4, sdk-core ADR-0034), which hands a walk to
+core's `fetch_pages` with the bound `WALK_PAGES`, 24 pages for Python and MCP alike, as the
+docstring of `tasks.py` says. `meta.total` is upstream's `total` on every list task, never
+`len(data)`.
 
 Lookups (accounts, currencies, tax codes, fiscal periods, account and person categories,
 titles, cost centers, locations, custom fields) are tasks too, named `list_<thing>`, so
@@ -419,8 +306,8 @@ agents can form valid calls; they serve the organisation's own data live and are
 packaged: a multi-tenant source packages no tenant data, and a value set
 `docs/upstream/` fixes is a `Literal` in `models.py`, written by hand. A lookup whose
 whole list an agent needs and the default result cap (200 rows or 64 KB) would cut gets a
-cap of its own in `MCP_CAPS` in `tasks.py`, which `mcp.py` passes through (sdk-core
-ADR-0038, decision 5); the docstring of `MCP_CAPS` gives each cap its reason. Every other
+cap of its own in `MCP_CAPS` in `tasks.py`, which core's `ToolSet.from_tasks` reads
+(sdk-core ADR-0038, decision 5); the docstring of `MCP_CAPS` gives each cap its reason. Every other
 list takes filters or pages, or is short. Where the documentation gives no schema and the
 shape differs by kind, as the rows of `report/element/data.json` differ by report type,
 the task returns upstream's JSON as sent (`JsonValue`, camelCase keys included) and says
@@ -430,7 +317,7 @@ builds its model with `UpstreamModel.project`; nothing is renamed or computed, p
 value (`parse_decimal`) is the only override.
 
 Upstream's documented error shapes go into `classify` in `_client.py`, once; wrappers
-use `client_for(org).get_json` and never inspect status codes. CashCtrl refuses with
+use `client_for(org).get_answer` and never inspect status codes. CashCtrl refuses with
 HTTP 200 and `success: false`: `classify` raises `RequestRejected`, or `NotFoundError`
 for an unknown id on a `read.json` by `id`; a 404 is an unknown endpoint
 (`UpstreamError`), on a `read.pdf` by `ids` or a report download by its id an unknown id (`NotFoundError`). Probes: `docs/upstream/OBSERVED.md`.
@@ -445,8 +332,8 @@ was. The recorder writes no file, so `tests/test_downloads.py` mounts synthetic 
 ### How to record a fixture
 
 `scripts/record_fixture.py` records it in place of `/record-fixture`'s one-off script, and
-its docstring holds the recorder's use and policies in full: one request through a
-client that never retries, core's `Scrub` (conventions §10) and its own `TenantScrub`
+its docstring holds the recorder's use and policies in full: one request sent by core's
+`send_once`, which never retries, core's `Scrub` (conventions §10) and its own `TenantScrub`
 (sdk-core ADR-0042, decision 4), the final check before the one write, and the delete it
 asks for after a write. The demo-only rule above names what it scrubs and refuses.
 On `FILE_PATHS` it writes a 4xx or 5xx with a text body or a 2xx refusal alone. Before committing, run the grep block at the end of that docstring; its last two greps
@@ -454,7 +341,7 @@ print `0`. Fixtures are never typed in by hand.
 
 ### Never
 
-Besides the list under Never above:
+Besides the rules of `.claude/rules/never.md`:
 
 - Never hand-write a fixture, and never commit one without grepping for key patterns
   and for values under `ssn` and every name ending in `iban`.
@@ -462,7 +349,8 @@ Besides the list under Never above:
   but `demo`; never set `CASHCTRL_ORGS` with real names anywhere an agent or a test of
   this repository runs: a shell, an environment file, an MCP client's configuration or a
   test.
-- Never print, log or commit `CASHCTRL_DEMO_SUBDOMAIN` or any organisation's subdomain.
+- Never read, print, log or commit `CASHCTRL_DEMO_SUBDOMAIN`, an organisation's
+  `CASHCTRL_<NAME>_SUBDOMAIN` or any organisation's subdomain.
 - Never add a task, tool or helper that spans organisations.
 - Never point fixtures, live tests or the seeder at an organisation with real data: the
   demo organisation holds synthetic books only, created and seeded as `docs/demo-org.md`

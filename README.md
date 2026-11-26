@@ -3,8 +3,8 @@
 Typed Python client, MCP server and FastAPI routes for
 [CashCtrl](https://cashctrl.com), part of the
 [xippios SDK family](https://github.com/xippios). Names and semantics follow the
-upstream documentation; every response carries release metadata (source, endpoint,
-retrieved_at, published_at, vintage).
+upstream documentation; every response carries its metadata (source, endpoint,
+retrieved_at, request).
 
 ## Install
 
@@ -57,8 +57,9 @@ bank = tasks.list_accounts("demo", filter=[Filter(comparison="eq", field="number
 record = tasks.get_account("demo", bank.data[0].id)
 print(record.meta.endpoint, record.meta.request, record.meta.retrieved_at)
 
-# The journal, persons and orders page by offset: limit gives one page, and meta.total
-# says how many match; without limit every page is collected.
+# The journal, persons, orders and history page by offset: limit gives one page, and
+# meta.total says how many match; without limit every page is collected, and a list of
+# more than 24 pages is refused after its first request.
 page = tasks.list_journal_entries("demo", fiscal_period_id=current.id, limit=20)
 print(len(page.data), "of", page.meta.total)
 entry = tasks.get_journal_entry("demo", page.data[0].id)  # with lines and bookings
@@ -348,6 +349,38 @@ The MCP entry points quiet httpx's request log; the router does not, so a consum
 logs at INFO logs httpx's request lines, whose URLs carry the organisation's host (its
 subdomain): set the `httpx` logger to WARNING.
 
+## Scope
+
+CashCtrl documents 376 operations in ten groups, of which `docs/upstream/` keeps a page
+each: account, common, file, inventory, journal, meta, order, person, report and salary.
+The package wraps 57 of them, from seven of the groups: the journal, the accounts with
+their categories and cost centers, the fiscal periods, currencies, tax codes, locations,
+custom fields and history, the persons with their categories and titles, the orders with
+their categories, documents, book entries, statuses and payments, and the reports, as data
+and as files. The table under Status below lists 56, and the 57th,
+`order/bookentry/read.json`, has no task of its own: `update_order_book_entry` and
+`delete_order_book_entry` read the entry through it
+(https://github.com/xippios/sdk-cashctrl/issues/150). It leaves out salary, 90 operations,
+since a payroll record holds personal data beyond `ssn` and `iban` and no policy yet says
+what a task may return of it, which is why `get_report_data` refuses payroll reports;
+inventory, 42 operations, which no order needs, since an order item's `inventory_id` is
+optional; the file module and the journal and person imports, 39 operations, since a file
+is binary, which the fixture recorder does not record, and an import reads an uploaded
+file; the fiscal period writes and tasks, 15 operations, since fiscal periods stay
+read-only: a switch or a completed period would change what every later call reads; an
+organisation's configuration, 46 operations of its settings, sequence numbers, roundings,
+text templates, order layouts, bank accounts, cost center categories, custom field groups
+and logo, which every record shares; and 87 further operations of the controllers it wraps:
+reads by id, whose list returns the whole record already, the writes of accounts, lookups,
+categories, titles and reports, a balance, a period's result or an exchange rate at a date,
+an order's continuation, dossiers, mail and recurrence, attachments, and further exports
+and formats. Each part left out is an open issue of this repository, except
+`account/category/tree.json`, which nests the categories of `list_account_categories` with
+display fields only. `lang` (`de`, `fr`, `it`, `en`), which upstream documents on every
+request and which sets the language of its error messages and of its PDF, Excel and CSV
+files, is not exposed yet: no task takes it
+(https://github.com/xippios/sdk-cashctrl/issues/74).
+
 ## Status
 
 | Upstream operation | Task function | MCP tool | Status |
@@ -392,17 +425,19 @@ subdomain): set the `httpx` logger to WARNING.
 | `POST order/payment/create.json` (Create payment) | `create_order_payment` | `cashctrl_create_order_payment` | available on the write server only; no book entry, no delete documented |
 | `POST order/bookentry/create.json`, `update.json`, `delete.json` | `create_order_book_entry`, `update_order_book_entry`, `delete_order_book_entry` | `cashctrl_create_order_book_entry`, ... | available on the write server only; the entries booked by hand (`MANUAL`) only |
 
-`lang` (`de`, `fr`, `it`, `en`), which upstream takes on every request and which matters
-mostly for error messages and exports, is not exposed yet. `list_accounts` checks `dir`
-(`ASC`, `DESC`) and each filter's `comparison` (`eq`, `like`, `gt`, `lt`) before
-anything is sent, since upstream silently ignores values it does not know; both are
-typed as these value sets, so the tool schema lists them. A filter is a `Filter` or,
-from Python, a mapping with the same keys.
+`list_accounts` checks `dir` (`ASC`, `DESC`) and each filter's `comparison` (`eq`, `like`,
+`gt`, `lt`) before anything is sent, since upstream silently ignores values it does not
+know; both are typed as these value sets, so the tool schema lists them. A filter is a
+`Filter` or, from Python, a mapping with the same keys.
 
 The paged lists (`list_journal_entries`, `list_persons`, `list_orders`, `list_history`)
 take `start` (default 0) and `limit`. With `limit` they return one page of at most
 `limit` records from `start`; without it, every record from `start` on, fetched 100 at a
-time (upstream's documented page size, about 1 s per 100 at the self-imposed pace).
+time (upstream's documented page size, about 1 s per 100 at the self-imposed pace) and 24
+pages at most, for Python and MCP alike. Where upstream counts more records from `start`
+than 24 pages hold, the call is refused after its first request with `InvalidRequestError`
+and returns nothing, naming the count, the bound, the paging arguments, the page reached and
+the total of pages.
 `meta.total` is upstream's count of every record the request matches. The next page
 starts at `start` plus the number of records received: over MCP the result cap (200 rows
 or 64 KB) may return fewer than `limit`, so never advance by `limit`. MCP agents should
@@ -455,6 +490,44 @@ filters as `list_accounts` does.
 Data comes from CashCtrl (https://cashctrl.com) under its own terms of use;
 this package adds no rights to it. Documentation snapshot: `docs/upstream/`; what
 CashCtrl was seen doing beside it, each note with its probe: `docs/upstream/OBSERVED.md`.
+
+## Workflows
+
+`ci.yml` runs ruff, its format check, mypy, pytest and pre-commit on Python 3.12, 3.13 and
+3.14, requires a changelog entry of every pull request but Dependabot's and refuses a
+fixture file over 256 KiB that a pull request adds or changes. It runs on every pull request and,
+called by `publish.yml`, once for a release, and its job `ci` is the check the
+organization's ruleset requires. It is handed no secret, and no variable switches it off.
+
+`publish.yml` is the release train (conventions §12): on a push to `main` whose
+`pyproject.toml` names a version that has no tag yet and has its section in `CHANGELOG.md`,
+it runs `ci.yml`, refuses a core pinned to git, tags the merge commit, builds the package
+and, once a reviewer of the environment `pypi` approves the run, publishes it to PyPI by
+trusted publishing. Every push to `main` and a dispatch start it, and a push that brings no
+release ends quietly. It is handed no secret: the step that tells a release is handed the
+job's token as `GH_TOKEN`, the tag goes with the job's token and PyPI trusts the workflow
+itself. Its job `tag` holds the one checkout of the repository that keeps its credentials,
+since it pushes the tag with the job's token; every other checkout sets
+`persist-credentials: false` (conventions §13). No variable switches it off.
+
+`live.yml` runs every `live` test against the upstream with `--tb=short --assert=plain`, so
+its public log holds neither a failing test's arguments nor the values an assertion compared.
+It runs every night at 02:36 UTC and on demand, never on a pull request.
+Its pytest step alone is handed `XIPPIOS_LIVE_TESTS` and, each from the secret of the same
+name, `CASHCTRL_DEMO_API_KEY`, `CASHCTRL_DEMO_SUBDOMAIN`, so the checkout, setup-uv and `uv sync` see none.
+A variable `WORKFLOW_LIVE` of `off`, the repository's over the organization's, switches it off.
+
+`conventions.yml` calls the organization's review of a pull request against the documents
+listed under Documents below, the check `conventions / conventions`, when a pull request
+opens, is pushed to, reopens or is edited, and on a push to `main` or a dispatch the review
+of the range of commits, `range / range`. It hands the review the organization's
+secret of the model's key, by name. A variable `WORKFLOW_CONVENTIONS` of `off`, the
+repository's over the organization's, switches both off.
+
+`adr-index.yml` calls the organization's check of the ADR index, `adr-index / adr-index`,
+which runs `scripts/adr_index.py --check`, when a pull request opens, is pushed to or
+reopens. It hands over nothing, and the called workflow reads its switch itself: a variable
+`WORKFLOW_ADR_INDEX` of `off`, the repository's over the organization's, skips the check.
 
 ## Documents
 
