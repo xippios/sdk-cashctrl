@@ -2400,7 +2400,7 @@ def test_secrets_are_redacted_plain_and_percent_encoded(recorder: ModuleType) ->
     )
     core = fixture_from_response(response, scrub=Scrub(secrets=[secret]))
     fixture, replaced = step(recorder, str(request.url)).apply(core)
-    assert replaced == [], "the step's verify refuses what survives, not core's check"
+    assert replaced == [HOST], "the host it replaced, never a secret, which is core's"
     assert "s3cr3t" not in fixture.model_dump_json()
     assert fixture.request.url == f"https://demo.cashctrl.com/api/v1/{REDACTED}?q={REDACTED}"
     assert fixture.request.body == f"note={REDACTED}"
@@ -2530,6 +2530,68 @@ def test_the_verify_passes_a_clean_fixture(recorder: ModuleType) -> None:
         "home": "https://demo.cashctrl.com/",
     }
     assert dict(fixture.response.headers)["location"] == "https://demo.cashctrl.com/next"
+
+
+IDNA_SUBDOMAIN = "bücher"
+"""An invented subdomain outside ASCII, whose host has an IDNA form beside it."""
+IDNA_HOST = f"{IDNA_SUBDOMAIN}.cashctrl.com"
+
+
+@pytest.mark.parametrize(
+    ("host", "subdomain", "replaced"),
+    [
+        (HOST, REAL, [HOST]),
+        (IDNA_HOST, IDNA_SUBDOMAIN, sorted([IDNA_HOST, "xn--bcher-kva.cashctrl.com"])),
+    ],
+    ids=["ascii", "idna"],
+)
+def test_the_step_returns_the_host_it_replaced(
+    recorder: ModuleType, host: str, subdomain: str, replaced: list[str]
+) -> None:
+    """The step returns the host in each form it was given, the values core then searches for.
+
+    Conventions §10: the rewrite step returns the fixture "with the values it replaced", and
+    core refuses a fixture in which one of them still stands as given.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
+    request = httpx.Request("GET", f"https://{host}/api/v1/x.json")
+    response = httpx.Response(
+        200, content=f'{{"home": "https://{host}/"}}'.encode(), request=request
+    )
+    core = fixture_from_response(response, scrub=recorder.scrub(KEY))
+    fixture, returned = step(recorder, str(request.url), subdomain=subdomain).apply(core)
+    assert sorted(returned) == replaced
+    assert json.loads(fixture.response.body) == {"home": "https://demo.cashctrl.com/"}
+    assert fixture.request.url == "https://demo.cashctrl.com/api/v1/x.json"
+
+
+def test_core_refuses_a_fixture_that_still_holds_the_host_the_step_replaced(
+    recorder: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Core's check after the step searches for the host the step returned (conventions §10).
+
+    The step's own verify would refuse the host first, so it is set aside here, and the text
+    hook puts the host back into a header value after the step replaced it: core's check alone
+    refuses the fixture, naming the header and never the host.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
+    request = httpx.Request("GET", f"https://{HOST}/api/v1/x.json")
+    response = httpx.Response(200, headers={"Location": "/next"}, content=b"", request=request)
+    scrub_step = step(
+        recorder,
+        str(request.url),
+        text_rewrite=lambda text: f"https://{HOST}{text}" if text == "/next" else text,
+    )
+    monkeypatch.setattr(scrub_step, "verify", lambda fixture: None)
+    with pytest.raises(
+        ValueError,
+        match=r"^the rewritten fixture still holds a value the rewrite step replaced, "
+        r"in the response header 'location'; nothing is written$",
+    ) as info:
+        fixture_from_response(response, scrub=recorder.scrub(KEY), rewrite=scrub_step.apply)
+    assert REAL not in str(info.value)
 
 
 @pytest.mark.parametrize(
