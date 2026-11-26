@@ -128,7 +128,8 @@ core also refuses a body that is not UTF-8 text, which no scrub can read (export
 scope for fixtures, which the recorder's message says first), after the recorder has
 refused any file a file path answered. Then the recorder's own
 step, ``TenantScrub``, passed as ``rewrite=``, runs on the ``Fixture`` core returns (sdk-core
-ADR-0042, decision 4; ADR-0066, decision 1), and core checks what it returns: the
+ADR-0042, decision 4; ADR-0066, decisions 1 and 2), and returns it with the host it replaced,
+which core's check then searches for as given: the
 demo host (``<CASHCTRL_DEMO_SUBDOMAIN>.cashctrl.com``, in any case, IDNA or
 percent-encoded) becomes ``demo.cashctrl.com``, the host offline tests replay against, in
 the URL, the headers and both bodies; and ``scrub_text`` runs over the URL, every response header
@@ -911,6 +912,7 @@ class TenantScrub:
                 "the replay host is the request's own host, which would be written as it is"
             )
         self._placeholder = host
+        self._replaced = sorted(forms)
         longest_first = sorted(forms, key=len, reverse=True)
         self._host = re.compile(
             "|".join(_plain_or_encoded(form, any_case=True) for form in longest_first),
@@ -970,13 +972,15 @@ class TenantScrub:
         """``rewrite``, then ``verify``: the fixture as the recorder writes it, as core's step.
 
         Passed as ``rewrite=`` of core's ``fixture_from_response`` (sdk-core ADR-0066,
-        decision 1), it returns no value of its own for core's check: its verify by pattern
-        refuses what survives, the subdomain in any case and the encoded forms among them,
-        which a search for each value as given would miss.
+        decisions 1 and 2), it returns the fixture with the values it replaced, the request's
+        host as given and its IDNA form where that differs, and core's check then refuses a
+        fixture in which one of them still stands as given. Its own verify by pattern refuses
+        first what such a search would miss, the host in another letter case or encoded, and
+        the subdomain on its own, which the step never replaces but refuses wherever it stands.
         """
         rewritten = self.rewrite(fixture)
         self.verify(rewritten)
-        return rewritten, []
+        return rewritten, list(self._replaced)
 
     def verify(self, fixture: Fixture) -> None:
         r"""Refuse a rewritten fixture that still holds the demo host or the subdomain.
