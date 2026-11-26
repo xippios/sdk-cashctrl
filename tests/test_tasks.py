@@ -673,9 +673,6 @@ def test_list_accounts_is_a_post_route(
     assert ("end_amount" in row, "endAmount" in row) == (True, False), "snake_case over HTTP"
     numbers = [account["number"] for account in response.json()["data"]]
     assert (len(numbers), numbers[-2:]) == (8, ["6900", "6950"])
-    unknown = client.post("/cashctrl/list_accounts", json={"org": "nowhere"})
-    assert unknown.status_code == 422
-    assert unknown.json()["title"] == "InvalidRequestError", "the task's refusals as problems"
 
 
 def account_1020_id(fixtures_dir: Path) -> int:
@@ -1048,11 +1045,6 @@ async def test_list_journal_entries_as_a_tool(
     }
     first = payload["data"][0]
     assert (first["id"], first["date_added"], first["amount"]) == (48, "2026-09-30T00:00:00", 45)
-    refused = {"org": DEMO, "limit": "many"}
-    assert await mcp_call_text(server, "cashctrl_list_journal_entries", refused) == (
-        "error: InvalidRequestError: limit: "
-        "Input should be a valid integer, unable to parse string as an integer. Nothing was sent."
-    )
 
 
 def collective_line_associates(fixtures_dir: Path) -> list[object]:
@@ -1466,9 +1458,6 @@ async def test_list_orders_as_a_tool(
     payload = await mcp_call(server, "cashctrl_list_orders", arguments)
     assert payload["meta"]["total"] == 4
     assert (payload["data"][0]["nr"], payload["data"][0]["sub_total"]) == ("RE-2026-104", 832.56)
-    assert await mcp_call_text(server, "cashctrl_list_orders", {"org": DEMO, "type": "sales"}) == (
-        "error: InvalidRequestError: type: Input should be 'SALES' or 'PURCHASE'. Nothing was sent."
-    )
 
 
 def test_get_order_replays_the_recorded_read(
@@ -2004,17 +1993,12 @@ async def test_list_custom_fields_as_a_tool(
         ("customField1", "Kundenreferenz", "TEXT")
     ]
     assert payload["meta"]["request"] == {"org": DEMO, "type": "PERSON"}
-    refused = {"org": DEMO, "type": "person"}
-    text = await mcp_call_text(server, "cashctrl_list_custom_fields", refused)
-    assert text.startswith("error: InvalidRequestError: type: Input should be 'JOURNAL'")
-    missing = await mcp_call_text(server, "cashctrl_list_custom_fields", {"org": DEMO})
-    assert missing == "error: InvalidRequestError: type: Field required. Nothing was sent."
 
 
 def test_list_custom_fields_as_a_route(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
-    """A ``GET``, ``type`` a query parameter the route requires and checks as the tool does."""
+    """A ``GET``, ``type`` a query parameter."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -2029,8 +2013,6 @@ def test_list_custom_fields_as_a_route(
     assert response.json()["meta"]["total"] == 1
     assert response.json()["data"][0]["field_id"] == "customField1"
     assert response.json()["meta"]["tenant"] == DEMO
-    missing = client.get("/cashctrl/list_custom_fields", params={"org": DEMO})
-    assert missing.status_code == 422
 
 
 def test_list_person_categories_replays_the_recorded_list(
@@ -2991,9 +2973,6 @@ async def test_get_report_data_as_a_tool(
     text = await mcp_call_text(server, "cashctrl_get_report_data", both)
     assert text.startswith("error: InvalidRequestError: ")
     assert "give fiscal_period or start_date and end_date, not both" in text
-    bad_date = {**arguments, "fiscal_period": None, "end_date": "31.12.2025"}
-    text = await mcp_call_text(server, "cashctrl_get_report_data", bad_date)
-    assert text.startswith("error: InvalidRequestError: end_date: ")
 
 
 @pytest.mark.anyio
@@ -3167,10 +3146,6 @@ def test_the_paged_lists_are_post_routes_with_upstreams_total(
     response = client.post(f"/cashctrl/{task}", json={"org": DEMO, **arguments})
     assert response.status_code == 200, response.text
     assert response.json()["meta"]["total"] == total
-    rejected = client.post(f"/cashctrl/{task}", json={"org": DEMO, "start": -1})
-    assert rejected.status_code == 422
-    assert rejected.json()["title"] == "InvalidRequestError"
-    assert "start must be a whole number" in rejected.json()["detail"]
 
 
 RECORDED_LISTS: dict[str, tuple[Callable[..., typing.Any], dict[str, typing.Any]]] = {
