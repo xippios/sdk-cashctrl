@@ -62,7 +62,8 @@ order alone.
 The file tasks tested live write into pytest's temporary directory and assert the file's
 size and content type only: one seeded sales order's document, its id from the list, the
 journal of 2025 as CSV, at most five entries (``limit=5``), and the persons as CSV with
-the columns ``download_persons`` names by default, which upstream must accept. The two
+upstream's default columns, since ``download_persons`` sends no ``columns`` unless its
+caller names them. The two
 exports stand for the four, which share one download path, as
 https://github.com/xippios/sdk-cashctrl/pull/20 decided: ``download_accounts`` and
 ``download_orders`` have no live test of their own.
