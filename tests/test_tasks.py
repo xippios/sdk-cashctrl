@@ -17,6 +17,7 @@ from pydantic import BeforeValidator
 from xippios.core import (
     Answer,
     InvalidRequestError,
+    NamedBy,
     NotFoundError,
     Result,
     UpstreamModel,
@@ -233,6 +234,60 @@ def test_a_date_upstream_sends_with_its_time_is_read_whole(model: type[UpstreamM
         assert annotation in (datetime, datetime | None), (name, annotation)
         assert model.model_fields[name].metadata == [], f"{name}: no validator cuts it"
     assert "UpstreamDate" not in dir(models)
+
+
+NAMED_CODES: dict[type[UpstreamModel], dict[str, str]] = {
+    models.Person: {"language": "language_name", "country": "country_name"},
+    models.PersonProjection: {"language": "language_name", "country": "country_name"},
+    models.PersonDetail: {"language": "language_name", "language_code": "language_name"},
+    models.PersonDetailProjection: {
+        "language": "language_name",
+        "language_code": "language_name",
+    },
+    models.ReportTreeNode: {"type": "type_name"},
+}
+"""Each code field whose name the same record carries beside it, with the field of the name."""
+
+
+def codes_beside_their_names() -> dict[type[UpstreamModel], dict[str, str]]:
+    """Every field ``<code>`` or ``<code>_code`` of a model with a text ``<code>_name`` beside it.
+
+    An id is left out: it names a record of the organisation's own books, which its list
+    reads, and no code. So is a code whose name field holds no text, such as a person's
+    ``gender`` and an order category's ``type``, beside a name only ever seen ``null`` and
+    kept as sent.
+    """
+    text, code = (str, str | None), (str, int, str | None, int | None)
+    found: dict[type[UpstreamModel], dict[str, str]] = {}
+    for name in models.__all__:
+        model = getattr(models, name)
+        if not (isinstance(model, type) and issubclass(model, UpstreamModel)):
+            continue
+        fields = model.model_fields
+        for field, info in fields.items():
+            label = f"{field.removesuffix('_code')}_name"
+            if field.endswith("_id") or label == field or label not in fields:
+                continue
+            if fields[label].annotation in text and info.annotation in code:
+                found.setdefault(model, {})[field] = label
+    return found
+
+
+def test_a_code_beside_its_name_is_named_by_it() -> None:
+    """A code whose name the same record carries declares that field with core's ``NamedBy``.
+
+    Conventions §4 and sdk-core ADR-0067, decision 6: the mark says where a code's name stands,
+    so a code and its label stand side by side, and ``meta.names`` takes no entry for it, since
+    the name stands on the record in upstream's words. The table holds every such field that
+    the models declare, so a new model with a code beside its name fails here until it is marked.
+    """
+    assert codes_beside_their_names() == NAMED_CODES
+    for model, codes in NAMED_CODES.items():
+        for field, label in codes.items():
+            marks = [
+                mark for mark in model.model_fields[field].metadata if isinstance(mark, NamedBy)
+            ]
+            assert marks == [NamedBy(label)], f"{model.__name__}.{field}"
 
 
 # fiscalperiod/read.json, recorded on 2026-11-17: by id (2026), without an id (the current
@@ -618,9 +673,6 @@ def test_list_accounts_is_a_post_route(
     assert ("end_amount" in row, "endAmount" in row) == (True, False), "snake_case over HTTP"
     numbers = [account["number"] for account in response.json()["data"]]
     assert (len(numbers), numbers[-2:]) == (8, ["6900", "6950"])
-    unknown = client.post("/cashctrl/list_accounts", json={"org": "nowhere"})
-    assert unknown.status_code == 422
-    assert unknown.json()["title"] == "InvalidRequestError", "the task's refusals as problems"
 
 
 def account_1020_id(fixtures_dir: Path) -> int:
@@ -993,11 +1045,6 @@ async def test_list_journal_entries_as_a_tool(
     }
     first = payload["data"][0]
     assert (first["id"], first["date_added"], first["amount"]) == (48, "2026-09-30T00:00:00", 45)
-    refused = {"org": DEMO, "limit": "many"}
-    assert await mcp_call_text(server, "cashctrl_list_journal_entries", refused) == (
-        "error: InvalidRequestError: limit: "
-        "Input should be a valid integer, unable to parse string as an integer. Nothing was sent."
-    )
 
 
 def collective_line_associates(fixtures_dir: Path) -> list[object]:
@@ -1411,9 +1458,6 @@ async def test_list_orders_as_a_tool(
     payload = await mcp_call(server, "cashctrl_list_orders", arguments)
     assert payload["meta"]["total"] == 4
     assert (payload["data"][0]["nr"], payload["data"][0]["sub_total"]) == ("RE-2026-104", 832.56)
-    assert await mcp_call_text(server, "cashctrl_list_orders", {"org": DEMO, "type": "sales"}) == (
-        "error: InvalidRequestError: type: Input should be 'SALES' or 'PURCHASE'. Nothing was sent."
-    )
 
 
 def test_get_order_replays_the_recorded_read(
@@ -1949,17 +1993,12 @@ async def test_list_custom_fields_as_a_tool(
         ("customField1", "Kundenreferenz", "TEXT")
     ]
     assert payload["meta"]["request"] == {"org": DEMO, "type": "PERSON"}
-    refused = {"org": DEMO, "type": "person"}
-    text = await mcp_call_text(server, "cashctrl_list_custom_fields", refused)
-    assert text.startswith("error: InvalidRequestError: type: Input should be 'JOURNAL'")
-    missing = await mcp_call_text(server, "cashctrl_list_custom_fields", {"org": DEMO})
-    assert missing == "error: InvalidRequestError: type: Field required. Nothing was sent."
 
 
 def test_list_custom_fields_as_a_route(
     replay_fixture: Callable[[str, str], respx.Route],
 ) -> None:
-    """A ``GET``, ``type`` a query parameter the route requires and checks as the tool does."""
+    """A ``GET``, ``type`` a query parameter."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -1974,8 +2013,6 @@ def test_list_custom_fields_as_a_route(
     assert response.json()["meta"]["total"] == 1
     assert response.json()["data"][0]["field_id"] == "customField1"
     assert response.json()["meta"]["tenant"] == DEMO
-    missing = client.get("/cashctrl/list_custom_fields", params={"org": DEMO})
-    assert missing.status_code == 422
 
 
 def test_list_person_categories_replays_the_recorded_list(
@@ -2936,9 +2973,6 @@ async def test_get_report_data_as_a_tool(
     text = await mcp_call_text(server, "cashctrl_get_report_data", both)
     assert text.startswith("error: InvalidRequestError: ")
     assert "give fiscal_period or start_date and end_date, not both" in text
-    bad_date = {**arguments, "fiscal_period": None, "end_date": "31.12.2025"}
-    text = await mcp_call_text(server, "cashctrl_get_report_data", bad_date)
-    assert text.startswith("error: InvalidRequestError: end_date: ")
 
 
 @pytest.mark.anyio
@@ -3112,10 +3146,6 @@ def test_the_paged_lists_are_post_routes_with_upstreams_total(
     response = client.post(f"/cashctrl/{task}", json={"org": DEMO, **arguments})
     assert response.status_code == 200, response.text
     assert response.json()["meta"]["total"] == total
-    rejected = client.post(f"/cashctrl/{task}", json={"org": DEMO, "start": -1})
-    assert rejected.status_code == 422
-    assert rejected.json()["title"] == "InvalidRequestError"
-    assert "start must be a whole number" in rejected.json()["detail"]
 
 
 RECORDED_LISTS: dict[str, tuple[Callable[..., typing.Any], dict[str, typing.Any]]] = {

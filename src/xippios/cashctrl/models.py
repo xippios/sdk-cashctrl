@@ -26,6 +26,14 @@ as ``get_report_data`` drops them from its raw rows (``ReportData`` itself keeps
 upstream sends), a write task does not echo one in ``meta.request`` and its preview
 shows one as ``REDACTED``, and fixtures never carry their values (sdk-core ADR-0017).
 
+A code whose name the same record carries beside it declares that field with core's
+``NamedBy`` (conventions §4, sdk-core ADR-0067, decision 6): a person's ``language`` and
+``country`` (``language_name``, ``country_name``), a person's ``language_code`` on its read
+(``language_name``) and a report's ``type`` (``type_name``). The name stands on the record in
+upstream's words, so ``meta.names`` takes no entry for these codes and an answer is unchanged.
+An id names a record of the organisation's own books and no code, and a name only ever seen
+``null`` and kept as sent holds no text (a person's ``gender_name``), so neither is marked.
+
 ``created_by`` and ``last_updated_by`` are ``AuditUser`` on every model that has them:
 CashCtrl writes an API user there as ``API:`` and the first four characters of its key,
 which every model masks to ``API:REDACTED``, the value the fixture recorder writes, so
@@ -74,7 +82,7 @@ from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import AliasChoices, BeforeValidator, ConfigDict, Field, JsonValue, field_validator
-from xippios.core import UpstreamModel
+from xippios.core import NamedBy, UpstreamModel
 
 __all__ = [
     "Account",
@@ -747,7 +755,7 @@ class _PersonFields(UpstreamModel):
     position: str | None = None
     department: str | None = None
     industry: str | None = None
-    language: str | None = None
+    language: Annotated[str | None, NamedBy("language_name")] = None
     language_name: str | None = Field(default=None, validation_alias="languageName")
     address: str | None = None
     zip: str | None = None
@@ -791,8 +799,13 @@ class _PersonFields(UpstreamModel):
 
 
 class _PersonEntryFields(_PersonFields):
-    """The fields only ``person/list.json`` sends, but ``iban`` (see ``Person``)."""
+    """The fields only ``person/list.json`` sends, but ``iban`` (see ``Person``).
 
+    ``country`` is ``_PersonFields``'s, declared again here, in its place, with its mark:
+    ``country_name`` stands on the list's entry alone, and the read sends none.
+    """
+
+    country: Annotated[str | None, NamedBy("country_name")] = None
     category_display: str | None = Field(default=None, validation_alias="categoryDisplay")
     country_name: str | None = Field(default=None, validation_alias="countryName")
     children_count: int | None = Field(default=None, validation_alias="childrenCount")
@@ -883,7 +896,9 @@ class _PersonDetailFields(_PersonFields):
     company_or_full_name: str | None = Field(default=None, validation_alias="companyOrFullName")
     abbreviated_name: str | None = Field(default=None, validation_alias="abbreviatedName")
     title_name: str | None = Field(default=None, validation_alias="titleName")
-    language_code: str | None = Field(default=None, validation_alias="languageCode")
+    language_code: Annotated[str | None, NamedBy("language_name")] = Field(
+        default=None, validation_alias="languageCode"
+    )
     canton_code: str | None = Field(default=None, validation_alias="cantonCode")
     country_code2: str | None = Field(default=None, validation_alias="countryCode2")
     country_code3: str | None = Field(default=None, validation_alias="countryCode3")
@@ -1871,7 +1886,7 @@ class ReportTreeNode(UpstreamModel):
 
     id: str
     text: str | None = None
-    type: str | None = None
+    type: Annotated[str | None, NamedBy("type_name")] = None
     type_name: str | None = Field(default=None, validation_alias="typeName")
     element_id: int | None = Field(default=None, validation_alias="elementId")
     collection_id: int | None = Field(default=None, validation_alias="collectionId")

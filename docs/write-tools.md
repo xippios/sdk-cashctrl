@@ -29,8 +29,10 @@ create table's parameters as keyword arguments between them,
 `Result[WritePreview[<record>] | WriteResult]`:
 
 - while `confirm` is false, a `WritePreview`: `performed=False`, `endpoint`, `payload` (the
-  exact fields), `before` (for an update or a delete, the record as the read task's
-  projection shows it) and `changes` (for an update), with `meta.request` `{"org": org}`;
+  exact fields), `reads` (the operations the preview read, the record's `read.json` for an
+  update or a delete and none for the others), `before` (for an update or a delete, the
+  record as the read task's projection shows it) and `changes` (for an update), with
+  `meta.request` `{"org": org}`;
 - with `confirm`, a `WriteResult`: `performed=True`, `insert_id` and `message`, with
   `meta.request` holding `org` and the fields as sent.
 
