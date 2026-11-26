@@ -319,7 +319,7 @@ async def test_download_journal_entries(
 
 
 async def test_download_persons_with_the_default_columns(demo_org: str, tmp_path: Path) -> None:
-    # No columns: the task sends PERSON_DEFAULT_COLUMNS, which upstream must accept.
+    # No columns: the task sends none, and the file holds upstream's default columns.
     dest = tmp_path / "persons.csv"
     result = await tasks.download_persons_async(demo_org, "csv", dest=dest)
     assert result.data.bytes == dest.stat().st_size > 0
