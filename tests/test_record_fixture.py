@@ -2594,6 +2594,74 @@ def test_core_refuses_a_fixture_that_still_holds_the_host_the_step_replaced(
     assert REAL not in str(info.value)
 
 
+ADDRESS = "anna@example.org"
+"""An invented e-mail address."""
+TAG = "API:Wxyz"
+"""An invented API user tag, no key's prefix."""
+TOKEN_VALUE = "k3y-l1ke-t0ken"  # pragma: allowlist secret
+"""An invented value of a token-like field."""
+
+
+def test_the_step_returns_what_its_text_hook_replaced(recorder: ModuleType) -> None:
+    """Every value ``scrub_text`` replaced is returned, as it stood, beside the host.
+
+    The address plain and percent-encoded, the tag in a body and a header and the token-like
+    field's value, but no value that reads as a placeholder the recorder writes: the
+    placeholder address, the scrubbed tag and ``REDACTED``, nor a token-like field's value that
+    an earlier scrub made the placeholder address, which core would then find in every place
+    that rightly holds it.
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
+    encoded = ADDRESS.replace("@", "%40")
+    request = httpx.Request("GET", f"https://{HOST}/api/v1/x.json?mail={encoded}")
+    body = {
+        "createdBy": TAG,
+        "hash": TOKEN_VALUE,
+        "email": ADDRESS,
+        "other": "user@example.com",
+        "lastUpdatedBy": "API:REDACTED",
+        "token": REDACTED,
+        "secret": "bob@example.org",  # pragma: allowlist secret (an invented address)
+    }
+    response = httpx.Response(
+        200, headers={"X-Owner": TAG}, content=json.dumps(body).encode(), request=request
+    )
+    core = fixture_from_response(response, scrub=recorder.scrub(KEY))
+    scrub_step = step(recorder, str(request.url), text_rewrite=recorder.scrub_text)
+    fixture, returned = scrub_step.apply(core)
+    assert HOST in returned
+    assert {encoded, ADDRESS, TAG, TOKEN_VALUE, "bob@example.org"} <= set(returned)
+    assert not {"user@example.com", "user%40example.com", "API:REDACTED", REDACTED} & set(returned)
+    assert len(returned) == len(set(returned)), "each value once"
+    written = fixture.model_dump_json()
+    assert [value for value in (ADDRESS, encoded, TAG, TOKEN_VALUE) if value in written] == []
+
+
+def test_core_refuses_an_address_the_hook_replaced_that_stands_behind_an_escape(
+    recorder: ModuleType,
+) -> None:
+    """Core's check finds a value the hook replaced where the hook could not reach it.
+
+    The address stands plain, which the hook replaces, and behind a JSON escape, which the
+    raw-text hook cannot see: core's search of the body's decoded strings finds it and refuses
+    the fixture, naming the place and never the address (conventions §10).
+
+    The answer is an input of the test, not an answer from CashCtrl.
+    """
+    request = httpx.Request("GET", f"https://{HOST}/api/v1/x.json")
+    content = b'{"email": "anna@example.org", "notes": "anna\\u0040example.org"}'
+    response = httpx.Response(200, content=content, request=request)
+    scrub_step = step(recorder, str(request.url), text_rewrite=recorder.scrub_text)
+    with pytest.raises(
+        ValueError,
+        match=r"^the rewritten fixture still holds a value the rewrite step replaced, "
+        r"in the response body, a decoded JSON string; nothing is written$",
+    ) as info:
+        fixture_from_response(response, scrub=recorder.scrub(KEY), rewrite=scrub_step.apply)
+    assert "example.org" not in str(info.value)
+
+
 @pytest.mark.parametrize(
     ("url", "overrides", "match"),
     [
